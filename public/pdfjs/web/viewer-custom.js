@@ -413,6 +413,9 @@
     headers.set("x-inscreen-config-token", await loadInscreenConfigToken());
     return fetch(input, { ...init, headers });
   }
+  window.addEventListener("message", event => {
+    if (event.source === window.parent && event.origin === window.location.origin && event.data?.type === "cursado-services-changed") state.inscreenConfigToken = "";
+  });
 
   function isInscreenConfigurationUnavailable(error) {
     return error?.name === "InscreenConfigurationUnavailable" || /Falta una mitad|no estan configuradas/i.test(String(error?.message || ""));

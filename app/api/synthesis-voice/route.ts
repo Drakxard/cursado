@@ -1,3 +1,4 @@
+import { withOptionalServicesConfig, getInscreenRuntimeSecret } from '@/lib/inscreen-user-config'
 import { requireAuthSession } from "@/lib/authz"
 import { parseSynthesisContext } from "@/lib/synthesis-context"
 import { decideSynthesisVoiceDestination, validateVoiceTree, type EvaluateChoices } from "@/lib/synthesis-voice-navigation"
@@ -11,7 +12,7 @@ class GatewayEvaluationError extends Error {
   }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   try {
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
       ? body.currentNodeId : null
     const lastEditedNodeId = typeof body?.lastEditedNodeId === "string" && nodes.some((node) => node.id === body.lastEditedNodeId)
       ? body.lastEditedNodeId : null
-    const apiKey = process.env.gatewayia?.trim()
+    const apiKey = (getInscreenRuntimeSecret('gatewayia') || process.env.gatewayia?.trim())
     const oidcToken = process.env.VERCEL_OIDC_TOKEN?.trim()
     const credentials = [
       ...(apiKey ? [{ name: "gatewayia", token: apiKey }] : []),
@@ -91,4 +92,8 @@ export async function POST(request: Request) {
       ...(error instanceof GatewayEvaluationError ? { upstreamStatus: error.upstreamStatus } : {}),
     }, { status: error instanceof GatewayEvaluationError && error.upstreamStatus === 403 ? 503 : 502 })
   }
+}
+
+export async function POST(request: Request) {
+  return withOptionalServicesConfig(request, () => handlePOST(request))
 }

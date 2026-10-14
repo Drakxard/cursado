@@ -1,3 +1,4 @@
+import { withOptionalServicesConfig, getInscreenRuntimeSecret } from '@/lib/inscreen-user-config'
 import { createGateway } from "@ai-sdk/gateway"
 import { requireAuthSession } from "@/lib/authz"
 import { explanationInput } from "@/lib/pdf-explanation"
@@ -9,7 +10,7 @@ import { azureExplanationConfig, azureExplanationModel } from "@/lib/server/pdf-
 export const runtime = "nodejs"
 export const maxDuration = 300
 
-export async function GET() {
+async function handleGET() {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   try {
@@ -17,12 +18,12 @@ export async function GET() {
     if (azure) return Response.json({ provider: "azure", models: [{ id: azure.deployment, name: "GPT-5 mini · Azure" }] }, { headers: { "Cache-Control": "no-store" } })
     return Response.json({ models: await freeExplanationModels(process.env.PDF_EXPLANATION_MODEL) }, { headers: { "Cache-Control": "no-store" } })
   } catch (error) {
-    if (process.env.gpt5mini || process.env.AZURE_OPENAI_API_KEY) return Response.json({ error: error instanceof Error ? error.message : "Revisá la configuración de Azure." }, { status: 503 })
+    if (getInscreenRuntimeSecret('gpt5mini') || process.env.gpt5mini || process.env.AZURE_OPENAI_API_KEY) return Response.json({ error: error instanceof Error ? error.message : "Revisá la configuración de Azure." }, { status: 503 })
     return Response.json({ error: error instanceof FreeExplanationModelsError ? error.message : "No se pudo cargar la lista de modelos gratuitos." }, { status: 503 })
   }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   let input: ReturnType<typeof explanationInput>
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
     return Response.json({ error: error instanceof Error && !failure.diagnostics.status ? error.message : failure.message,
       stage: "configuracion-azure", diagnostics: failure.diagnostics }, { status: 503 })
   }
-  const apiKey = process.env.gatewayia?.trim() || process.env.AI_GATEWAY_API_KEY?.trim()
+  const apiKey = (getInscreenRuntimeSecret('gatewayia') || process.env.gatewayia?.trim()) || process.env.AI_GATEWAY_API_KEY?.trim()
   if (!apiKey && !process.env.VERCEL_OIDC_TOKEN) {
     return Response.json({ error: "Falta configurar la clave de AI Gateway en el servidor.", stage: "configuracion-gateway" }, { status: 503 })
   }
@@ -68,4 +69,12 @@ export async function POST(request: Request) {
     console.error("[PDF explicación] AI Gateway", failure.diagnostics)
     return Response.json({ error: failure.message, stage: "solicitud-gateway", diagnostics: failure.diagnostics }, { status: 502 })
   }
+}
+
+export async function GET(request: Request) {
+  return withOptionalServicesConfig(request, () => handleGET())
+}
+
+export async function POST(request: Request) {
+  return withOptionalServicesConfig(request, () => handlePOST(request))
 }

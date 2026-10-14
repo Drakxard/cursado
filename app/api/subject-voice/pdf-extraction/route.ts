@@ -24,7 +24,7 @@ async function handle(request: Request) {
   }
 }
 function configuredHandle(request: Request) {
-  if (process.env.datalab?.trim() || process.env.MARKER_API?.trim() || process.env.marker_api?.trim() || !request.headers.get(INSCREEN_CONFIG_TOKEN_HEADER)) return handle(request)
+  if (!request.headers.get(INSCREEN_CONFIG_TOKEN_HEADER)) return handle(request)
   return withInscreenUserConfig(request, () => handle(request))
 }
 export async function POST(request: Request) { return configuredHandle(request) }

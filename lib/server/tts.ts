@@ -1,3 +1,4 @@
+import { getInscreenRuntimeSecret } from '../inscreen-user-config.ts'
 import { validateTtsRequest } from "../tts-models.ts"
 
 const MAX_AUDIO_BYTES = 64 * 1024 * 1024
@@ -62,7 +63,7 @@ export async function generateTts(value: unknown, requestSignal?: AbortSignal, f
     headers = { "api-key": config.apiKey, "Content-Type": "application/json" }
     body = { model: config.deployment, input: text, voice: voiceId, response_format: "mp3", speed: 1 }
   } else {
-    const apiKey = process.env.gatewayia?.trim()
+    const apiKey = (getInscreenRuntimeSecret('gatewayia') || process.env.gatewayia?.trim())
     if (!apiKey) throw new TtsServiceError("Falta configurar gatewayia en el servidor.", 503)
     // https://vercel.com/docs/ai-gateway/modalities/text-to-speech
     url = "https://ai-gateway.vercel.sh/v4/ai/speech-model"

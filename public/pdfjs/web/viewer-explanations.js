@@ -1,5 +1,12 @@
 /* Explanations use real PDF.js FreeText editors and a local HTML/position manifest. */
 window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, inscreenApiFetch, showToast }) {
+  const servicesFetch = async (input, init) => {
+    try { return await inscreenApiFetch(input, init); }
+    catch (error) {
+      if (error?.name !== "InscreenConfigurationUnavailable") throw error;
+      return fetch(input, init);
+    }
+  };
   const toolbar = document.getElementById("toolbarViewerRight");
   if (!toolbar) return;
   let documentState = null, loading = null, modal = null, restoring = false;
@@ -488,7 +495,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       modelStatus.hidden = false;
       modelStatus.textContent = "Consultando el modelo de explicación…";
       try {
-        const response = await fetch("/api/pdf-explanation", { cache: "no-store" });
+        const response = await servicesFetch("/api/pdf-explanation", { cache: "no-store" });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || "No se pudo cargar la lista de modelos.");
         if (!Array.isArray(payload.models) || !payload.models.length) throw new Error("No hay modelos disponibles.");
@@ -554,7 +561,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         debug.transcription = text;
         const image = await captureRegion();
         if (image) debug.region = { ...region };
-        const html = await window.requestPdfExplanation(question, text, message => { status.textContent = `${selectedModel} · ${message}`; }, debug, selectedModel, image);
+        const html = await window.requestPdfExplanation(question, text, message => { status.textContent = `${selectedModel} · ${message}`; }, debug, selectedModel, image, servicesFetch);
         debug.html = html;
         debug.stage = "guardar-html-y-nota";
         const pdfPage = await state.pdf.getPage(page);

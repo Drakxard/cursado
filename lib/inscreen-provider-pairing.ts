@@ -156,7 +156,7 @@ export async function createProviderPairing(config: InscreenUserConfig, origin: 
     expiresAt,
     r2,
     groqApiKey: config.GROQ_API_KEY,
-    markerApiKey: config.MARKER_API,
+    markerApiKey: config.datalab || config.MARKER_API,
   } satisfies BootstrapPayload)
   const pairingUri = `inscreen://provider-pair?${new URLSearchParams({ base_url: origin, token }).toString()}`
   return { pairingUri, expiresAt }

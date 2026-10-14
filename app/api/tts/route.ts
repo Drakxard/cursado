@@ -1,3 +1,4 @@
+import { withOptionalServicesConfig } from '@/lib/inscreen-user-config'
 import { requireAuthSession } from "@/lib/authz"
 import { TtsInputError } from "@/lib/tts-models"
 import { generateTts, TtsServiceError } from "@/lib/server/tts"
@@ -6,7 +7,7 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   try {
@@ -18,4 +19,8 @@ export async function POST(request: Request) {
     const message = error instanceof TtsInputError || error instanceof TtsServiceError ? error.message : "No se pudo generar el audio. Intentá nuevamente."
     return Response.json({ error: message }, { status, headers: { "Cache-Control": "no-store" } })
   }
+}
+
+export async function POST(request: Request) {
+  return withOptionalServicesConfig(request, () => handlePOST(request))
 }

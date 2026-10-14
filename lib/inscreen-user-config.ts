@@ -1,11 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
+import { EXTRA_SERVICE_FIELDS, SERVICE_FIELDS, type ExtraServiceField } from './services-config.ts'
 
 export const INSCREEN_CONFIG_COOKIE = "inscreen_config_b"
 export const INSCREEN_CONFIG_HALF_HEADER = "x-inscreen-config-half"
 export const INSCREEN_CONFIG_TOKEN_HEADER = "x-inscreen-config-token"
 
-export type InscreenUserConfig = {
+export type InscreenUserConfig = Partial<Record<ExtraServiceField, string>> & {
   GROQ_API_KEY: string
   MARKER_API: string
   R2_BUCKET_NAME: string
@@ -42,6 +43,40 @@ export function getInscreenConfigSeedFingerprint() {
 export function normalizeInscreenUserConfig(value: unknown): InscreenUserConfig {
   const input = value && typeof value === "object" ? value as Record<string, unknown> : {}
   const config = Object.fromEntries(CONFIG_FIELDS.map((field) => [field, String(input[field] || "").trim()])) as InscreenUserConfig
+  for (const field of EXTRA_SERVICE_FIELDS) {
+    if (input[field] !== undefined && typeof input[field] !== 'string') throw new Error(`${field} debe ser texto.`)
+    const entry = String(input[field] || '').trim()
+    // Keep the original token shape when opening older User.Services files.
+    if (entry) config[field] = entry
+  }
+  if ((config.gpt5mini || config.conexiongpt5mini || config.AZURE_OPENAI_DEPLOYMENT) && (!config.gpt5mini || !config.conexiongpt5mini)) throw new Error('Completá la clave y el endpoint de Azure para Verlo.')
+  if (config.storage_azure_container && !config.storage_azure) throw new Error('Completá la cadena de conexión de Azure Storage.')
+  if (config.conexiongpt5mini) {
+    let url: URL
+    try { url = new URL(config.conexiongpt5mini) } catch { throw new Error('El endpoint de Azure no es válido.') }
+    const path = url.pathname.replace(/\/+$/, '')
+    if (url.protocol !== 'https:' || !/\.(?:openai\.azure\.com|services\.ai\.azure\.com|cognitiveservices\.azure\.com)$/.test(url.hostname)
+      || url.username || url.password || url.search || url.hash || (url.port && url.port !== '443')
+      || (path && !/^\/openai(?:\/v1)?$/.test(path) && !/^\/api\/projects\/[^/]+(?:\/openai(?:\/v1)?)?$/.test(path))) throw new Error('Usá el endpoint HTTPS oficial del recurso o proyecto Azure, sin /responses ni claves en la URL.')
+  }
+  if ((config.cloudflareapi || config.CLOUDFLARE_ACCOUNT_ID) && (!config.cloudflareapi || !config.CLOUDFLARE_ACCOUNT_ID)) throw new Error('Completá el token y el identificador de cuenta de Cloudflare.')
+  if (config.CLOUDFLARE_ACCOUNT_ID && !/^[a-f0-9]{32}$/i.test(config.CLOUDFLARE_ACCOUNT_ID)) throw new Error('El identificador de cuenta de Cloudflare debe tener 32 caracteres hexadecimales.')
+  if (config.storage_azure) {
+    const parts = Object.fromEntries(config.storage_azure.split(';').filter(Boolean).map(part => { const at = part.indexOf('='); return [part.slice(0, at).trim(), part.slice(at + 1).trim()] }))
+    if (parts.DefaultEndpointsProtocol && parts.DefaultEndpointsProtocol !== 'https') throw new Error('La conexión de Azure debe usar HTTPS.')
+    if (parts.EndpointSuffix && !['core.windows.net', 'core.usgovcloudapi.net', 'core.chinacloudapi.cn', 'core.cloudapi.de'].includes(parts.EndpointSuffix)) throw new Error('Usá una cadena de conexión oficial de Azure Storage.')
+    if (!parts.AccountKey && !parts.SharedAccessSignature) throw new Error('Pegá la cadena de conexión completa de Azure Storage.')
+    if (!parts.AccountName && !parts.BlobEndpoint) throw new Error('La conexión de Azure no contiene una cuenta o un endpoint Blob.')
+    if (parts.AccountName && !/^[a-z0-9]{3,24}$/.test(parts.AccountName)) throw new Error('El nombre de cuenta de Azure Storage no es válido.')
+    for (const key of ['BlobEndpoint', 'QueueEndpoint', 'TableEndpoint', 'FileEndpoint']) {
+      if (!parts[key]) continue
+      let url: URL
+      try { url = new URL(parts[key]) } catch { throw new Error('La cadena de conexión de Azure tiene un endpoint inválido.') }
+      if (url.protocol !== 'https:' || !/^[a-z0-9]+\.(?:blob|queue|table|file)\.core\.(?:windows\.net|usgovcloudapi\.net|chinacloudapi\.cn|cloudapi\.de)$/.test(url.hostname)
+        || url.username || url.password || url.port || url.pathname !== '/' || url.search || url.hash) throw new Error('La cadena de conexión debe usar endpoints HTTPS oficiales de Azure Storage.')
+    }
+  }
+  if (config.storage_azure_container && (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(config.storage_azure_container) || config.storage_azure_container.includes('--'))) throw new Error('El nombre del contenedor de Azure no es válido.')
   const r2Fields = [config.R2_BUCKET_NAME, config.R2_ACCESS_KEY_ID, config.R2_SECRET_ACCESS_KEY, config.R2_ENDPOINT]
   if (r2Fields.some(Boolean) && !r2Fields.every(Boolean)) throw new Error("Completa todos los campos de Cloudflare R2.")
   if (config.R2_ENDPOINT) {
@@ -53,9 +88,10 @@ export function normalizeInscreenUserConfig(value: unknown): InscreenUserConfig 
     ) throw new Error("R2_ENDPOINT debe ser un endpoint S3 oficial de Cloudflare R2.")
     if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(config.R2_BUCKET_NAME)) throw new Error("R2_BUCKET_NAME invalido.")
   }
-  for (const field of CONFIG_FIELDS) {
-    if (Buffer.byteLength(config[field], "utf8") > 4096) throw new Error(`${field} es demasiado largo.`)
+  for (const field of SERVICE_FIELDS) {
+    if (Buffer.byteLength(config[field] || '', "utf8") > 4096) throw new Error(`${field} es demasiado largo.`)
   }
+  if (Buffer.byteLength(JSON.stringify(config), 'utf8') > 8000) throw new Error('La configuración es demasiado grande para enviarla de forma segura.')
   return config
 }
 
@@ -77,8 +113,10 @@ export function sealInscreenUserConfig(value: unknown) {
 }
 
 export function openInscreenUserConfig(token: string) {
-  const [version, ivValue, tagValue, ciphertextValue] = String(token || "").split(".")
-  if (version !== "v1" || !ivValue || !tagValue || !ciphertextValue) throw new Error("Configuracion InScreen invalida.")
+  const parts = String(token || "").split(".")
+  const [version, ivValue, tagValue, ciphertextValue] = parts
+  if (parts.length !== 4 || version !== "v1" || !ivValue || !tagValue || !ciphertextValue || token.length > 12_000
+    || !parts.slice(1).every(part => /^[A-Za-z0-9_-]+$/.test(part))) throw new Error("Configuracion InScreen invalida.")
   try {
     const decipher = createDecipheriv("aes-256-gcm", getSeed(), Buffer.from(ivValue, "base64url"))
     decipher.setAuthTag(Buffer.from(tagValue, "base64url"))
@@ -88,7 +126,7 @@ export function openInscreenUserConfig(token: string) {
     ]).toString("utf8")
     return normalizeInscreenUserConfig(JSON.parse(plaintext))
   } catch {
-    throw new Error("No se pudo desbloquear User.InScreen con la semilla de este despliegue.")
+    throw new Error("No se pudo desbloquear User.Services con la semilla de este despliegue.")
   }
 }
 
@@ -128,15 +166,20 @@ export function openInscreenUserConfigParts(fileHalf: string, request: Request) 
 }
 
 export async function withInscreenUserConfig(request: Request, handler: () => Promise<Response>) {
+  let config: InscreenUserConfig
   try {
-    const config = readInscreenUserConfig(request)
-    return await runtimeConfig.run(config, handler)
+    config = readInscreenUserConfig(request)
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Configuracion InScreen requerida.", configurationRequired: true },
       { status: 428 }
     )
   }
+  return runtimeConfig.run(config, handler)
+}
+
+export function withOptionalServicesConfig(request: Request, handler: () => Promise<Response>) {
+  return request.headers.get(INSCREEN_CONFIG_TOKEN_HEADER) ? withInscreenUserConfig(request, handler) : handler()
 }
 
 export function withInscreenRuntimeConfig<T>(config: InscreenUserConfig | InscreenR2Config, handler: () => T) {
@@ -148,6 +191,7 @@ export function withInscreenRuntimeConfig<T>(config: InscreenUserConfig | Inscre
 }
 
 export function getInscreenRuntimeSecret(name: keyof InscreenUserConfig) {
+  if (name === 'MARKER_API') return runtimeConfig.getStore()?.datalab || runtimeConfig.getStore()?.MARKER_API || ''
   return runtimeConfig.getStore()?.[name] || ""
 }
 

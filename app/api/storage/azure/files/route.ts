@@ -1,3 +1,4 @@
+import { withOptionalServicesConfig } from '@/lib/inscreen-user-config'
 import { Readable } from "node:stream"
 import { requireAuthSession } from "@/lib/authz"
 import { azureStorage, azureStorageFailure, azureWorkspacePrefix, azureWorkspaceBlob } from "@/lib/server/azure-storage"
@@ -6,7 +7,7 @@ import { azureWorkspaceId, azureWorkspacePath } from "@/lib/azure-workspace"
 export const runtime = "nodejs"
 export const maxDuration = 300
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   const query = new URL(request.url).searchParams
@@ -34,4 +35,8 @@ export async function GET(request: Request) {
     if ((error as { statusCode?: number })?.statusCode === 404 && !query.has("path")) return Response.json({ files: [] })
     return Response.json({ error: azureStorageFailure(error) }, { status: 502 })
   }
+}
+
+export async function GET(request: Request) {
+  return withOptionalServicesConfig(request, () => handleGET(request))
 }

@@ -32,7 +32,7 @@ async function transcribe(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (process.env.datalab?.trim() || process.env.MARKER_API?.trim() || process.env.marker_api?.trim() || !request.headers.get(INSCREEN_CONFIG_TOKEN_HEADER)) {
+  if (!request.headers.get(INSCREEN_CONFIG_TOKEN_HEADER)) {
     return transcribe(request)
   }
   return withInscreenUserConfig(request, () => transcribe(request))

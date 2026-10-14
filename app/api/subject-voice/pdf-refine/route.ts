@@ -1,10 +1,11 @@
+import { withOptionalServicesConfig } from '@/lib/inscreen-user-config'
 import { requireAuthSession } from "@/lib/authz"
 import { evaluatePdfWordUnits } from "@/lib/server/subject-pdf-words"
 import type { PdfWordUnit } from "@/lib/subject-pdf-search"
 
 export const runtime = "nodejs"
 export const maxDuration = 60
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   try {
@@ -17,4 +18,8 @@ export async function POST(request: Request) {
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "No se pudo delimitar el fragmento." }, { status: 502 })
   }
+}
+
+export async function POST(request: Request) {
+  return withOptionalServicesConfig(request, () => handlePOST(request))
 }

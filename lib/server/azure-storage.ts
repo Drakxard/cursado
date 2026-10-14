@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto"
 import { BlobServiceClient, type ContainerClient } from "@azure/storage-blob"
 import { azureWorkspaceId, azureWorkspacePath } from "../azure-workspace.ts"
+import { getInscreenRuntimeSecret } from '../inscreen-user-config.ts'
 
-export function azureConnectionString() { return (process.env.storage_azure || process.env.AZURE_STORAGE_CONNECTION_STRING || "").trim() }
+export function azureConnectionString() { return (getInscreenRuntimeSecret('storage_azure') || process.env.storage_azure || process.env.AZURE_STORAGE_CONNECTION_STRING || "").trim() }
 
 export function azureStorage() {
   const connection = azureConnectionString()
   if (!connection) throw new Error("Falta configurar storage_azure en el despliegue.")
-  const name = (process.env.storage_azure_container || process.env.AZURE_STORAGE_CONTAINER || "cursado2026").trim()
+  const name = (getInscreenRuntimeSecret('storage_azure') ? getInscreenRuntimeSecret('storage_azure_container') || 'cursado2026' : process.env.storage_azure_container || process.env.AZURE_STORAGE_CONTAINER || "cursado2026").trim()
   if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(name) || name.includes("--")) throw new Error("El nombre del contenedor de Azure no es válido.")
   const service = BlobServiceClient.fromConnectionString(connection)
   return { service, container: service.getContainerClient(name) }

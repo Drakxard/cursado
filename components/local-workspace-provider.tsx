@@ -3,6 +3,9 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import { usePathname } from "next/navigation"
 import QRCode from "qrcode"
+import { ServicesEditor } from "@/components/services-editor"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { SERVICE_GROUPS, emptyServicesDraft, type ServiceGroup, type ServicesDraft, type ServicesStatus } from "@/lib/services-config"
 import { getSynthesisFolderStore } from "@/lib/client/synthesis-persistence"
 
 import { LocalFetchInterceptor } from "@/components/local-fetch-interceptor"
@@ -41,23 +44,10 @@ type LocalWorkspaceBootState = "checking" | "prompt" | "recover" | "unsupported"
 type DriveStatus = { connected: boolean; email?: string; rootFolderName?: string; rootFolderLink?: string; error?: string }
 type DriveSummary = { synced: number; pending: number; failed: number; errors: string[] }
 type WidgetTargetSummary = { pending: number; failed: number; errors: string[]; revision: number; lastPublishedAt: string }
-type ApiStatus = { groq: boolean; r2: boolean }
+type ApiStatus = ServicesStatus
 
-type InscreenConfigValues = {
-  GROQ_API_KEY: string
-  R2_BUCKET_NAME: string
-  R2_ACCESS_KEY_ID: string
-  R2_SECRET_ACCESS_KEY: string
-  R2_ENDPOINT: string
-}
-
-const EMPTY_INSCREEN_CONFIG: InscreenConfigValues = {
-  GROQ_API_KEY: "",
-  R2_BUCKET_NAME: "",
-  R2_ACCESS_KEY_ID: "",
-  R2_SECRET_ACCESS_KEY: "",
-  R2_ENDPOINT: "",
-}
+type InscreenConfigValues = ServicesDraft
+const EMPTY_INSCREEN_CONFIG = emptyServicesDraft()
 
 const INSCREEN_CONFIG_SKIPPED_KEY = "inscreen.config-skipped.v1"
 
@@ -258,7 +248,7 @@ function InscreenConfigModal({
   )
 }
 
-function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFileMessage, busy, error, driveCleanupMessage, onConfigureGroq, onConfigureR2, onConnect, onDisconnect, onSync, onCleanupDrive, onRetryWidgets, onClose }: {
+function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFileMessage, busy, error, driveCleanupMessage, onConfigureGroq, onConfigureR2, onConfigureService, onPair, onConnect, onDisconnect, onSync, onCleanupDrive, onRetryWidgets, onClose }: {
   apis: ApiStatus
   drive: DriveStatus
   azure: ReturnType<typeof useAzureWorkspaceSync>
@@ -270,6 +260,8 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
   driveCleanupMessage: string
   onConfigureGroq: () => void
   onConfigureR2: () => void
+  onConfigureService: (group: ServiceGroup) => void
+  onPair: () => void
   onConnect: () => void
   onDisconnect: () => void
   onSync: () => void
@@ -277,47 +269,41 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
   onRetryWidgets: () => void
   onClose: () => void
 }) {
-  const service = (name: string, detail: string, ok = true) => (
-    <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
-      <div><p className="font-medium">{name}</p><p className="text-xs text-slate-500">{detail}</p></div>
-      <span className={ok ? "text-emerald-600" : "text-slate-400"}>{ok ? "✓ OK" : "OFF"}</span>
-    </div>
-  )
-  return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/25 px-6 backdrop-blur-sm">
-    <div className="max-h-[94vh] w-full max-w-xl overflow-auto rounded-3xl border border-slate-200 bg-white p-7 text-slate-900 shadow-2xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">Servicios</p>
-      <h2 className="mt-2 text-2xl font-semibold">Conexiones de este navegador</h2>
-      <div className="mt-6 space-y-3">
-        <button type="button" onClick={onConfigureGroq} className="block w-full text-left">{service("Groq", apis.groq ? "Verificado en User.Services" : "Selecciona para configurarlo", apis.groq)}</button>
-        <button type="button" onClick={onConfigureR2} className="block w-full text-left">{service("Cloudflare R2", apis.r2 ? "Verificado en User.Services" : "Selecciona para configurarlo", apis.r2)}</button>
-        {azure.status?.configured ? service("Azure Blob Storage", azure.status.connected ? "Sincronización con la conexión del despliegue" : "Revisá la conexión del despliegue", Boolean(azure.status.connected)) : service("Google Drive", drive.connected ? `${drive.email} · ${drive.rootFolderName}` : "Sin cuenta conectada", drive.connected)}
+  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}>
+    <DialogContent className="max-h-[85dvh] max-w-xl overflow-y-auto rounded-2xl bg-white p-5 text-slate-900">
+      <DialogTitle>Servicios</DialogTitle>
+      <DialogDescription>User.Services guarda tus conexiones cifradas.</DialogDescription>
+      <div className="grid grid-cols-2 gap-2">
+        {SERVICE_GROUPS.map(group => <button key={group.id} type="button" disabled={busy}
+          onClick={() => group.id === 'groq' ? onConfigureGroq() : group.id === 'r2' ? onConfigureR2() : onConfigureService(group.id)}
+          className="rounded-xl border border-slate-200 p-3 text-left hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-sky-500">
+          <span className="block text-sm font-medium">{group.name}</span>
+          <span className={apis[group.id] ? 'text-xs text-emerald-700' : 'text-xs text-slate-500'}>{apis[group.id] ? 'Configurado' : 'Agregar'}</span>
+        </button>)}
       </div>
-      {servicesFileMessage ? <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{servicesFileMessage}</p> : null}
-      <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm">
-        <p>Widgets InScreen · {widgetSummary.pending} pendientes · {widgetSummary.failed} con error</p>
-        {widgetSummary.revision > 0 ? <p className="mt-1 text-xs text-slate-500">R2 revision {widgetSummary.revision} · verificado {widgetSummary.lastPublishedAt ? new Date(widgetSummary.lastPublishedAt).toLocaleString() : "-"}</p> : null}
-        {widgetSummary.errors.map((message, index) => <p className="mt-2 text-xs text-amber-800" key={`${index}-${message}`}>{message}</p>)}
-        {widgetSummary.pending > 0 || widgetSummary.failed > 0 ? <button type="button" onClick={onRetryWidgets} disabled={busy} className="mt-3 rounded-xl border border-slate-300 px-3 py-2 disabled:opacity-50">Reintentar widgets</button> : null}
-      </div>
-      {azure.status?.configured ? <AzureWorkspaceSyncControls sync={azure} /> : drive.connected ? <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm">
-        <p>{summary.synced} sincronizados · {summary.pending} pendientes · {summary.failed} con error</p>
-        {summary.errors.length ? <div className="mt-3 space-y-1 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-          {summary.errors.map((message, index) => <p key={`${index}-${message}`}>{message}</p>)}
-          <p className="pt-1 text-amber-700">Se reintentan al iniciar, ante el proximo cambio o manualmente.</p>
-        </div> : null}
-        <div className="mt-3 flex flex-wrap gap-2">
-          {drive.rootFolderLink ? <a href={drive.rootFolderLink} target="_blank" rel="noreferrer" className="rounded-xl border border-slate-300 px-3 py-2">Abrir carpeta</a> : null}
-          <button type="button" onClick={onSync} disabled={busy} className="rounded-xl border border-slate-300 px-3 py-2 disabled:opacity-50">Sincronizar existentes</button>
-          <button type="button" onClick={onCleanupDrive} disabled={busy} className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 disabled:opacity-50">Limpiar duplicados</button>
-          <button type="button" onClick={onConnect} disabled={busy} className="rounded-xl border border-slate-300 px-3 py-2 disabled:opacity-50">Cambiar cuenta</button>
-          <button type="button" onClick={onDisconnect} disabled={busy} className="rounded-xl border border-red-200 px-3 py-2 text-red-600 disabled:opacity-50">Desconectar</button>
+      {servicesFileMessage ? <p className="text-xs text-emerald-700">{servicesFileMessage}</p> : null}
+      <details className="rounded-xl border p-3 text-sm">
+        <summary className="cursor-pointer font-medium">Sincronizacion y dispositivos</summary>
+        <div className="mt-3 space-y-3">
+          {azure.status?.configured ? <AzureWorkspaceSyncControls sync={azure} /> : <div>
+            <p className="text-xs">Google Drive: {drive.connected ? `${drive.email} - ${summary.synced} sincronizados, ${summary.pending} pendientes` : 'Sin cuenta conectada'}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" onClick={onConnect} disabled={busy} className="rounded-lg border px-3 py-2">{drive.connected ? 'Cambiar cuenta' : 'Conectar Google Drive'}</button>
+              {drive.connected ? <><button type="button" onClick={onSync} disabled={busy} className="rounded-lg border px-3 py-2">Sincronizar existentes</button><button type="button" onClick={onCleanupDrive} disabled={busy} className="rounded-lg border px-3 py-2">Limpiar duplicados</button><button type="button" onClick={onDisconnect} disabled={busy} className="rounded-lg border px-3 py-2">Desconectar</button></> : null}
+            </div>
+            {drive.rootFolderLink ? <a href={drive.rootFolderLink} target="_blank" rel="noreferrer" className="mt-2 block text-xs underline">Abrir carpeta de Drive</a> : null}
+            {summary.errors.map((message,index) => <p className="text-xs text-amber-800" key={index}>{message}</p>)}
+          </div>}
+          <p className="text-xs">Widgets InScreen: {widgetSummary.pending} pendientes, {widgetSummary.failed} con error</p>
+          {widgetSummary.errors.map((message,index) => <p className="text-xs text-amber-800" key={index}>{message}</p>)}
+          <div className="flex gap-2"><button type="button" onClick={onPair} disabled={busy || !apis.r2} className="rounded-lg border px-3 py-2 disabled:opacity-50">Vincular telefono</button>{widgetSummary.pending > 0 || widgetSummary.failed > 0 ? <button type="button" onClick={onRetryWidgets} disabled={busy} className="rounded-lg border px-3 py-2">Reintentar widgets</button> : null}</div>
         </div>
-      </div> : <button type="button" onClick={onConnect} disabled={busy} className="mt-4 h-11 w-full rounded-xl bg-sky-600 px-5 font-semibold text-white disabled:opacity-50">Conectar Google Drive</button>}
-      {driveCleanupMessage ? <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{driveCleanupMessage}</p> : null}
-      {error ? <p className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      <div className="mt-6 flex justify-end"><button type="button" onClick={onClose} className="h-11 rounded-xl bg-slate-900 px-6 font-semibold text-white">Cerrar</button></div>
-    </div>
-  </div>
+      </details>
+      {driveCleanupMessage ? <p className="text-xs text-emerald-700">{driveCleanupMessage}</p> : null}
+      {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+      <div className="flex justify-end"><button type="button" onClick={onClose} disabled={busy} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Cerrar</button></div>
+    </DialogContent>
+  </Dialog>
 }
 
 async function unlockWorkspaceServices(handle: FileSystemDirectoryHandle): Promise<{ ok: boolean; missing?: boolean; error: string; migrated?: boolean }> {
@@ -412,6 +398,7 @@ export function LocalWorkspaceProvider({
   )
   const [error, setError] = useState("")
   const [configStep, setConfigStep] = useState(0)
+  const [selectedService, setSelectedService] = useState<ServiceGroup>("azureStorage")
   const [configValues, setConfigValues] = useState<InscreenConfigValues>(EMPTY_INSCREEN_CONFIG)
   const [savingConfig, setSavingConfig] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState("")
@@ -423,7 +410,7 @@ export function LocalWorkspaceProvider({
   const [driveCleanupMessage, setDriveCleanupMessage] = useState("")
   const [servicesFileMessage, setServicesFileMessage] = useState("")
   const [widgetTargetSummary, setWidgetTargetSummary] = useState<WidgetTargetSummary>({ pending: 0, failed: 0, errors: [], revision: 0, lastPublishedAt: "" })
-  const isReady = !enabled || (bootState === "ready" && Boolean(rootHandle) && permissionState === "granted")
+  const isReady = !enabled || ((bootState === "ready" || bootState === "configure") && Boolean(rootHandle) && permissionState === "granted")
   const canRenderBeforeWorkspaceReady = enabled && pathname === "/practice/viewer"
   const [synthesisMigrationError, setSynthesisMigrationError] = useState("")
   const azure = useAzureWorkspaceSync(rootHandle, enabled && permissionState === "granted", isReady)
@@ -536,13 +523,14 @@ export function LocalWorkspaceProvider({
   }, [enabled, rootHandle])
 
   useEffect(() => {
-    if (!enabled || pathname !== "/" || bootState !== "ready" || !rootHandle || permissionState !== "granted") return
+    if (!enabled || pathname !== "/estudio" || bootState !== "ready" || !rootHandle || permissionState !== "granted") return
 
     const reopenConfiguration = async (event: KeyboardEvent) => {
-      if (event.key !== "|") return
+      if (event.key !== "|" || event.repeat) return
       const target = event.target
       if (target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']")) return
       event.preventDefault()
+      event.stopPropagation()
       setInscreenConfigurationSkipped(false)
       setConfigValues(EMPTY_INSCREEN_CONFIG)
       setQrDataUrl("")
@@ -570,12 +558,16 @@ export function LocalWorkspaceProvider({
 
       setApiStatus({ groq: false, r2: false })
       setConfigStep(4)
-      setError(unlocked.error)
+      setError(unlocked.missing ? "" : unlocked.error)
       setBootState("configure")
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      void reopenConfiguration(event)
+      void reopenConfiguration(event).catch(configurationError => {
+        setError(configurationError instanceof Error ? configurationError.message : "No se pudo abrir User.Services.")
+        setConfigStep(4)
+        setBootState("configure")
+      })
     }
 
     window.addEventListener("keydown", handleKeyDown)
@@ -667,13 +659,8 @@ export function LocalWorkspaceProvider({
   }
 
   const nextConfigStep = () => {
-    const requiredByStep: Array<Array<keyof InscreenConfigValues>> = [
-      ["GROQ_API_KEY"],
-      ["R2_BUCKET_NAME", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ENDPOINT"],
-    ]
-    const missing = requiredByStep[configStep].find((field) => !configValues[field].trim())
-    if (missing) {
-      setError(`Completa ${missing} para continuar.`)
+    if (!Object.values(configValues).some(value => value.trim())) {
+      setError("Ingresa al menos un dato para guardar.")
       return false
     }
     setError("")
@@ -718,6 +705,9 @@ export function LocalWorkspaceProvider({
       if (!sealedResponse.ok || !sealedPayload?.token) {
         throw new Error(sealedPayload?.error || "No se pudo proteger la configuracion.")
       }
+      const statusResponse = await fetch("/api/inscreen/config/status", { cache: "no-store", headers: { "x-inscreen-config-token": sealedPayload.token } })
+      const status = await statusResponse.json().catch(() => null) as { configured?: boolean; services?: ApiStatus; error?: string } | null
+      if (!statusResponse.ok || !status?.configured) throw new Error(status?.error || "No se pudo verificar el archivo cifrado.")
       const current = await loadServicesFile(rootHandle)
       const saved = await persistServicesFile(rootHandle, {
         inscreenToken: sealedPayload.token,
@@ -727,16 +717,15 @@ export function LocalWorkspaceProvider({
       })
       setReadyInscreenConfigToken(saved.inscreenToken)
       setReadyDriveConfigToken(saved.driveToken)
-      const statusResponse = await fetch("/api/inscreen/config/status", { cache: "no-store", headers: { "x-inscreen-config-token": saved.inscreenToken } })
-      const status = await statusResponse.json().catch(() => null) as { configured?: boolean; services?: ApiStatus; error?: string } | null
-      if (!statusResponse.ok || !status?.configured) throw new Error(status?.error || "User.Services se creo, pero no pudo validarse.")
       setInscreenConfigurationSkipped(false)
       setReadyWorkspaceHandle(rootHandle)
       setApiStatus(status.services ?? sealedPayload.services ?? { groq: false, r2: false })
       setServicesFileMessage(`User.Services creado y verificado · ${new Date(saved.validatedAt || saved.savedAt).toLocaleString()}`)
-      if (configStep === 1) setWidgetTargetSummary(await processLocalWidgetTargetSyncQueue())
+      if (configStep === 1) void processLocalWidgetTargetSyncQueue().then(setWidgetTargetSummary).catch(() => {})
       setConfigValues(EMPTY_INSCREEN_CONFIG)
       setConfigStep(4)
+      window.dispatchEvent(new Event("cursado-services-changed"))
+      document.querySelectorAll('iframe').forEach(frame => frame.contentWindow?.postMessage({ type: 'cursado-services-changed' }, window.location.origin))
     } catch (configError) {
       setError(configError instanceof Error ? configError.message : "No se pudo guardar la configuracion InScreen.")
     } finally {
@@ -886,7 +875,11 @@ export function LocalWorkspaceProvider({
         <button className="ml-3 underline" onClick={() => { void getSynthesisFolderStore().then(() => setSynthesisMigrationError("")).catch((error) => setSynthesisMigrationError(String(error.message || error))) }}>Reintentar migración</button>
       </div> : null}
       {enabled && bootState === "configure" && configStep === 4 ? (
-        <ServicesPanel apis={apiStatus} drive={driveStatus} azure={azure} summary={driveSummary} widgetSummary={widgetTargetSummary} servicesFileMessage={servicesFileMessage} busy={savingConfig} error={error} driveCleanupMessage={driveCleanupMessage} onConfigureGroq={() => { setConfigValues(EMPTY_INSCREEN_CONFIG); setConfigStep(0) }} onConfigureR2={() => { setConfigValues(EMPTY_INSCREEN_CONFIG); setConfigStep(1) }} onConnect={connectDrive} onDisconnect={() => { void disconnectDrive() }} onSync={() => { void syncDrive() }} onCleanupDrive={() => { void cleanupDriveDuplicates() }} onRetryWidgets={() => { void retryWidgets() }} onClose={finishInscreenConfiguration} />
+        <ServicesPanel apis={apiStatus} drive={driveStatus} azure={azure} summary={driveSummary} widgetSummary={widgetTargetSummary} servicesFileMessage={servicesFileMessage} busy={savingConfig} error={error} driveCleanupMessage={driveCleanupMessage} onConfigureGroq={() => { setSelectedService("groq"); setConfigValues(EMPTY_INSCREEN_CONFIG); setConfigStep(0) }} onConfigureR2={() => { setConfigValues(EMPTY_INSCREEN_CONFIG); setConfigStep(1) }} onConfigureService={group => { setSelectedService(group); setConfigValues(EMPTY_INSCREEN_CONFIG); setError(""); setConfigStep(0) }} onPair={() => { setConfigStep(3); void createPairingQr() }} onConnect={connectDrive} onDisconnect={() => { void disconnectDrive() }} onSync={() => { void syncDrive() }} onCleanupDrive={() => { void cleanupDriveDuplicates() }} onRetryWidgets={() => { void retryWidgets() }} onClose={finishInscreenConfiguration} />
+      ) : enabled && bootState === "configure" && configStep < 2 ? (
+        <ServicesEditor values={configValues} status={apiStatus} initialGroup={configStep === 1 ? "r2" : selectedService} busy={savingConfig} error={error}
+          onChange={(field, value) => { setConfigValues(current => ({ ...current, [field]: value })); setError("") }} onSave={() => { void saveInscreenConfiguration() }}
+          onClose={() => { setConfigValues(EMPTY_INSCREEN_CONFIG); setError(""); setConfigStep(4) }} />
       ) : enabled && bootState === "configure" ? (
         <InscreenConfigModal
           step={configStep}

@@ -1,3 +1,4 @@
+import { getInscreenRuntimeSecret } from '../inscreen-user-config.ts'
 export const CLEF_FLASH_MODEL = "@cf/cloudflare/clef-flash"
 
 export type ClefQuestion =
@@ -12,8 +13,8 @@ type ClefEvaluation = {
 }
 
 export function getClefConfiguration() {
-  const token = process.env.cloudflareapi?.trim() ?? ""
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim() ?? ""
+  const token = getInscreenRuntimeSecret('cloudflareapi') || process.env.cloudflareapi?.trim() || ""
+  const accountId = getInscreenRuntimeSecret('CLOUDFLARE_ACCOUNT_ID') || process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || ""
   const missing = [
     ...(!token ? ["cloudflareapi"] : []),
     ...(!accountId ? ["CLOUDFLARE_ACCOUNT_ID"] : []),

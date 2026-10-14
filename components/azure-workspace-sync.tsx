@@ -34,7 +34,8 @@ export function useAzureWorkspaceSync(root: FileSystemDirectoryHandle | null, en
     const timer = auto ? setInterval(() => { if (document.visibilityState === "visible") void run() }, 45_000) : undefined
     const online = () => { void run() }
     window.addEventListener("online", online)
-    return () => { cancelled = true; clearInterval(timer); window.removeEventListener("online", online) }
+    window.addEventListener("cursado-services-changed", online)
+    return () => { cancelled = true; clearInterval(timer); window.removeEventListener("online", online); window.removeEventListener("cursado-services-changed", online) }
   }, [root, enabled, auto])
 
   const sync = async () => {

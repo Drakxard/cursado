@@ -64,6 +64,7 @@ import { SUBJECT_IDS } from "@/lib/subjects"
 import { getReadyDriveConfigToken, getReadyInscreenConfigToken } from "@/lib/local-workspace-client"
 import { isSubjectVoiceServerRequest } from "@/lib/subject-voice-api"
 import { isTtsServerRequest } from "@/lib/tts-api"
+import { isServicesServerRequest } from '@/lib/services-config'
 
 const INSCREEN_CONFIG_TOKEN_HEADER = "x-inscreen-config-token"
 
@@ -808,12 +809,15 @@ export function LocalFetchInterceptor() {
         return originalFetch(new Request(request, { headers }))
       }
       if (isTtsServerRequest(url.pathname, request.method) || (url.pathname === "/api/synthesis-voice" && request.method.toUpperCase() === "POST")) {
-        return originalFetch(request)
+        const headers = new Headers(request.headers)
+        const token = getReadyInscreenConfigToken()
+        if (token && !headers.has(INSCREEN_CONFIG_TOKEN_HEADER)) headers.set(INSCREEN_CONFIG_TOKEN_HEADER, token)
+        return originalFetch(new Request(request, { headers }))
       }
-      if (isProtectedInscreenRequest(url.pathname, request.method)) {
+      if (isServicesServerRequest(url.pathname) || isProtectedInscreenRequest(url.pathname, request.method)) {
         const configToken = getReadyInscreenConfigToken()
         const headers = new Headers(request.headers)
-        if (configToken) headers.set(INSCREEN_CONFIG_TOKEN_HEADER, configToken)
+        if (configToken && !headers.has(INSCREEN_CONFIG_TOKEN_HEADER)) headers.set(INSCREEN_CONFIG_TOKEN_HEADER, configToken)
         return originalFetch(new Request(request, { headers }))
       }
       if (url.pathname.startsWith("/api/inscreen/config/")) {

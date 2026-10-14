@@ -43,11 +43,32 @@ HTTPS del servidor. Reiniciar Python después de actualizarlo. El archivo es
 local: no contiene datos que deban copiarse al frontend.
 
 El organizador mantiene su modo local y las variables documentadas en
-`.env.example`; las credenciales de servicios permanecen en el servidor o en
-los mecanismos existentes de `User.Services`. Las cuentas de ambos módulos
+`.env.example`. Desde la rueda de materias (`/estudio`), **`|`** abre el panel
+compacto de servicios; el atajo no se activa mientras se escribe en un campo.
+Las cuentas de ambos módulos
 son independientes. Los datos y sesiones del navegador de los dominios
 anteriores no se trasladan automáticamente: usar los respaldos e importaciones
 existentes y volver a ingresar en el nuevo dominio.
+
+Configurar en Vercel **INSCREEN_CONFIG_SEED** y **INSCREEN_PROVIDER_CAPSULE_SECRET**
+con dos secretos diferentes de al menos 32 caracteres, sin prefijo `NEXT_PUBLIC_`.
+La primera cifra `User.Services`; la segunda protege la vinculación con el teléfono.
+Conservar ambas estables y respaldadas. Las claves de proveedores se cargan desde
+el panel `|`: Azure Storage (`storage_azure`, contenedor opcional), Azure GPT
+(`gpt5mini`, `conexiongpt5mini`, `AZURE_OPENAI_DEPLOYMENT` opcional), AI Gateway
+(`gatewayia`), Datalab (`datalab`), Cloudflare Voice (`cloudflareapi`,
+`CLOUDFLARE_ACCOUNT_ID`), Groq y R2. No es necesario duplicarlas en Vercel cuando
+se utilizan desde la carpeta local. Las variables de proveedores del despliegue
+siguen disponibles como alternativa para solicitudes sin configuración local.
+
+El servidor valida el formato y cifra las claves con AES-256-GCM. El navegador
+conserva el sobre cifrado, sin claves en texto plano en almacenamiento persistente.
+Cada guardado mantiene las conexiones no editadas, verifica el sobre y relee el
+archivo; la versión anterior queda en `User.Services.backup`. Los campos vacíos
+conservan las claves anteriores. Los proveedores reciben las credenciales de la
+solicitud actual, sin modificar variables globales ni mezclar usuarios.
+La validación del formato no confirma permisos o disponibilidad de cada proveedor;
+Groq y R2 conservan además sus comprobaciones de conexión existentes.
 
 Validación:
 
@@ -392,12 +413,10 @@ INSCREEN_CONFIG_SEED=una-cadena-aleatoria-de-al-menos-32-caracteres
 
 No compartas esa semilla ni la incluyas en Git. Debe conservarse estable y respaldarse fuera de Vercel: si cambia, los sobres de `User.Services` dejaran de poder descifrarse y el panel mostrara un diagnostico de semilla incompatible.
 
-Al abrir el modo local por primera vez, la aplicacion pide una carpeta y luego muestra el asistente de Groq y Cloudflare R2. Las credenciales y la conexion de Drive se cifran en el servidor como sobres independientes y se guardan juntas en `User.Services`, dentro de la carpeta elegida. El archivo puede reutilizarse desde ambos sistemas operativos y no contiene secretos en texto plano. Cada guardado se relee y valida; R2 se comprueba escribiendo, leyendo y borrando un objeto temporal. Las versiones anteriores `User.InScreen` y `User.Drive` se migran automaticamente cuando sus cookies antiguas todavia permiten descifrarlas.
+Al abrir el modo local por primera vez, la aplicación pide una carpeta. Desde la rueda de materias, `|` permite configurar los servicios necesarios. Las credenciales y la conexión de Drive se cifran en el servidor como sobres independientes y se guardan juntas en `User.Services`, dentro de la carpeta elegida. El archivo puede reutilizarse desde ambos sistemas operativos y no contiene secretos en texto plano. Cada guardado se relee y valida; R2 se comprueba escribiendo, leyendo y borrando un objeto temporal. Las versiones anteriores `User.InScreen` y `User.Drive` se migran automáticamente cuando sus cookies antiguas todavía permiten descifrarlas.
 
-El asistente puede omitirse para usar la aplicacion sin Groq, Marker ni R2. La
-preferencia queda guardada en ese navegador y no vuelve a interrumpir las
-cargas. Para abrir nuevamente la configuracion, pulsa `|` desde la pantalla de
-inicio.
+La aplicación puede utilizarse sin configurar proveedores. Para abrir la
+configuración, pulsa `|` desde la rueda de materias en `/estudio`.
 
 Recommended Cloudflare R2 CORS configuration for operational hardening:
 

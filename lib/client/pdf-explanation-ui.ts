@@ -2,12 +2,12 @@ import { DefaultChatTransport, readUIMessageStream } from "ai"
 import { downloadPdfExplanationAttempt, type ExplanationAttempt } from "../pdf-explanation-debug"
 
 export async function requestPdfExplanation(question: string, transcription: string, onProgress: (text: string) => void,
-  debug?: ExplanationAttempt, model?: string, image?: string) {
+  debug?: ExplanationAttempt, model?: string, image?: string, requestFetch: typeof fetch = fetch) {
   if (debug) { debug.stage = "solicitud-gateway"; debug.transcription = transcription; debug.wire = "" }
   const transport = new DefaultChatTransport({
     api: "/api/pdf-explanation",
     fetch: async (url, init) => {
-      const response = await fetch(url, init)
+      const response = await requestFetch(url, init)
       if (debug) { debug.httpStatus = response.status; debug.stage = "respuesta-http" }
       if (!response.ok) {
         const body = await response.text()

@@ -1,3 +1,4 @@
+import { withOptionalServicesConfig } from '@/lib/inscreen-user-config'
 import { createHash } from "node:crypto"
 import { requireAuthSession } from "@/lib/authz"
 import { azureConnectionString, azureStorage, azureStorageFailure, azureWorkspaceBlob } from "@/lib/server/azure-storage"
@@ -6,7 +7,7 @@ import { azureContentHash, azureWorkspaceId, azureWorkspacePath, AZURE_UPLOAD_CH
 export const runtime = "nodejs"
 export const maxDuration = 300
 
-export async function GET() {
+async function handleGET() {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   if (!azureConnectionString()) return Response.json({ configured: false })
@@ -20,7 +21,7 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   let body: { workspaceId: string; path: string; hash: string; expectedEtag?: string; action: "prepare" | "commit"; blocks?: string[]; contentType?: string }
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
   } catch (error) { return Response.json({ error: azureStorageFailure(error) }, { status: (error as { statusCode?: number })?.statusCode === 412 ? 409 : 502 }) }
 }
 
-export async function PUT(request: Request) {
+async function handlePUT(request: Request) {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   const query = new URL(request.url).searchParams
@@ -62,4 +63,16 @@ export async function PUT(request: Request) {
     await azureWorkspaceBlob(container, auth.session.email, query.get("workspaceId"), query.get("path")).stageBlock(query.get("block")!, bytes, bytes.length)
     return Response.json({ uploaded: true })
   } catch (error) { return Response.json({ error: azureStorageFailure(error) }, { status: 502 }) }
+}
+
+export async function GET(request: Request) {
+  return withOptionalServicesConfig(request, () => handleGET())
+}
+
+export async function POST(request: Request) {
+  return withOptionalServicesConfig(request, () => handlePOST(request))
+}
+
+export async function PUT(request: Request) {
+  return withOptionalServicesConfig(request, () => handlePUT(request))
 }

@@ -1,6 +1,7 @@
+import { withOptionalServicesConfig, getInscreenRuntimeSecret } from '@/lib/inscreen-user-config'
 import Groq from 'groq-sdk'
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     const { userPrompt, completedContext } = await request.json()
 
@@ -8,7 +9,7 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Empty prompt' }, { status: 400 })
     }
 
-    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
+    const groq = new Groq({ apiKey: getInscreenRuntimeSecret('GROQ_API_KEY') || process.env.GROQ_API_KEY })
 
     const fullMessage = completedContext
       ? `${userPrompt}\n\nMaterias completadas hoy:\n${completedContext}`
@@ -51,4 +52,8 @@ export async function POST(request: Request) {
     console.error('POST /api/ai-chat error:', error)
     return Response.json({ error: 'Failed to call AI' }, { status: 500 })
   }
+}
+
+export async function POST(request: Request) {
+  return withOptionalServicesConfig(request, () => handlePOST(request))
 }

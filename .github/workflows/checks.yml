@@ -42,6 +42,7 @@ jobs:
       - run: npm run test:pdf-search
       - run: npm run test:voice
       - run: npm run test:synthesis-paste
+      - run: npm run test:services
       - run: npm run build
       - name: Pruebas del servidor Python con base temporal
         run: python pizarraproyecto-main/tests/hosting_namespace.test.py
