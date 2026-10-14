@@ -296,6 +296,7 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
           </div>}
           <p className="text-xs">Widgets InScreen: {widgetSummary.pending} pendientes, {widgetSummary.failed} con error</p>
           {widgetSummary.errors.map((message,index) => <p className="text-xs text-amber-800" key={index}>{message}</p>)}
+          <p className="text-xs text-slate-600">R2 revision {widgetSummary.revision} · {widgetSummary.pending} pendientes · {widgetSummary.failed} con error</p>
           <div className="flex gap-2"><button type="button" onClick={onPair} disabled={busy || !apis.r2} className="rounded-lg border px-3 py-2 disabled:opacity-50">Vincular telefono</button>{widgetSummary.pending > 0 || widgetSummary.failed > 0 ? <button type="button" onClick={onRetryWidgets} disabled={busy} className="rounded-lg border px-3 py-2">Reintentar widgets</button> : null}</div>
         </div>
       </details>
