@@ -20,7 +20,7 @@ export function ServicesEditor({ values, status, initialGroup, busy, error, onCh
   const [visible, setVisible] = useState(false)
   const group = SERVICE_GROUPS.find(group => group.id === selected)!
   return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <DialogContent className="max-h-[85dvh] max-w-lg overflow-y-auto rounded-2xl bg-white p-5 text-slate-900" aria-describedby="services-editor-description">
+    <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto rounded-2xl bg-white p-5 text-slate-900 sm:max-w-lg" aria-describedby="services-editor-description">
       <DialogTitle>Configurar servicios</DialogTitle>
       <DialogDescription id="services-editor-description">Se guardan cifrados en User.Services, dentro de tu carpeta.</DialogDescription>
       <form onSubmit={event => { event.preventDefault(); onSave() }} className="space-y-4">

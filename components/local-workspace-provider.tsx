@@ -270,7 +270,7 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
   onClose: () => void
 }) {
   return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <DialogContent className="max-h-[85dvh] max-w-xl overflow-y-auto rounded-2xl bg-white p-5 text-slate-900">
+    <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto rounded-2xl bg-white p-5 text-slate-900 sm:max-w-xl">
       <DialogTitle>Servicios</DialogTitle>
       <DialogDescription>User.Services guarda tus conexiones cifradas.</DialogDescription>
       <div className="grid grid-cols-2 gap-2">

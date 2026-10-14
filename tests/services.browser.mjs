@@ -100,7 +100,7 @@ async function setup(t, initialFiles = {}) {
       } catch { return route.fulfill({ json: { configured: false, error: 'No se pudo abrir User.Services' } }) }
     }
     if (path.startsWith('/api/')) return route.fulfill({ json: { configured: false, connected: false } })
-    return route.fulfill({ contentType: 'text/html', body: `<style>${css.css}</style><div id="root"></div><script>${bundle.outputFiles[0].text}</script>` })
+    return route.fulfill({ contentType: 'text/html', body: `<style>${css.css} body {font-family:Arial,sans-serif} *,*::before,*::after {animation:none!important;transition:none!important}</style><div id="root"></div><script>${bundle.outputFiles[0].text}</script>` })
   })
   await page.goto('https://services.test/estudio')
   await page.getByRole('button', { name: 'Seleccionar carpeta', exact: true }).click()
