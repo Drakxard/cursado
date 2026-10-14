@@ -1,0 +1,345 @@
+export const SYNTHESIS_WORKSPACE_VERSION = 2 as const
+export const SYNTHESIS_WORKSPACE_STORAGE_KEY = "inscreen:synthesis:workspace-v2"
+export const SYNTHESIS_WORKSPACE_PENDING_KEY = "inscreen:synthesis:pending-v2"
+export const SYNTHESIS_MAX_DOCUMENT_BYTES = 1_000_000
+export const SYNTHESIS_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+export const SYNTHESIS_LOCAL_IMAGE_PREFIX = "synthesis-local-image:"
+export const SYNTHESIS_EDITOR_FONT_SIZES = [12, 14, 16, 18, 20, 22, 24, 28, 32] as const
+export const SYNTHESIS_EDITOR_DEFAULT_FONT_SIZE = 16
+
+export function normalizeSynthesisEditorFontSize(value: unknown): number {
+  return SYNTHESIS_EDITOR_FONT_SIZES.some((size) => size === value) ? value as number : SYNTHESIS_EDITOR_DEFAULT_FONT_SIZE
+}
+
+export type TiptapJSON = {
+  type?: string
+  attrs?: Record<string, unknown>
+  content?: TiptapJSON[]
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
+  text?: string
+  [key: string]: unknown
+}
+
+export type SynthesisNodeLayout = { x: number; y: number; scale: number }
+
+export type SynthesisSourceLink = { nodeId: string; autoTitle: string; containerId?: number; dismissed?: boolean }
+export type SynthesisSources = {
+  containers: Record<string, SynthesisSourceLink>
+  materials: Record<string, SynthesisSourceLink>
+}
+
+function normalizeSynthesisSources(input: SynthesisSources): SynthesisSources {
+  const normalizeLinks = (links: Record<string, SynthesisSourceLink>) => Object.fromEntries(
+    Object.entries(links ?? {}).filter(([, link]) => link && typeof link.nodeId === "string" && typeof link.autoTitle === "string")
+      .map(([id, link]) => [id, { nodeId: link.nodeId, autoTitle: link.autoTitle,
+        ...(Number.isInteger(link.containerId) ? { containerId: link.containerId } : {}),
+        ...(link.dismissed ? { dismissed: true } : {}),
+      }])
+  )
+  return { containers: normalizeLinks(input.containers), materials: normalizeLinks(input.materials) }
+}
+
+export type SynthesisWorkspaceV2 = {
+  version: typeof SYNTHESIS_WORKSPACE_VERSION
+  revision: number
+  updatedAt: string
+  defaultScale: number
+  document: TiptapJSON
+  layout: Record<string, SynthesisNodeLayout>
+  sources?: SynthesisSources
+  editorFontSize?: number
+  lastEditedNodeId?: string
+}
+
+export type DerivedSynthesisNode = {
+  id: string
+  parentId: string | null
+  name: string
+  kind: "heading" | "listItem" | "taskItem"
+  level: number
+  body: TiptapJSON[]
+  source: TiptapJSON
+}
+
+const STRUCTURAL_TYPES = new Set(["heading", "listItem", "taskItem"])
+const LIST_TYPES = new Set(["bulletList", "orderedList", "taskList"])
+const IMAGE_TYPES = new Set(["image"])
+
+export function createSynthesisId() {
+  return globalThis.crypto?.randomUUID?.() ?? `syn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`
+}
+
+export function createEmptySynthesisWorkspace(): SynthesisWorkspaceV2 {
+  return {
+    version: SYNTHESIS_WORKSPACE_VERSION,
+    revision: 0,
+    updatedAt: new Date(0).toISOString(),
+    defaultScale: 1,
+    document: { type: "doc", content: [{ type: "paragraph" }] },
+    layout: {},
+  }
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+export function plainText(node: TiptapJSON | undefined): string {
+  if (!node) return ""
+  if (node.type === "synthesisMath" && typeof node.attrs?.latex === "string") return node.attrs.latex
+  if (typeof node.text === "string") return node.text
+  return (node.content ?? []).map(plainText).join("").trim()
+}
+
+function structuralId(node: TiptapJSON) {
+  const value = node.attrs?.synthesisId
+  return typeof value === "string" && value.trim() ? value : null
+}
+
+export function ensureSynthesisDocument(
+  input: unknown,
+  idFactory: () => string = createSynthesisId
+): TiptapJSON {
+  const candidate = clone(input && typeof input === "object" ? input : { type: "doc", content: [] }) as TiptapJSON
+  candidate.type = "doc"
+  candidate.content = Array.isArray(candidate.content) ? candidate.content : []
+
+  if (candidate.content.length === 0) {
+    candidate.content.push({ type: "paragraph" })
+  }
+
+  const seen = new Set<string>()
+  const visit = (node: TiptapJSON) => {
+    if (STRUCTURAL_TYPES.has(node.type ?? "")) {
+      const existing = structuralId(node)
+      const id = existing && !seen.has(existing) ? existing : idFactory()
+      node.attrs = { ...(node.attrs ?? {}), synthesisId: id }
+      seen.add(id)
+    }
+    for (const child of node.content ?? []) visit(child)
+  }
+  visit(candidate)
+  return candidate
+}
+
+export function deriveSynthesisNodes(documentInput: TiptapJSON): DerivedSynthesisNode[] {
+  const document = ensureSynthesisDocument(documentInput)
+  const nodes: DerivedSynthesisNode[] = []
+  let activeHeading: DerivedSynthesisNode | undefined
+
+  for (const block of document.content ?? []) {
+    if (block.type === "heading" && Number(block.attrs?.level) === 1) {
+      const id = structuralId(block)!
+      const parent = nodes.find((node) => node.id === block.attrs?.synthesisParentId)
+      activeHeading = { id, parentId: parent?.id ?? null, name: plainText(block) || "Sin título", kind: "heading", level: parent ? parent.level + 1 : 1, body: [], source: block }
+      nodes.push(activeHeading)
+      continue
+    }
+    activeHeading?.body.push(block)
+  }
+  return nodes
+}
+
+/** Return the last heading changed by an editor update, preferring the open branch when possible. */
+export function findEditedSynthesisNode(previous: TiptapJSON, next: TiptapJSON, preferredId: string | null = null): string | null {
+  if (JSON.stringify(previous) === JSON.stringify(next)) return null
+  const before = new Map(deriveSynthesisNodes(previous).map((node) => [node.id, JSON.stringify([node.source, node.body])]))
+  const changed = deriveSynthesisNodes(next).filter((node) => before.get(node.id) !== JSON.stringify([node.source, node.body]))
+  if (preferredId && changed.some((node) => node.id === preferredId)) return preferredId
+  return changed.at(-1)?.id ?? null
+}
+
+export function reconcileSynthesisLayout(
+  nodes: DerivedSynthesisNode[],
+  layout: Record<string, SynthesisNodeLayout>,
+  defaultScale = 1,
+  repairOverlaps = false
+) {
+  const next: Record<string, SynthesisNodeLayout> = {}
+  const viewportWidth = typeof window !== "undefined" && window.innerWidth ? window.innerWidth : 1366
+  const viewportHeight = typeof window !== "undefined" && window.innerHeight ? window.innerHeight : 768
+  const plaqueWidth = viewportWidth <= 640 ? 139 : 164
+  const plaqueHeight = viewportWidth <= 640 ? 127 : 150
+  const columns = Math.max(1, Math.min(4, Math.floor(viewportWidth / (plaqueWidth * defaultScale + 45))))
+  const rowHeight = (plaqueHeight * defaultScale + 45) / viewportHeight
+  const occupied = new Map<string, SynthesisNodeLayout[]>()
+  const overlaps = (a: SynthesisNodeLayout, b: SynthesisNodeLayout) =>
+    Math.abs(a.x - b.x) < (plaqueWidth * (a.scale + b.scale) / 2 + 35) / viewportWidth
+    && Math.abs(a.y - b.y) < (plaqueHeight * (a.scale + b.scale) / 2 + 35) / viewportHeight
+  for (const node of nodes) {
+    if (!layout[node.id]) continue
+    const key = node.parentId ?? "root"
+    const positions = occupied.get(key) ?? []
+    if (repairOverlaps && positions.some((position) => overlaps(position, layout[node.id]))) continue
+    next[node.id] = layout[node.id]
+    occupied.set(key, [...positions, layout[node.id]])
+  }
+  for (const node of nodes) {
+    if (next[node.id]) continue
+    const key = node.parentId ?? "root"
+    const positions = occupied.get(key) ?? []
+    const scale = layout[node.id]?.scale ?? defaultScale
+    let index = 0
+    let position: SynthesisNodeLayout
+    do {
+      position = { x: ((index % columns) + 0.5) / columns, y: Math.max(0.28, (100 + plaqueHeight * scale / 2) / viewportHeight) + Math.floor(index / columns) * rowHeight, scale }
+      index++
+    } while (positions.some((p) => overlaps(p, position)))
+    next[node.id] = position
+    occupied.set(key, [...positions, position])
+  }
+  return next
+}
+
+/** Reserve existing siblings first when editing moves a heading into their screen. */
+export function repairSynthesisLayout(workspace: SynthesisWorkspaceV2, previousDocument?: TiptapJSON) {
+  const next = normalizeSynthesisWorkspace(workspace)
+  const nodes = deriveSynthesisNodes(next.document)
+  const previousParents = new Map(deriveSynthesisNodes(previousDocument ?? next.document).map((node) => [node.id, node.parentId]))
+  const staysInPlace = (node: DerivedSynthesisNode) => previousParents.has(node.id) && previousParents.get(node.id) === node.parentId
+  const ordered = [...nodes.filter(staysInPlace), ...nodes.filter((node) => !staysInPlace(node))]
+  next.layout = reconcileSynthesisLayout(ordered, next.layout, next.defaultScale, true)
+  return next
+}
+
+export function normalizeSynthesisWorkspace(input: unknown): SynthesisWorkspaceV2 {
+  const value = input && typeof input === "object" ? input as Partial<SynthesisWorkspaceV2> : {}
+  const document = ensureSynthesisDocument(value.document)
+  // Older linked PDFs used H2 delimiters. Migrate their IDs and parent links once;
+  // later manual heading changes must remain ordinary formatting.
+  for (const link of Object.values(value.sources?.materials ?? {})) {
+    const heading = document.content?.find((block) => block.type === "heading" && structuralId(block) === link.nodeId)
+    const parentId = value.sources?.containers[String(link.containerId)]?.nodeId
+    if (heading && Number(heading.attrs?.level) > 1 && parentId && !("synthesisParentId" in heading.attrs!)) {
+      heading.attrs = { ...heading.attrs, level: 1, synthesisParentId: parentId }
+    }
+  }
+  const defaultScale = Math.max(0.5, Math.min(2, Number(value.defaultScale) || 1))
+  const rawLayout = value.layout && typeof value.layout === "object" ? value.layout : {}
+  const layout: Record<string, SynthesisNodeLayout> = {}
+  for (const [id, position] of Object.entries(rawLayout)) {
+    if (!position || typeof position !== "object") continue
+    const p = position as Partial<SynthesisNodeLayout>
+    if ([p.x, p.y, p.scale].every(Number.isFinite)) layout[id] = {
+      x: Math.max(0, Math.min(1, Number(p.x))), y: Math.max(0.1, Number(p.y)), scale: Math.max(0.5, Math.min(2, Number(p.scale))),
+    }
+  }
+  const nodes = deriveSynthesisNodes(document)
+  return {
+    version: SYNTHESIS_WORKSPACE_VERSION,
+    revision: Math.max(0, Math.floor(Number(value.revision) || 0)),
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date(0).toISOString(),
+    defaultScale,
+    editorFontSize: normalizeSynthesisEditorFontSize(value.editorFontSize),
+    ...(typeof value.lastEditedNodeId === "string" && nodes.some((node) => node.id === value.lastEditedNodeId)
+      ? { lastEditedNodeId: value.lastEditedNodeId } : {}),
+    document,
+    layout: reconcileSynthesisLayout(nodes, layout, defaultScale),
+    ...(value.sources ? { sources: normalizeSynthesisSources(value.sources) } : {}),
+  }
+}
+
+export function assertValidSynthesisWorkspace(input: unknown) {
+  const candidate = input as Partial<SynthesisWorkspaceV2> | null
+  if (candidate?.version !== SYNTHESIS_WORKSPACE_VERSION || candidate.document?.type !== "doc" || !Array.isArray(candidate.document.content)) {
+    throw new Error("El documento de Síntesis tiene un formato inválido.")
+  }
+  const serialized = JSON.stringify(input)
+  if (new TextEncoder().encode(serialized).byteLength > SYNTHESIS_MAX_DOCUMENT_BYTES) throw new Error("La Síntesis es demasiado grande.")
+  if (/\b(?:data:image\/|blob:)/i.test(serialized)) throw new Error("Las imágenes deben guardarse como referencias locales.")
+  const workspace = normalizeSynthesisWorkspace(input)
+  if (deriveSynthesisNodes(workspace.document).length > 500) throw new Error("La Síntesis tiene demasiados nodos.")
+  return workspace
+}
+
+export function childrenOf(nodes: DerivedSynthesisNode[], parentId: string | null) {
+  return nodes.filter((node) => node.parentId === parentId)
+}
+
+export function scaleSynthesisWorkspace(workspace: SynthesisWorkspaceV2, scale: number) {
+  const nextScale = Math.round(Math.max(0.5, Math.min(2, scale)) * 10) / 10
+  return { ...workspace, defaultScale: nextScale, layout: Object.fromEntries(Object.entries(workspace.layout).map(([id, value]) => [id, { ...value, scale: nextScale }])) }
+}
+
+function listContainsId(node: TiptapJSON, id: string): boolean {
+  if (structuralId(node) === id) return true
+  return (node.content ?? []).some((child) => listContainsId(child, id))
+}
+
+/** Include formatted content and explicitly associated children until the next sibling. */
+export function synthesisBranchEnd(document: TiptapJSON, index: number): number {
+  const blocks = document.content ?? []
+  const nodes = deriveSynthesisNodes(document)
+  const rootId = structuralId(blocks[index])
+  const descendants = new Set([rootId])
+  for (const node of nodes) if (descendants.has(node.parentId)) descendants.add(node.id)
+  let end = index + 1
+  while (end < blocks.length) {
+    const block = blocks[end]
+    if (block.type === "heading" && Number(block.attrs?.level) === 1 && !descendants.has(structuralId(block))) break
+    end++
+  }
+  return end
+}
+
+export function extractSynthesisBranchDocument(documentInput: TiptapJSON, id: string): TiptapJSON {
+  const document = ensureSynthesisDocument(documentInput)
+  const blocks = document.content ?? []
+  const headingIndex = blocks.findIndex((node) => node.type === "heading" && structuralId(node) === id)
+  if (headingIndex >= 0) {
+    const end = synthesisBranchEnd(document, headingIndex)
+    return { type: "doc", content: clone(blocks.slice(headingIndex, end)) }
+  }
+  const findListItem = (node: TiptapJSON): TiptapJSON | null => {
+    if ((node.type === "listItem" || node.type === "taskItem") && structuralId(node) === id) return node
+    for (const child of node.content ?? []) { const found = findListItem(child); if (found) return found }
+    return null
+  }
+  for (const block of blocks) {
+    if (!listContainsId(block, id)) continue
+    const item = findListItem(block)
+    if (item) {
+      const wrapperType = item.type === "taskItem" ? "taskList" : block.type === "orderedList" ? "orderedList" : "bulletList"
+      return { type: "doc", content: [{ type: wrapperType, content: [clone(item)] }] }
+    }
+  }
+  return { type: "doc", content: [] }
+}
+
+export function replaceSynthesisBranch(documentInput: TiptapJSON, id: string, branchInput: TiptapJSON): TiptapJSON {
+  const document = ensureSynthesisDocument(documentInput)
+  const branch = ensureSynthesisDocument(branchInput)
+  const blocks = document.content ?? []
+  const headingIndex = blocks.findIndex((node) => node.type === "heading" && structuralId(node) === id)
+  if (headingIndex >= 0) {
+    const end = synthesisBranchEnd(document, headingIndex)
+    blocks.splice(headingIndex, end - headingIndex, ...(branch.content ?? []))
+    return ensureSynthesisDocument(document)
+  }
+  const replacement = (branch.content ?? []).flatMap((node) => LIST_TYPES.has(node.type ?? "") ? node.content ?? [] : []).find((node) => node.type === "listItem" || node.type === "taskItem")
+  const visit = (node: TiptapJSON): boolean => {
+    const children = node.content ?? []
+    const index = children.findIndex((child) => structuralId(child) === id)
+    if (index >= 0) { if (replacement) children.splice(index, 1, clone(replacement)); else children.splice(index, 1); return true }
+    return children.some(visit)
+  }
+  visit(document)
+  return ensureSynthesisDocument(document)
+}
+
+export function nodeReadingDocument(node: DerivedSynthesisNode): TiptapJSON {
+  return { type: "doc", content: clone(node.body) }
+}
+
+export function referencedLocalImageIds(document: TiptapJSON) {
+  const ids = new Set<string>()
+  const visit = (node: TiptapJSON) => {
+    if (IMAGE_TYPES.has(node.type ?? "")) {
+      const src = typeof node.attrs?.src === "string" ? node.attrs.src : ""
+      if (src.startsWith(SYNTHESIS_LOCAL_IMAGE_PREFIX)) ids.add(src.slice(SYNTHESIS_LOCAL_IMAGE_PREFIX.length))
+    }
+    for (const child of node.content ?? []) visit(child)
+  }
+  visit(document)
+  return [...ids]
+}

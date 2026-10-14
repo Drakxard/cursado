@@ -1,0 +1,38 @@
+{
+  "id": "/mobile/review",
+  "name": "Repaso movil",
+  "short_name": "Repaso",
+  "description": "Mini app instalable para repaso movil",
+  "start_url": "/mobile/review",
+  "scope": "/mobile/review",
+  "display": "standalone",
+  "categories": ["education", "productivity"],
+  "background_color": "#f1e4a9",
+  "theme_color": "#f1e4a9",
+  "screenshots": [],
+  "icons": [
+    {
+      "src": "/mobile-review-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/mobile-review-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/mobile-review-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/mobile-review-icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

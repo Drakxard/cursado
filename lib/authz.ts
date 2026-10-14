@@ -1,0 +1,230 @@
+import { cookies } from "next/headers"
+import { getLegacyDatabase } from "@/lib/db"
+import { NextResponse } from "next/server"
+
+import { APP_AUTH_COOKIE_NAME, getAppAuthConfig, verifySessionToken, type AppSessionTokenPayload } from "@/lib/app-auth"
+import { isLocalStorageMode } from "@/lib/storage-mode"
+import { SUBJECT_IDS, normalizeAllowedSubjectIds, getSubjectIdFromIndex } from "@/lib/subjects"
+
+const sql = getLegacyDatabase()
+
+const LOCAL_SESSION: AuthSession = {
+  email: "local@app.local",
+  isAdmin: true,
+  allowedSubjectIds: SUBJECT_IDS,
+  expiresAtMs: Number.MAX_SAFE_INTEGER,
+}
+
+export type AllowedAccountRow = {
+  id: number
+  email: string
+  allowed_subject_ids: string[] | string
+  created_at: string
+  updated_at: string
+}
+
+export type AuthSession = AppSessionTokenPayload
+
+function normalizeAllowedSubjectIdsColumn(value: AllowedAccountRow["allowed_subject_ids"]) {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value
+  return normalizeAllowedSubjectIds(Array.isArray(parsed) ? parsed : [])
+}
+
+export function getAdminEmail() {
+  return getAppAuthConfig().adminEmail
+}
+
+export function getAdminSession() {
+  return {
+    isAdmin: true,
+    allowedSubjectIds: SUBJECT_IDS,
+  }
+}
+
+export async function getCurrentSessionForEmail(email: string): Promise<AuthSession | null> {
+  if (isLocalStorageMode()) {
+    return LOCAL_SESSION
+  }
+  if (!sql) {
+    return null
+  }
+
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail) return null
+
+  if (normalizedEmail === getAdminEmail()) {
+    return {
+      email: normalizedEmail,
+      ...getAdminSession(),
+      expiresAtMs: 0,
+    }
+  }
+
+  const allowedAccount = await getAllowedAccountByEmail(normalizedEmail)
+  const allowedSubjectIds = allowedAccount?.allowed_subject_ids ?? []
+  if (allowedSubjectIds.length === 0) return null
+
+  return {
+    email: normalizedEmail,
+    isAdmin: false,
+    allowedSubjectIds,
+    expiresAtMs: 0,
+  }
+}
+
+export async function getAllowedAccountByEmail(email: string) {
+  if (isLocalStorageMode()) {
+    return null
+  }
+  if (!sql) {
+    return null
+  }
+
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail) return null
+
+  const rows = await sql`
+    SELECT id, email, allowed_subject_ids, created_at, updated_at
+    FROM allowed_google_accounts
+    WHERE email = ${normalizedEmail}
+    LIMIT 1
+  ` as AllowedAccountRow[]
+
+  if (!rows[0]) return null
+
+  return {
+    ...rows[0],
+    email: rows[0].email.toLowerCase(),
+    allowed_subject_ids: normalizeAllowedSubjectIdsColumn(rows[0].allowed_subject_ids),
+  }
+}
+
+export async function listAllowedAccounts() {
+  if (isLocalStorageMode()) {
+    return []
+  }
+  if (!sql) {
+    return []
+  }
+
+  const rows = await sql`
+    SELECT id, email, allowed_subject_ids, created_at, updated_at
+    FROM allowed_google_accounts
+    ORDER BY email ASC
+  ` as AllowedAccountRow[]
+
+  return rows.map((row) => ({
+    ...row,
+    email: row.email.toLowerCase(),
+    allowed_subject_ids: normalizeAllowedSubjectIdsColumn(row.allowed_subject_ids),
+  }))
+}
+
+export async function createAllowedAccount(email: string, allowedSubjectIds: string[]) {
+  if (isLocalStorageMode()) {
+    throw new Error("Los accesos administrados no se usan en modo local.")
+  }
+  if (!sql) {
+    throw new Error("Missing database connection.")
+  }
+
+  const normalizedEmail = email.trim().toLowerCase()
+  const normalizedSubjects = normalizeAllowedSubjectIds(allowedSubjectIds)
+
+  const rows = await sql`
+    INSERT INTO allowed_google_accounts (email, allowed_subject_ids)
+    VALUES (${normalizedEmail}, ${JSON.stringify(normalizedSubjects)})
+    RETURNING id, email, allowed_subject_ids, created_at, updated_at
+  ` as AllowedAccountRow[]
+
+  return {
+    ...rows[0],
+    email: rows[0].email.toLowerCase(),
+    allowed_subject_ids: normalizeAllowedSubjectIdsColumn(rows[0].allowed_subject_ids),
+  }
+}
+
+export async function deleteAllowedAccountById(id: number) {
+  if (isLocalStorageMode()) {
+    return null
+  }
+  if (!sql) {
+    return null
+  }
+
+  const rows = await sql`
+    DELETE FROM allowed_google_accounts
+    WHERE id = ${id}
+    RETURNING id
+  ` as Array<{ id: number }>
+
+  return rows[0] ?? null
+}
+
+export async function getRequestAuthSession(): Promise<AuthSession | null> {
+  if (isLocalStorageMode()) {
+    return LOCAL_SESSION
+  }
+
+  const cookieStore = await cookies()
+  const token = cookieStore.get(APP_AUTH_COOKIE_NAME)?.value
+  if (!token) return null
+
+  const { sessionSecret } = getAppAuthConfig()
+  const tokenSession = await verifySessionToken(token, sessionSecret)
+  if (!tokenSession) return null
+
+  const currentSession = await getCurrentSessionForEmail(tokenSession.email)
+  if (!currentSession) return null
+
+  return {
+    ...currentSession,
+    expiresAtMs: tokenSession.expiresAtMs,
+  }
+}
+
+export async function requireAuthSession() {
+  if (isLocalStorageMode()) {
+    return { session: LOCAL_SESSION, response: null }
+  }
+
+  const session = await getRequestAuthSession()
+  if (!session) {
+    return { session: null, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
+  }
+
+  return { session, response: null }
+}
+
+export async function requireAdminSession() {
+  if (isLocalStorageMode()) {
+    return { session: LOCAL_SESSION, response: null }
+  }
+
+  const auth = await requireAuthSession()
+  if (auth.response) return auth
+  if (!auth.session?.isAdmin) {
+    return { session: auth.session, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
+  }
+
+  return auth
+}
+
+export function canAccessSubject(session: AuthSession, subjectId: string) {
+  return session.isAdmin || session.allowedSubjectIds.includes(subjectId)
+}
+
+export function ensureSubjectAccess(session: AuthSession, subjectId: string) {
+  return canAccessSubject(session, subjectId)
+    ? null
+    : NextResponse.json({ error: "Forbidden" }, { status: 403 })
+}
+
+export function ensureQuestionSubjectAccess(session: AuthSession, idMateria: number | null) {
+  const subjectId = getSubjectIdFromIndex(idMateria)
+  if (!subjectId) {
+    return NextResponse.json({ error: "Invalid subject" }, { status: 400 })
+  }
+
+  return ensureSubjectAccess(session, subjectId)
+}

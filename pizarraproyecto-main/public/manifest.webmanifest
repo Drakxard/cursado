@@ -1,0 +1,17 @@
+{
+  "id": "/pizarra/",
+  "name": "Tu pizarra",
+  "short_name": "Pizarra",
+  "description": "Pizarras y herramientas de estudio. Tus privadas guardadas en tu dispositivo.",
+  "lang": "es",
+  "start_url": "/pizarra/?app=1",
+  "scope": "/pizarra/",
+  "display": "standalone",
+  "background_color": "#171b25",
+  "theme_color": "#171b25",
+  "icons": [
+    {"src":"/pizarra/icons/pizarra-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"/pizarra/icons/pizarra-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"/pizarra/icons/pizarra-maskable.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
+  ]
+}

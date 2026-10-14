@@ -1,2 +1,415 @@
 # cursado
+
 Comunidad de estudiantes, intentando estudiar
+
+Este repositorio integra el organizador de estudio (Next.js, en la raíz) y la
+pizarra colaborativa (Vite, en `pizarraproyecto-main`). La pantalla `/` permite
+abrir `/estudio` o `/pizarra/`. **Ctrl+Q** guarda los cambios pendientes y vuelve
+al inicio sin cerrar la sesión. Si el guardado falla, la aplicación permanece
+abierta y muestra el error.
+
+## Desarrollo y despliegue de Cursado
+
+Requiere Node.js 22.12 o posterior. Instalar ambos proyectos:
+
+```powershell
+npm.cmd ci
+npm.cmd --prefix pizarraproyecto-main ci
+npm.cmd run dev
+```
+
+`dev` y `build` compilan la pizarra y generan `public/pizarra` antes de ejecutar
+Next.js. Esos archivos son generados y no se suben a Git. Tras modificar la
+pizarra, ejecutar `npm.cmd run build:pizarra` para actualizarla en Next; también
+se puede desarrollar directamente con `npm.cmd --prefix pizarraproyecto-main run dev`.
+
+En Vercel importar **cursado**, seleccionar la raíz del repositorio y Next.js.
+`vercel.json` instala ambas aplicaciones y ejecuta `npm run build`. Configurar
+**PIZARRA_BACKEND_URL** con el origen HTTPS del servidor Python existente
+(por ejemplo `https://pizarra-api.example.com`, sin `/api`, ruta ni parámetros).
+La URL se utiliza al compilar: después de cambiarla hay que volver a desplegar.
+Sin esa variable, las privadas y copias locales siguen disponibles y los
+servicios compartidos responden con un error 503 explícito.
+
+La computadora que aloja Python debe seguir encendida para colaboración,
+usuarios compartidos y los servicios asociados. Su configuración de hosting
+debe aceptar el nuevo origen de Cursado; la conexión en vivo conserva los
+tickets y la URL WebSocket entregada por ese servidor. No configurar una
+reescritura global de `/api`: esas rutas pertenecen al organizador.
+
+En el servidor Python, `pizarraproyecto-main/hosting.local.json` debe contener
+`publicOrigin` con el origen HTTPS de Cursado y `backendOrigin` con el origen
+HTTPS del servidor. Reiniciar Python después de actualizarlo. El archivo es
+local: no contiene datos que deban copiarse al frontend.
+
+El organizador mantiene su modo local y las variables documentadas en
+`.env.example`; las credenciales de servicios permanecen en el servidor o en
+los mecanismos existentes de `User.Services`. Las cuentas de ambos módulos
+son independientes. Los datos y sesiones del navegador de los dominios
+anteriores no se trasladan automáticamente: usar los respaldos e importaciones
+existentes y volver a ingresar en el nuevo dominio.
+
+Validación:
+
+```powershell
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd --prefix pizarraproyecto-main test
+python pizarraproyecto-main/tests/hosting_namespace.test.py
+npm.cmd run build
+npm.cmd run start
+npm.cmd run test:integration
+```
+
+La prueba de integración usa el servidor local de Next en el puerto 3000 y
+Chrome. Las comprobaciones del backend usan respuestas simuladas; una prueba
+de colaboración con el servidor real requiere `PIZARRA_BACKEND_URL` configurada.
+La prueba Python usa una base temporal y comprueba las rutas, usuarios y cookies
+reales; reemplaza únicamente la automatización de ChatGPT por un stub.
+
+Los apartados siguientes documentan las funciones existentes del organizador.
+
+La configuración de Vercel se detalla en [docs/vercel-despliegue.md](docs/vercel-despliegue.md).
+GitHub Actions instala ambas aplicaciones, ejecuta sus pruebas, compila Cursado
+y verifica la navegación, las sesiones, los guardados y el modo sin conexión
+en Linux. No requiere claves de servicios reales ni modifica sus datos.
+
+Verlo envía al modelo únicamente la solicitud escrita por el usuario, dos saltos de línea y la transcripción de la página. No agrega instrucciones de diseño, mensajes de sistema, herramientas ni un esquema de pasos. El modelo genera directamente el HTML y Vercel AI SDK UI transporta esa respuesta. La aplicación no aplica una plantilla; mantiene la validación del documento completo y el visor aislado sin acceso a la red. Si el modelo entrega texto o JSON en lugar de HTML, el diagnóstico conserva esa respuesta para ajustar la solicitud. Enter con el campo vacío sigue usando `Explicalo`. El HTML y sus posiciones se conservan para reabrirlos sin llamar a la IA, por lo que una explicación guardada conserva su diseño anterior hasta generar una nueva. La carga, la descarga de diagnósticos y Escape permanecen disponibles.
+
+El editor de Síntesis agrupa las conversiones del documento a JSON tras 350 ms de pausa, con un máximo de 1500 ms durante escritura continua. El autoguardado consulta primero el contenido vivo del editor, también si llegan cambios mientras una escritura de carpeta sigue pendiente. Ctrl+S, cierre, cambio de pestaña y salida fuerzan esa actualización. Las fórmulas iniciales se normalizan una vez por documento y los identificadores estructurales se validan al crear títulos/listas, sin recorrer todo el apunte por cada movimiento de cursor o letra. El documento sigue completo en ProseMirror: estas optimizaciones reducen trabajo y copias temporales, no implementan paginación ni un límite fijo de memoria. Prueba con 4000 párrafos: `node --test tests/synthesis-performance.browser.mjs`.
+
+Para usar GPT-5 mini en ★, configurar en el servidor `gpt5mini` (clave de Azure) y `conexiongpt5mini` (punto de conexión del proyecto o recurso, por ejemplo `https://RECURSO.services.ai.azure.com/api/projects/PROYECTO`). El código agrega `/openai/v1` y usa el proveedor Azure de Vercel AI SDK con Responses. `AZURE_OPENAI_DEPLOYMENT` debe contener el nombre exacto de la implementación de Foundry; si se omite, se usa `gpt-5-mini`. El endpoint y la clave por sí solos no crean una implementación. Tras cambiar estas variables en Vercel hay que volver a desplegar. Las claves permanecen en el servidor.
+
+Con Azure configurado, Verlo usa ese despliegue fijo, razonamiento bajo y hasta 12 000 tokens de salida, incluidos los de razonamiento. No aplica el límite de los modelos gratuitos de Gateway; conserva el límite de ejecución de la plataforma. Sin clave de Azure se mantiene el selector de Gateway descrito abajo. La explicación HTML ocupa toda la vista del PDF; `Esc` o el botón de cierre permiten volver, también desde dentro del HTML.
+
+This is a [Next.js](https://nextjs.org) project bootstrapped with [v0](https://v0.app).
+
+## Built with v0
+
+El organizador original se creó con [v0](https://v0.app). El despliegue integrado de Cursado se configura desde la raíz de este repositorio, como se indica arriba.
+
+[Continue working on v0 →](https://v0.app/chat/projects/prj_iGGl2OX2U2EmCIzdCTqF1UkU6sUE)
+
+## Getting Started
+
+First, run the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+## Modo de voz por materia
+
+La carpeta local puede copiarse a Azure Blob Storage configurando `storage_azure` con la cadena de conexión del despliegue. El contenedor privado se crea automáticamente con el nombre `cursado2026`; se puede cambiar con `storage_azure_container`. Cuando esa variable está presente, Azure reemplaza a Drive como destino de sincronización. Se copian `cronograma`, `teoria`, `practica`, `audio` y `manifests`, incluyendo transcripciones, síntesis y los HTML/posiciones de Verlo. `User.Services`, las credenciales y los registros de sincronización no se suben. La conexión queda en el servidor; los archivos grandes se transfieren mediante bloques de 3 MiB por la API de la app, sin configurar CORS ni exponer la clave de Azure en el navegador.
+
+La copia se actualiza al abrir la carpeta y cada 45 segundos mientras la app está visible. En Servicios (`|`) aparecen el progreso, **Sincronizar ahora** y **Recuperar archivos faltantes**. El código de la carpeta permite recuperar su respaldo desde otro dispositivo de la misma cuenta. La recuperación conserva archivos locales existentes; los cambios concurrentes de otro dispositivo en Azure no se sobrescriben. Los archivos eliminados localmente permanecen en el respaldo. Esta función copia archivos locales: no migra ni elimina los archivos que ya estaban en Drive. Sin `storage_azure`, se mantiene la sincronización anterior con Drive.
+
+Prueba de integración opcional con el emulador Azurite: definir `AZURE_STORAGE_TEST_CONNECTION_STRING=UseDevelopmentStorage=true` y ejecutar `node --test --experimental-strip-types tests/azure-storage.integration.mts`. El test verifica explícitamente el destino localhost para evitar escribir en una cuenta real.
+
+En el visor PDF.js, tocar `★` prepara la transcripción de la página actual inmediatamente, reutilizando el caché cuando existe. `Verlo` permite escribir una duda y presionar `Enter` para generar una explicación HTML animada; si el campo queda vacío se usa `Explicalo`. `Shift+Enter` agrega una línea. La preparación pendiente se comparte con la generación y los reintentos, sin duplicar solicitudes a Datalab. Un clic sobre el texto de la duda vuelve a abrirla; arrastrarlo guarda su posición. `Esc` cierra la explicación. `Procedimiento` queda reservado para una próxima implementación.
+
+El servidor usa AI SDK con AI Gateway: configurar `gatewayia` o `AI_GATEWAY_API_KEY`. Verlo consulta el catálogo de Gateway y sólo lista modelos de lenguaje vigentes con precio cero de entrada/salida. El selector permite elegir el modelo exacto para cada intento; todos los modelos devuelven directamente el HTML solicitado. `PDF_EXPLANATION_MODEL` define la opción inicial si sigue siendo gratuita. Si el modelo elegido deja de ser gratuito o no se puede verificar el catálogo, la generación se detiene sin pasar a un modelo pago. Los USD 5 mensuales de Vercel cubren un subconjunto de modelos y no dan acceso a todo el catálogo; Verlo aplica una política más estricta de precio cero, incluso cuando vencen las promociones.
+
+Se reutilizan los bloques de Datalab guardados por Conjuntos; si faltan, se transcribe solamente la página actual con `datalab`/`MARKER_API` o la configuración de `User.Services`. Los HTML, transcripciones y posiciones se guardan en `manifests/pdf-explanations` de la carpeta local; en modo remoto se conservan en el almacenamiento del navegador.
+
+Temporalmente cada intento descarga `verlo-pagina-N-exito-….html` o `verlo-pagina-N-fallo-….html`. En éxito contiene la explicación y un apartado desplegable de diagnóstico. En fallo muestra la etapa alcanzada, el error y los fragmentos recibidos como texto sin ejecutarlos. Incluye duda, transcripción, estado HTTP, flujo recibido del SDK, modelo, argumentos de herramientas y motivos de finalización cuando estén disponibles; no incluye claves ni cabeceras de autenticación. Los errores de argumentos de una herramienta no interrumpen la recepción de la respuesta de recuperación.
+
+
+El botón de micrófono de la esquina superior derecha activa el modo de voz. En ese modo, tocar una esfera abre un lienzo blanco con el nombre de la materia y dictado en español. El micrófono del modal permite pausar o reintentar; `Esc` cierra el modal y detiene la captura. El texto es temporal y se limpia al cerrar. Con el modo apagado, las esferas conservan su apertura habitual.
+
+En el servidor, configurar `cloudflareapi` con un token con permisos de Workers AI y `CLOUDFLARE_ACCOUNT_ID` con el identificador de la cuenta. `/api/subject-voice` informa si están configuradas esas variables sin exponer el token. Clef Flash filtra las coincidencias de PDF mediante decisiones estructuradas; el dictado sigue siendo temporal y se realiza mediante el reconocimiento de voz del navegador, sin enviarlo a Clef.
+
+### Búsqueda de fragmentos de PDF
+
+Al entrar a una materia en modo de voz se preparan los PDF del contenedor fijo
+Teoría de la semana de mayor número que tenga PDF allí. Escribir busca en todo
+su texto; los fragmentos aparecen junto a las imágenes, únicamente durante la
+búsqueda. Se ignoran mayúsculas y tildes, con singular/plural y `teo`. No hay
+categorías académicas obligatorias ni búsqueda por significado.
+
+El visor de fragmentos permite abrir el PDF original en otra pestaña, situado
+en la región seleccionada (también en páginas rotadas). Mantener un recorte
+presionado durante un segundo lo quita de ese fragmento; mantener un globo
+presionado durante un segundo oculta ese resultado. Las correcciones se guardan
+en el workspace por PDF y consulta y se respetan al volver a abrir o buscar.
+
+Las búsquedas terminadas de cualquier palabra y los recortes PNG también se guardan en esa carpeta.
+Al repetir una consulta o escribir el inicio de una búsqueda anterior, los globos
+guardados aparecen sin la espera de 450 ms ni llamadas a los proveedores. `teo`
+y `def` equivalen a `teorema` y `definición`. Los recortes abiertos previamente se
+leen directamente del disco. El historial se limita a los PDF de la semana
+actual y deja de reutilizar datos de archivos reemplazados o extracciones cambiadas.
+El historial queda separado por materia, semana y contenedor de Teoría: subir
+el mismo PDF a otra materia o apartado no importa sus búsquedas anteriores.
+
+El botón `+` de una búsqueda crea un conjunto con toda la vista: imágenes y
+globos de PDF. Los fragmentos se guardan como referencias al PDF y sus bloques,
+conservan el visor de recortes y el enlace al original, y cuentan como elementos
+del conjunto. También se pueden crear conjuntos que solo contengan fragmentos.
+Mantener un globo de un conjunto presionado un segundo quita su referencia de
+ese conjunto. El guardado conserva el conjunto anterior si falla y permite reintentar.
+
+`tema` y `temas` son palabras reservadas para la síntesis manual. Abren el mismo
+apartado de imágenes de la materia y la semana seleccionada en la rueda, sin
+buscar coincidencias en los PDF ni llamar a Clef. Arrastrar imágenes o pulsar
+`+` las guarda directamente en ese apartado, sin crear un conjunto ni exigir
+que su nombre contenga la palabra tema. La carpeta local mantiene cada materia
+y semana por separado, incluso si no hay PDF de teoría para esa semana.
+
+Configurar `datalab` en el entorno del servidor con la API key de Datalab.
+`MARKER_API` y `marker_api` siguen funcionando como alternativas; también se
+admite la clave heredada del sobre cifrado de InScreen en `User.Services`.
+No usar variables `NEXT_PUBLIC_` para estas claves. Datalab recibe lotes de hasta
+diez páginas y 3 MiB mediante `/api/v1/convert`, en modo `balanced`, con salida
+`json,markdown`. Una página que supere 3 MiB se informa sin impedir procesar las
+restantes. Los trabajos llevan seguimiento firmado y se retoman al volver a
+entrar; no se mantiene una petición de servidor abierta durante toda la conversión.
+
+Clef valida cada candidato: acepta contenido desarrollado, incluidos ejemplos
+resueltos, y descarta menciones, índices y consignas que solo pidan aplicar lo
+buscado. Luego elige los bloques originales que pertenecen al fragmento; nunca
+genera títulos, texto ni coordenadas. El globo usa el encabezado original o un
+extracto inicial, con archivo y página. Al abrirlo, PDF.js muestra recortes del
+PDF original, separados por bloque y página para conservar fórmulas y columnas.
+Un bloque mixto solicita una extracción adicional de esa página con
+`word_bboxes=true`, y Clef selecciona unidades del texto original. Si no puede
+delimitarse con fiabilidad, el visor informa la limitación y omite ese bloque.
+Este refinamiento puede tener un cargo adicional del proveedor.
+
+La carpeta local guarda extracción, JSON original, trabajos pendientes y filtros
+en `manifests/subject-voice/pdf/`, con verificación de escritura y copias `.backup`.
+El SHA-256 de cada PDF y las versiones de extracción y filtro identifican la
+caché. Repetir una consulta no vuelve a llamar a los servicios; una consulta
+nueva solo necesita evaluar sus candidatos. Un PDF nuevo o reemplazado se
+procesa por separado; retirarlo lo excluye de las búsquedas. La selección se
+actualiza al recuperar el foco o en la comprobación periódica de 30 segundos.
+Una falla de Clef se muestra con reintento y no se interpreta como una búsqueda
+sin resultados. Escape y Backspace conservan la navegación habitual; el `+`
+solo agrupa imágenes manuales, no los fragmentos automáticos.
+
+Verificación: `npm test`, `npm run test:voice`, `npm run test:pdf-search`,
+`npm run typecheck` y `npm run build`. Las pruebas de navegador usan PDF reales
+generados localmente y respuestas simuladas de los servicios; no certifican la
+calidad de OCR o de clasificación de un proveedor sobre apuntes reales.
+
+### Conjuntos de imágenes en modo de voz
+
+Al abrir una materia con el modo de voz activo, el lienzo permite arrastrar o
+seleccionar imágenes. Soltar en blanco crea un conjunto con nombre y color;
+soltar sobre su globo agrega imágenes al conjunto. Cada globo muestra el nombre
+y la cantidad guardada. Al abrirlo aparecen los nombres de las imágenes sin
+su última extensión; pulsarlos abre el archivo original en un visor.
+
+Los conjuntos se guardan por materia, sin división semanal, en
+`manifests/subject-voice/{id-materia}/workspace.json`, con una copia anterior en
+`workspace.backup.json`. Las imágenes originales se conservan en
+`subject-voice/images/{id-materia}/`, con identificadores únicos aunque sus
+nombres se repitan. Se requiere la carpeta local autorizada de la app. Cada
+escritura se verifica antes de actualizar el conteo; los errores permiten
+reintentar y los manifiestos ilegibles no se reemplazan por conjuntos vacíos.
+
+El dictado temporal aparece al pie. Escribir desde los globos abre una búsqueda
+temporal de imágenes de toda la materia. Ignora mayúsculas y acentos, admite
+singular/plural y `teo` como abreviatura de `teorema`; con varias palabras exige
+todas las coincidencias. El campo sin borde al pie también permite buscar en
+móvil. El `+` naranja agrupa los resultados en un nuevo conjunto: conserva los
+IDs y archivos originales, actualiza los conteos y quita los conjuntos que
+queden vacíos. Sin búsqueda, el `+` abre el selector de nuevas imágenes.
+
+`Esc` y `Backspace` vuelven del visor a su vista anterior, del conjunto al inicio
+y del inicio salen de la materia y detienen el micrófono. Con búsqueda escrita,
+`Backspace` borra letras y `Esc` limpia la búsqueda; al abrir un resultado, volver
+conserva esa búsqueda. Los campos de creación conservan la edición normal y
+`Esc` cancela el formulario. Las escrituras pendientes impiden retroceder hasta
+terminar. No hay botones de regreso ni nombre visible del archivo en el visor.
+Los conjuntos usan tamaños según su cantidad de imágenes. El estilo usa
+Rough.js y Virgil alojada localmente, sin incorporar el editor de Excalidraw.
+
+## Storage
+
+Los PDF de materiales pueden replicarse en el Google Drive conectado desde el panel `|`. La copia semanal usa `Cursado2026/{materia}/Semana {n}/{contenedor}`; los contenedores fijados se guardan una sola vez en `Cursado2026/{materia}/Fijos/{contenedor}` y cada semana contiene un acceso directo a `Fijos`. La replica no reemplaza el workspace local. El refresh token se cifra en el servidor y se conserva como un sobre opaco dentro de `User.Services`.
+
+La aplicación usa un workspace local elegido por el usuario para materias, PDFs y manifiestos. No requiere una base de datos SQL.
+
+Las salidas de InSreen usan Cloudflare R2 para que otro programa pueda consumir los TXT. Su estado técnico se guarda por separado bajo `manifests/inscreen/`.
+
+La página `/sintesis` guarda el documento completo en la carpeta autorizada del
+dispositivo: `manifests/sintesis/{id-materia}/semana-{n}/workspace.json`.
+El archivo incluye `workspace` (texto, formato y organización del árbol) y `r2`
+(estado de sincronización). Las imágenes se guardan en `sintesis/images/`.
+Cada escritura se relee y verifica antes de darla por guardada; se conserva
+`workspace.backup.json` y las versiones anteriores en `manifests/sintesis/copias/`.
+
+Al abrir la carpeta, la aplicación migra automáticamente los guardados de Síntesis
+del navegador, incluidos pendientes y envolturas antiguas. Conserva todos los
+originales en `manifests/sintesis/migracion-navegador/`, sin borrar los datos del
+navegador ni reemplazar documentos diferentes que ya existan en la carpeta.
+Los árboles v1 sin contexto y las copias dañadas se archivan para recuperación;
+no se les asigna una materia o semana por suposición. El navegador solo conserva
+copias auxiliares y borradores de emergencia; la carpeta es la fuente principal.
+
+R2 recibe una replica unidireccional del contenido de la carpeta bajo
+`manifests/inscreen/sintesis/by-subject/{id-materia}/semana-{n}/synthesis-v2.json`,
+La carpeta local es la unica fuente editable: la web nunca descarga ni mezcla una
+version R2 en el workspace. Los dispositivos vinculados consumen R2 en modo lectura.
+El archivo global
+`manifests/inscreen/sintesis/tree-v1.json` pertenece al formato anterior.
+
+### Navegación por voz en Síntesis
+
+El botón circular junto al lápiz activa o desactiva el micrófono y recuerda la elección
+en este navegador. La voz navega únicamente por la materia y semana abiertas: decir
+`temas` muestra la jerarquía, `última edición` vuelve al último nodo modificado y
+`abre` usa el lápiz de la vista actual. Decir el nombre de un tema navega hasta él sin
+abrir el editor. La transcripción no se muestra ni se guarda en el workspace.
+
+Cada frase se envía a Jev (`typesafe-ai/jev`) mediante Vercel AI Gateway. Jev elige
+un tema, una acción o `none`; la aplicación aplica esa elección sin umbrales locales.
+Configurá `gatewayia` en el servidor como clave de AI Gateway. En Vercel también puede
+usarse `VERCEL_OIDC_TOKEN`. El navegador nunca recibe esas credenciales. Si AI Gateway
+responde 403, el detalle queda registrado en la consola; verificá el acceso del equipo
+a Jev en AI Gateway.
+Para aislar un 403, cargá la misma clave `gatewayia` en el entorno de una terminal y
+ejecutá `npm run diagnose:jev` (`npm.cmd run diagnose:jev` en PowerShell). La prueba envía una evaluación mínima por la ruta
+predeterminada y, si recibe 403, repite con TypeSafe AI como único proveedor. Imprime
+estado, error e identificador de Gateway sin imprimir la clave. Si ambas pruebas dan
+403, revisá en el mismo equipo de Vercel la disponibilidad de Jev, las listas de
+modelos y proveedores permitidos y las reglas de enrutamiento. Si todo está permitido,
+enviá a soporte de Vercel los identificadores de solicitud y el registro de AI Gateway.
+Si solo funciona TypeSafe AI, configurá `JEV_PREFER_TYPESAFE_AI=true` en Vercel y
+volvé a desplegar. La petición lo preferirá sin excluir los demás proveedores.
+El reconocimiento de voz depende de la disponibilidad de Web Speech
+API en el navegador y puede requerir otro toque para reanudarlo tras volver a la página.
+
+Required environment variables for R2:
+
+```bash
+R2_BUCKET_NAME=
+R2_ENDPOINT=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+```
+
+### Vinculacion de la APK sin base central
+
+El despliegue funciona como intermediario sin estado entre cada APK y el R2 de su
+propietario. No se guardan usuarios ni credenciales en Neon y no se crean variables de
+entorno por persona. En Vercel configura una unica semilla adicional y estable:
+
+```bash
+INSCREEN_PROVIDER_CAPSULE_SECRET=otra-cadena-aleatoria-de-al-menos-32-caracteres
+```
+
+Al terminar los pasos Groq, Marker y R2, la web muestra un cuarto paso con un QR valido
+durante cinco minutos. El QR contiene un paquete AES-256-GCM opaco, nunca las claves
+legibles. Android lo canjea una sola vez y recibe por HTTPS la clave Groq y una capsula
+propia del dispositivo que contiene R2 y Marker. Groq queda protegido con Android
+Keystore; R2 y Marker permanecen cifrados dentro de la capsula y solo se abren en memoria
+en Vercel. La clave Marker nunca se devuelve como un campo legible al APK.
+
+El estado se distribuye en el R2 de cada usuario:
+
+```text
+manifests/inscreen/provider/pairings/<pairingId>.json
+manifests/inscreen/provider/devices/<deviceId>.json
+manifests/inscreen/provider/widget-targets-v1.json
+```
+
+Cada consulta envia la capsula en `Authorization: Bearer ...`. El proveedor obtiene de
+ella el R2 correcto, verifica en ese mismo R2 que el dispositivo siga activo y devuelve
+los TXT. La pantalla final permite generar otro QR y revocar telefonos individualmente.
+Cambiar `INSCREEN_PROVIDER_CAPSULE_SECRET` invalida todas las vinculaciones; cambiar las
+credenciales R2 exige revocar y volver a vincular los dispositivos.
+
+Las rutas disponibles son:
+
+```text
+GET /api/inscreen/provider/paginas-leidas?materia=ecuordinarias&dia=6
+GET /api/inscreen/provider/traducciones?materia=ecuordinarias&dia=6
+GET /api/inscreen/provider/traducciones?materia=ecuordinarias&ultimo=6.txt
+POST /api/inscreen/provider/marker-transcribe
+GET /api/inscreen/provider/widget-targets
+GET /api/inscreen/provider/widget-targets?subjectId=eo&kind=notebooklm
+```
+
+`marker-transcribe` recibe un único JPG, PNG o WebP en el campo multipart `file`, exige
+la misma cápsula Bearer y devuelve `{ ok: true, markdown }`. El límite por imagen es
+4 MiB. Una cápsula emitida antes de incluir Marker conserva acceso a las rutas R2, pero
+esta ruta responde `428` con `provider_repair_required` hasta volver a vincular el APK.
+
+`materia` es el nombre exacto de la carpeta normalizada bajo `InSreen/`, por ejemplo
+`ecuordinarias`. Se admiten materias creadas por el usuario y no solamente las del
+catalogo inicial. `dia` acepta enteros de 6 (dia de clase) a 0 (dia anterior a la
+clase siguiente). El proveedor resuelve internamente la etapa mediante sus manifiestos
+y el metadato `subject-id` existente.
+
+En el modo incremental se omite `dia`. `ultimo` contiene el último TXT conocido por la
+APK; sin ese parámetro se devuelve completa la etapa semanal más reciente dentro de
+`nuevaEtapa`. Los archivos posteriores de la semana conocida permanecen en `archivos` y
+el reinicio en `1.txt` se entrega por separado en `nuevaEtapa`. Sin novedades se devuelve
+`hayNuevos: false`, `archivos: []` y `nuevaEtapa: null`.
+
+La respuesta incremental contiene `ok`, `hayNuevos`, `archivos` y `nuevaEtapa`. Cada archivo conserva su
+nombre y el contenido exacto del TXT guardado en R2:
+
+```json
+{
+  "ok": true,
+  "hayNuevos": true,
+  "archivos": [
+    { "nombre": "7.txt", "contenido": "Contenido de la etapa conocida" }
+  ],
+  "nuevaEtapa": {
+    "etapa": 15,
+    "archivos": [
+      { "nombre": "1.txt", "contenido": "Contenido de la nueva etapa" }
+    ]
+  }
+}
+```
+
+Sin resultados se devuelve `{ "ok": true, "hayNuevos": false, "archivos": [], "nuevaEtapa": null }`; cualquier error devuelve
+`{ "ok": false, "archivos": [] }` con el codigo HTTP correspondiente.
+
+Las rutas no aceptan ya un token global compilado. Una APK sin vincular responde
+`provider_not_configured` y debe escanear el QR del despliegue que genero su configuracion.
+
+## Configuracion personal de InScreen
+
+En el despliegue solo debe configurarse una semilla privada del servidor:
+
+```bash
+INSCREEN_CONFIG_SEED=una-cadena-aleatoria-de-al-menos-32-caracteres
+```
+
+No compartas esa semilla ni la incluyas en Git. Debe conservarse estable y respaldarse fuera de Vercel: si cambia, los sobres de `User.Services` dejaran de poder descifrarse y el panel mostrara un diagnostico de semilla incompatible.
+
+Al abrir el modo local por primera vez, la aplicacion pide una carpeta y luego muestra el asistente de Groq y Cloudflare R2. Las credenciales y la conexion de Drive se cifran en el servidor como sobres independientes y se guardan juntas en `User.Services`, dentro de la carpeta elegida. El archivo puede reutilizarse desde ambos sistemas operativos y no contiene secretos en texto plano. Cada guardado se relee y valida; R2 se comprueba escribiendo, leyendo y borrando un objeto temporal. Las versiones anteriores `User.InScreen` y `User.Drive` se migran automaticamente cuando sus cookies antiguas todavia permiten descifrarlas.
+
+El asistente puede omitirse para usar la aplicacion sin Groq, Marker ni R2. La
+preferencia queda guardada en ese navegador y no vuelve a interrumpir las
+cargas. Para abrir nuevamente la configuracion, pulsa `|` desde la pantalla de
+inicio.
+
+Recommended Cloudflare R2 CORS configuration for operational hardening:
+
+- Origins: production Vercel domain and `http://localhost:3000`
+- Methods: `PUT`, `GET`, `HEAD`, `OPTIONS`, `DELETE`
+- Allowed headers: `Content-Type`, `x-amz-meta-*`
+- Expose headers: `ETag`
+
+## Learn More
+
+To learn more, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- [v0 Documentation](https://v0.app/docs) - learn about v0 and how to use it.

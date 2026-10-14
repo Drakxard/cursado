@@ -1,0 +1,163 @@
+import { getLegacyDatabase } from "@/lib/db"
+import { requireSql } from "@/lib/db"
+import { NextResponse } from "next/server"
+
+import { buildR2ObjectKey } from "@/lib/r2"
+import { listLocalSubjectDayEntries } from "@/lib/local-r2-manifests"
+import { isLocalStorageMode } from "@/lib/storage-mode"
+import { getWeekNumberForDate, getWeekdayIndexFromDateKey, parseDateKey } from "@/lib/subject-utils"
+import { ensureSubjectAccess, requireAuthSession } from "@/lib/authz"
+
+export const runtime = "nodejs"
+
+const sql = getLegacyDatabase()
+
+function isMissingSubjectDayEntriesTable(error: unknown) {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "42P01"
+  )
+}
+
+function badRequest(message: string) {
+  return NextResponse.json({ error: message }, { status: 400 })
+}
+
+function parseSessionDate(sessionDate: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(sessionDate)) return null
+  const parsed = parseDateKey(sessionDate)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed
+}
+
+async function getNextOrderIndex(params: {
+  subjectId: string
+  weekNumber: number
+  sessionDate: string
+  materialId: number | null
+}) {
+  const { subjectId, weekNumber, sessionDate, materialId } = params
+
+  try {
+    const [countRow] = await requireSql(sql)`
+      SELECT COALESCE(MAX(order_index), -1) AS max_order
+      FROM subject_day_entries
+      WHERE subject_id = ${subjectId}
+        AND week_number = ${weekNumber}
+        AND session_date = ${sessionDate}
+        AND (
+          (${materialId}::INTEGER IS NULL AND subject_day_material_id IS NULL)
+          OR subject_day_material_id = ${materialId}
+        )
+    `
+
+    return Number(countRow?.max_order ?? -1) + 1
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "42703")) throw error
+
+    const [countRow] = await requireSql(sql)`
+      SELECT COALESCE(MAX(order_index), -1) AS max_order
+      FROM subject_day_entries
+      WHERE subject_id = ${subjectId}
+        AND week_number = ${weekNumber}
+        AND session_date = ${sessionDate}
+    `
+
+    return Number(countRow?.max_order ?? -1) + 1
+  }
+}
+
+function getFileExtension(mimeType: string) {
+  if (mimeType.includes("ogg")) return "ogg"
+  if (mimeType.includes("mpeg")) return "mp3"
+  if (mimeType.includes("mp4")) return "mp4"
+  return "webm"
+}
+
+export async function POST(request: Request) {
+  try {
+    const auth = await requireAuthSession()
+    if (auth.response) return auth.response
+
+    const payload = await request.json()
+    const subjectId = String(payload?.subjectId || "").trim()
+    const subjectName = String(payload?.subjectName || "").trim()
+    const sessionDate = String(payload?.sessionDate || "").trim()
+    const parsedSessionDate = parseSessionDate(sessionDate)
+    const requestedWeekNumber = Number.parseInt(String(payload?.weekNumber || ""), 10)
+    const rawMaterialId = Number.parseInt(String(payload?.materialId || ""), 10)
+    const materialId = Number.isNaN(rawMaterialId) ? null : rawMaterialId
+    const mimeType = String(payload?.mimeType || "").trim() || "audio/webm"
+
+    if (!subjectId || !subjectName || !sessionDate || !parsedSessionDate) {
+      return badRequest("Missing subject metadata")
+    }
+
+    const forbidden = ensureSubjectAccess(auth.session!, subjectId)
+    if (forbidden) return forbidden
+
+    if (!mimeType.startsWith("audio/")) {
+      return badRequest("Invalid audio mime type")
+    }
+
+    const derivedWeekNumber = getWeekNumberForDate(parsedSessionDate)
+    const weekNumber =
+      Number.isNaN(requestedWeekNumber) || requestedWeekNumber !== derivedWeekNumber ? derivedWeekNumber : requestedWeekNumber
+    const weekdayIndex = getWeekdayIndexFromDateKey(sessionDate)
+
+    const nextOrderIndex = isLocalStorageMode()
+      ? (
+          await listLocalSubjectDayEntries({
+            subjectId,
+            weekNumber,
+            sessionDate,
+            materialId,
+          })
+        ).length
+      : await getNextOrderIndex({
+          subjectId,
+          weekNumber,
+          sessionDate,
+          materialId,
+        })
+    const safeSubjectName = subjectName.replace(/\s+/g, "-").toLowerCase()
+    const fileName = `${safeSubjectName}-${sessionDate}-${nextOrderIndex + 1}.${getFileExtension(mimeType)}`
+
+    const objectKey = buildR2ObjectKey({
+      subjectName,
+      weekNumber,
+      weekdayIndex,
+      fileName,
+    })
+    const metadata = {
+      "subject-id": subjectId,
+      "subject-name": subjectName.replace(/\n/g, " ").trim(),
+      "session-date": sessionDate,
+      "week-number": String(weekNumber),
+      "weekday-index": String(weekdayIndex),
+      ...(materialId !== null ? { "material-id": String(materialId) } : {}),
+      "original-file-name": fileName,
+    }
+
+    return NextResponse.json({
+      uploadMode: "server",
+      objectKey,
+      metadata,
+      mimeType,
+      fileName,
+      driveFileId: objectKey,
+    })
+  } catch (error) {
+    console.error("POST /api/subject-day-entries/upload-session error:", error)
+    if (isMissingSubjectDayEntriesTable(error)) {
+      return NextResponse.json(
+        { error: "Falta crear la tabla subject_day_entries. Ejecuta scripts/005-create-subject-day-entries.sql y scripts/006-add-subject-day-entry-metadata.sql en Neon." },
+        { status: 503 }
+      )
+    }
+    const message = error instanceof Error ? error.message : "Failed to create upload session"
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}

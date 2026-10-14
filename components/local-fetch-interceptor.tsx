@@ -1,0 +1,842 @@
+"use client"
+
+import { useLayoutEffect } from "react"
+
+import {
+  buildLocalContinuePayload,
+  assignLocalTagToMaterial,
+  completeLocalAudioEntryUpload,
+  completeLocalCronogramaUpload,
+  completeLocalMaterialUpload,
+  createLocalSubjectShortcut,
+  createLocalSubjectMaterialContainer,
+  createLocalCronogramaUploadSession,
+  createLocalEntryUploadSession,
+  createLocalMaterialUploadSession,
+  createLocalTextEntry,
+  createLocalMaterialTag,
+  deleteLocalMaterialTag,
+  deleteLocalEntry,
+  deleteLocalMaterial,
+  deleteLocalSubjectMaterialContainer,
+  deleteLocalSubjectCompletion,
+  deleteLocalSubjectShortcut,
+  getLocalAiPrompt,
+  getLocalCronograma,
+  getLocalDailySession,
+  getLocalEntryById,
+  getLocalEntryAudioPositionList,
+  getLocalMaterialById,
+  getLocalSubjectCompletion,
+  getLocalSubjectShortcuts,
+  getWorkspaceFile,
+  listLocalSubjectDayEntries,
+  listLocalSubjectDayMaterials,
+  listLocalPinnedSubjectMaterials,
+  listLocalSubjectMaterialContainers,
+  listLocalMaterialTagWorkspace,
+  listLocalTagsForMaterial,
+  listLocalMaterialTagRegions,
+  mergeLocalMaterialTags,
+  moveLocalSubjectMaterialContainer,
+  processLocalDriveSyncQueue,
+  readLocalWorkspaceTabsState,
+  saveLocalAiPrompt,
+  saveLocalDailySession,
+  saveLocalEntryAudioPosition,
+  saveLocalEntryLink,
+  saveLocalSubjectCompletion,
+  updateLocalSubjectShortcut,
+  saveLocalWorkspaceTabsState,
+  syncLocalCronogramaPdf,
+  syncLocalMaterialPdf,
+  updateLocalEntry,
+  updateLocalMaterial,
+  renameLocalSubjectMaterialContainer,
+  setLocalSubjectMaterialContainerPinned,
+  updateLocalMaterialTag,
+  replaceLocalMaterialTagRegions,
+  unassignLocalTagFromMaterial,
+  uploadWorkspaceBlobFromFormData,
+  type LocalWorkspaceTabsState,
+} from "@/lib/local-workspace-data"
+import { SUBJECT_IDS } from "@/lib/subjects"
+import { getReadyDriveConfigToken, getReadyInscreenConfigToken } from "@/lib/local-workspace-client"
+import { isSubjectVoiceServerRequest } from "@/lib/subject-voice-api"
+import { isTtsServerRequest } from "@/lib/tts-api"
+
+const INSCREEN_CONFIG_TOKEN_HEADER = "x-inscreen-config-token"
+
+function isProtectedInscreenRequest(pathname: string, method: string) {
+  return isSubjectVoiceServerRequest(pathname, method) || pathname === "/api/pdf-translate" || (
+    pathname.startsWith("/api/inscreen/") && !pathname.startsWith("/api/inscreen/config/")
+  )
+}
+
+function jsonResponse(payload: unknown, init?: ResponseInit) {
+  return new Response(JSON.stringify(payload), {
+    status: init?.status ?? 200,
+    headers: {
+      "Content-Type": "application/json",
+      "x-data-source": "workspace-folder",
+      ...(init?.headers ?? {}),
+    },
+  })
+}
+
+function errorResponse(message: string, status = 400) {
+  return jsonResponse({ error: message }, { status })
+}
+
+function parseRequestJson<T>(request: Request) {
+  return request.clone().json() as Promise<T>
+}
+
+function parsePathname(pathname: string) {
+  return pathname.split("/").filter(Boolean)
+}
+
+function matchesPath(pathSegments: string[], expected: string[]) {
+  return expected.length === pathSegments.length && expected.every((segment, index) => pathSegments[index] === segment)
+}
+
+async function handleLocalApiRequest(request: Request) {
+  const url = new URL(request.url)
+  const pathSegments = parsePathname(url.pathname)
+  const method = request.method.toUpperCase()
+
+  if (matchesPath(pathSegments, ["api", "auth", "session"]) && method === "GET") {
+    return jsonResponse({
+      email: "local@app.local",
+      isAdmin: true,
+      allowedSubjectIds: SUBJECT_IDS,
+    })
+  }
+
+  if (matchesPath(pathSegments, ["api", "workspace-state"])) {
+    if (method === "GET") {
+      const result = await readLocalWorkspaceTabsState()
+      return jsonResponse(result.state)
+    }
+    if (method === "PUT") {
+      const body = await parseRequestJson<Partial<LocalWorkspaceTabsState>>(request)
+      return jsonResponse(await saveLocalWorkspaceTabsState(body))
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "ai-prompt"])) {
+    if (method === "GET") {
+      return jsonResponse({ prompt: await getLocalAiPrompt() })
+    }
+    if (method === "POST") {
+      const body = await parseRequestJson<{ prompt?: string }>(request)
+      return jsonResponse(await saveLocalAiPrompt(String(body?.prompt || "")))
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "ai-chat"]) && method === "POST") {
+    return new Response("La IA remota esta deshabilitada en modo local.", {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "x-data-source": "static-local-disabled" },
+    })
+  }
+
+  if (matchesPath(pathSegments, ["api", "groq", "models"]) && method === "GET") {
+    return jsonResponse({ models: [] })
+  }
+
+  if (matchesPath(pathSegments, ["api", "tags"])) {
+    if (method === "GET") {
+      const subjectId = String(url.searchParams.get("subjectId") || "").trim()
+      const weekNumber = Number.parseInt(String(url.searchParams.get("weekNumber") || ""), 10)
+      const sessionDate = String(url.searchParams.get("sessionDate") || "").trim()
+      if (!subjectId) return errorResponse("Missing subjectId")
+      return jsonResponse(
+        await listLocalMaterialTagWorkspace({
+          subjectId,
+          weekNumber: Number.isInteger(weekNumber) ? weekNumber : undefined,
+          sessionDate: sessionDate || undefined,
+        })
+      )
+    }
+    if (method === "POST") {
+      const body = await parseRequestJson<{ name?: string; color?: string; parentId?: number | null }>(request)
+      try {
+        return jsonResponse(
+          await createLocalMaterialTag({
+            name: String(body?.name || ""),
+            color: typeof body?.color === "string" ? body.color : undefined,
+            parentId: body?.parentId == null ? null : Number(body.parentId),
+          })
+        )
+      } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : "No se pudo crear el tag.")
+      }
+    }
+  }
+
+  if (pathSegments[0] === "api" && pathSegments[1] === "tags" && pathSegments.length >= 3) {
+    const tagId = Number.parseInt(pathSegments[2] || "", 10)
+    if (!Number.isInteger(tagId)) return errorResponse("Invalid tag id")
+    if (pathSegments.length === 3 && method === "PATCH") {
+      const body = await parseRequestJson<{ name?: string; color?: string; parentId?: number | null }>(request)
+      try {
+        const tag = await updateLocalMaterialTag(tagId, {
+          name: typeof body?.name === "string" ? body.name : undefined,
+          color: typeof body?.color === "string" ? body.color : undefined,
+          parentId: "parentId" in body ? (body.parentId == null ? null : Number(body.parentId)) : undefined,
+        })
+        return tag ? jsonResponse(tag) : errorResponse("Tag not found", 404)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "No se pudo actualizar el tag."
+        return errorResponse(message, message.includes("existe") || message.includes("ciclo") ? 409 : 400)
+      }
+    }
+    if (pathSegments.length === 3 && method === "DELETE") {
+      const result = await deleteLocalMaterialTag(tagId, url.searchParams.get("force") === "1")
+      if (result.missing) return errorResponse("Tag not found", 404)
+      if (!result.deleted) {
+        return jsonResponse(
+          { error: "El tag tiene materiales asignados.", usageCount: result.usageCount },
+          { status: 409 }
+        )
+      }
+      return jsonResponse(result)
+    }
+    if (pathSegments[3] === "merge" && method === "POST") {
+      const body = await parseRequestJson<{ targetTagId?: number }>(request)
+      try {
+        const tag = await mergeLocalMaterialTags(tagId, Number(body?.targetTagId))
+        return tag ? jsonResponse(tag) : errorResponse("Tag not found", 404)
+      } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : "No se pudieron fusionar los tags.", 409)
+      }
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "sessions"])) {
+    if (method === "GET") {
+      const date = String(url.searchParams.get("date") || "").trim()
+      if (!date) return errorResponse("Missing date parameter")
+      return jsonResponse(await getLocalDailySession(date))
+    }
+    if (method === "POST") {
+      const body = await parseRequestJson<{
+        date: string
+        activeSubjectIds: string[]
+        completedSubjects: Record<string, boolean>
+        showAllSubjects: boolean
+      }>(request)
+      return jsonResponse(
+        await saveLocalDailySession({
+          date: body.date,
+          activeSubjectIds: Array.isArray(body.activeSubjectIds) ? body.activeSubjectIds : [],
+          completedSubjects: body.completedSubjects ?? {},
+          showAllSubjects: Boolean(body.showAllSubjects),
+        })
+      )
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-completions"])) {
+    if (method === "GET") {
+      const date = String(url.searchParams.get("date") || "").trim()
+      const subjectId = String(url.searchParams.get("subjectId") || "").trim()
+      if (!date || !subjectId) return errorResponse("Missing date or subjectId")
+      return jsonResponse(await getLocalSubjectCompletion(date, subjectId))
+    }
+    if (method === "POST") {
+      const body = await parseRequestJson<{ date: string; subjectId: string; panorama: string }>(request)
+      return jsonResponse(
+        await saveLocalSubjectCompletion({
+          date: String(body?.date || "").trim(),
+          subjectId: String(body?.subjectId || "").trim(),
+          panorama: String(body?.panorama || ""),
+        })
+      )
+    }
+    if (method === "DELETE") {
+      const body = await parseRequestJson<{ date: string; subjectId: string }>(request)
+      return jsonResponse(
+        await deleteLocalSubjectCompletion(String(body?.date || "").trim(), String(body?.subjectId || "").trim())
+      )
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-shortcuts"])) {
+    if (method === "GET") {
+      const subjectId = String(url.searchParams.get("subjectId") || "").trim()
+      if (!subjectId) return errorResponse("Missing subjectId")
+      return jsonResponse(await getLocalSubjectShortcuts(subjectId))
+    }
+    const body = await parseRequestJson<{ subjectId: string; id: string; label: string; url: string; sectionScoped: boolean; sectionKey?: string }>(request)
+    const subjectId = String(body?.subjectId || "").trim()
+    if (!subjectId) return errorResponse("Missing subjectId")
+    if (method === "POST") {
+      const label = String(body?.label || "").trim()
+      if (!label) return errorResponse("Missing label")
+      return jsonResponse(await createLocalSubjectShortcut({ subjectId, label }))
+    }
+    if (method === "PUT") {
+      const id = String(body?.id || "").trim()
+      if (!id) return errorResponse("Missing id")
+      return jsonResponse(await updateLocalSubjectShortcut({
+        subjectId,
+        id,
+        url: String(body?.url || ""),
+        sectionScoped: body?.sectionScoped === true,
+        sectionKey: String(body?.sectionKey || "").trim() || undefined,
+      }))
+    }
+    if (method === "DELETE") {
+      const id = String(body?.id || "").trim()
+      if (!id) return errorResponse("Missing id")
+      return jsonResponse(await deleteLocalSubjectShortcut({ subjectId, id }))
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-material-containers"])) {
+    if (method === "GET") {
+      const subjectId = String(url.searchParams.get("subjectId") || "").trim()
+      if (!subjectId) return errorResponse("Missing subjectId")
+      return jsonResponse(await listLocalSubjectMaterialContainers(subjectId))
+    }
+    if (method === "POST") {
+      const body = await parseRequestJson<{ subjectId?: string; name?: string }>(request)
+      try {
+        return jsonResponse(await createLocalSubjectMaterialContainer(
+          String(body?.subjectId || "").trim(),
+          String(body?.name || "")
+        ))
+      } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : "No se pudo crear el contenedor.", 409)
+      }
+    }
+  }
+
+  if (pathSegments[0] === "api" && pathSegments[1] === "subject-material-containers" && pathSegments.length === 3) {
+    const containerId = Number(pathSegments[2])
+    if (!Number.isInteger(containerId)) return errorResponse("Invalid id")
+    try {
+      if (method === "PATCH") {
+        const body = await parseRequestJson<{ name?: string; isPinned?: boolean; move?: "up" | "down" }>(request)
+        const hasName = typeof body?.name === "string"
+        const hasPinned = typeof body?.isPinned === "boolean"
+        const hasMove = body?.move === "up" || body?.move === "down"
+        if ([hasName, hasPinned, hasMove].filter(Boolean).length !== 1) {
+          return errorResponse("Envia solamente name, isPinned o move.")
+        }
+        const updated = hasName
+          ? await renameLocalSubjectMaterialContainer(containerId, body!.name!)
+          : hasPinned
+            ? await setLocalSubjectMaterialContainerPinned(containerId, body!.isPinned!)
+            : await moveLocalSubjectMaterialContainer(containerId, body!.move!)
+        if (updated && (hasName || hasPinned)) void processLocalDriveSyncQueue()
+        return updated ? jsonResponse(updated) : errorResponse("Container not found", 404)
+      }
+      if (method === "DELETE") {
+        const deleted = await deleteLocalSubjectMaterialContainer(containerId)
+        return deleted ? jsonResponse(deleted) : errorResponse("Container not found", 404)
+      }
+    } catch (error) {
+      return errorResponse(error instanceof Error ? error.message : "No se pudo modificar el contenedor.", 409)
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "cronograma"])) {
+    if (method === "GET") {
+      return jsonResponse(await getLocalCronograma())
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "cronograma", "upload-session"]) && method === "POST") {
+    const body = await parseRequestJson<{ fileName: string; mimeType: string }>(request)
+    return jsonResponse(
+      await createLocalCronogramaUploadSession({
+        fileName: String(body?.fileName || ""),
+        mimeType: String(body?.mimeType || "application/pdf"),
+      })
+    )
+  }
+
+  if (matchesPath(pathSegments, ["api", "cronograma", "complete"]) && method === "POST") {
+    const body = await parseRequestJson<{ driveFileId: string; fileName: string }>(request)
+    return jsonResponse(
+      await completeLocalCronogramaUpload({
+        driveFileId: String(body?.driveFileId || "").trim(),
+        fileName: String(body?.fileName || "").trim(),
+      })
+    )
+  }
+
+  if (matchesPath(pathSegments, ["api", "cronograma", "file"]) && method === "GET") {
+    const cronograma = await getLocalCronograma()
+    if (!cronograma?.driveFileId) return errorResponse("Cronograma not found", 404)
+    const file = await getWorkspaceFile(cronograma.driveFileId)
+    return new Response(file, {
+      status: 200,
+      headers: {
+        "Content-Type": file.type || cronograma.driveMimeType || "application/pdf",
+        "Content-Disposition": `inline; filename="${cronograma.fileName}"`,
+      },
+    })
+  }
+
+  if (matchesPath(pathSegments, ["api", "cronograma", "sync"]) && method === "POST") {
+    return jsonResponse(await syncLocalCronogramaPdf(await request.formData()))
+  }
+
+  if (matchesPath(pathSegments, ["api", "storage", "r2-upload"]) && method === "POST") {
+    return jsonResponse(await uploadWorkspaceBlobFromFormData(await request.formData()))
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-day-materials"])) {
+    if (method === "GET") {
+      const subjectId = String(url.searchParams.get("subjectId") || "").trim()
+      const weekNumber = Number.parseInt(String(url.searchParams.get("weekNumber") || ""), 10)
+      const sessionDate = String(url.searchParams.get("sessionDate") || "").trim()
+      const scope = String(url.searchParams.get("scope") || "").trim()
+      const materialTypeParam = String(url.searchParams.get("materialType") || "").trim()
+      const materialType =
+        materialTypeParam === "theory" || materialTypeParam === "practice" ? materialTypeParam : null
+      if (!subjectId || (scope !== "pinned" && !Number.isInteger(weekNumber))) {
+        return errorResponse("Missing subjectId or weekNumber")
+      }
+      if (scope === "pinned") {
+        return jsonResponse(await listLocalPinnedSubjectMaterials(subjectId))
+      }
+      return jsonResponse(
+        await listLocalSubjectDayMaterials({
+          subjectId,
+          weekNumber,
+          sessionDate: scope === "week" ? undefined : sessionDate || undefined,
+          materialType,
+        })
+      )
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-day-materials", "upload-session"]) && method === "POST") {
+    const body = await parseRequestJson<{
+      subjectId: string
+      sessionDate: string
+      weekNumber?: number
+      materialType: "theory" | "practice"
+      containerId?: number | null
+      fileName: string
+      mimeType: string
+    }>(request)
+    const materialType = body?.materialType === "theory" || body?.materialType === "practice" ? body.materialType : null
+    if (!materialType) return errorResponse("Invalid materialType")
+    return jsonResponse(
+      await createLocalMaterialUploadSession({
+        subjectId: String(body?.subjectId || "").trim(),
+        sessionDate: String(body?.sessionDate || "").trim(),
+        weekNumber: body?.weekNumber,
+        materialType,
+        containerId: Number.isInteger(Number(body?.containerId)) ? Number(body.containerId) : null,
+        fileName: String(body?.fileName || ""),
+        mimeType: String(body?.mimeType || "application/pdf"),
+      })
+    )
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-day-materials", "complete"]) && method === "POST") {
+    const body = await parseRequestJson<{
+      subjectId: string
+      subjectName?: string
+      sessionDate: string
+      weekNumber?: number
+      materialType: "theory" | "practice"
+      containerId?: number | null
+      driveFileId: string
+      fileName: string
+    }>(request)
+    const materialType = body?.materialType === "theory" || body?.materialType === "practice" ? body.materialType : null
+    if (!materialType) return errorResponse("Invalid materialType")
+    const completed = await completeLocalMaterialUpload({
+        subjectId: String(body?.subjectId || "").trim(),
+        subjectName: String(body?.subjectName || "").trim(),
+        sessionDate: String(body?.sessionDate || "").trim(),
+        weekNumber: body?.weekNumber,
+        materialType,
+        containerId: Number.isInteger(Number(body?.containerId)) ? Number(body.containerId) : null,
+        driveFileId: String(body?.driveFileId || "").trim(),
+        fileName: String(body?.fileName || ""),
+      })
+    void processLocalDriveSyncQueue()
+    return jsonResponse(completed)
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-day-materials", "next-theory"]) && method === "GET") {
+    const subjectId = String(url.searchParams.get("subjectId") || "").trim()
+    const sessionDate = String(url.searchParams.get("sessionDate") || "").trim()
+    const weekNumber = Number.parseInt(String(url.searchParams.get("weekNumber") || ""), 10)
+    return jsonResponse(
+      await buildLocalContinuePayload({
+        subjectId,
+        sessionDate,
+        weekNumber,
+        mode: "theory",
+      })
+    )
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-day-materials", "next-practice"]) && method === "GET") {
+    const subjectId = String(url.searchParams.get("subjectId") || "").trim()
+    const sessionDate = String(url.searchParams.get("sessionDate") || "").trim()
+    const weekNumber = Number.parseInt(String(url.searchParams.get("weekNumber") || ""), 10)
+    return jsonResponse(
+      await buildLocalContinuePayload({
+        subjectId,
+        sessionDate,
+        weekNumber,
+        mode: "practice",
+      })
+    )
+  }
+
+  if (pathSegments[0] === "api" && pathSegments[1] === "subject-day-materials" && pathSegments.length >= 3) {
+    const materialId = Number.parseInt(pathSegments[2] || "", 10)
+    if (!Number.isInteger(materialId)) return errorResponse("Invalid material id")
+
+    if (pathSegments.length === 3) {
+      if (method === "PATCH") {
+        const body = await parseRequestJson<{
+          isCheckupDone?: boolean
+          containerId?: number | null
+          materialType?: "theory" | "practice"
+        }>(request)
+        const material = await updateLocalMaterial(materialId, {
+          is_checkup_done: typeof body?.isCheckupDone === "boolean" ? body.isCheckupDone : undefined,
+          container_id: Number.isInteger(Number(body?.containerId)) ? Number(body.containerId) : undefined,
+          material_type: body?.materialType === "theory" || body?.materialType === "practice" ? body.materialType : undefined,
+        })
+        if (material && (body?.containerId !== undefined || body?.materialType !== undefined)) void processLocalDriveSyncQueue()
+        return material ? jsonResponse(material) : errorResponse("Material not found", 404)
+      }
+      if (method === "DELETE") {
+        const material = await deleteLocalMaterial(materialId)
+        void processLocalDriveSyncQueue()
+        return material ? jsonResponse({ success: true, id: materialId }) : errorResponse("Material not found", 404)
+      }
+    }
+
+    if (pathSegments[3] === "file" && method === "GET") {
+      const material = await getLocalMaterialById(materialId)
+      if (!material?.drive_file_id) return errorResponse("Material not found", 404)
+      const file = await getWorkspaceFile(material.drive_file_id)
+      return new Response(file, {
+        status: 200,
+        headers: {
+          "Content-Type": file.type || material.drive_mime_type || "application/pdf",
+          "Content-Disposition": `inline; filename="${material.file_name}"`,
+        },
+      })
+    }
+
+    if (pathSegments[3] === "tags") {
+      if (pathSegments.length === 4 && method === "GET") {
+        const material = await getLocalMaterialById(materialId)
+        return material ? jsonResponse(await listLocalTagsForMaterial(materialId)) : errorResponse("Material not found", 404)
+      }
+      if (pathSegments.length === 5) {
+        const tagId = Number.parseInt(pathSegments[4] || "", 10)
+        if (!Number.isInteger(tagId)) return errorResponse("Invalid tag id")
+        if (method === "PUT") {
+          const weekNumberParam = Number.parseInt(url.searchParams.get("weekNumber") || "", 10)
+          const tags = await assignLocalTagToMaterial(materialId, tagId, {
+            subjectId: url.searchParams.get("subjectId") || undefined,
+            weekNumber: Number.isInteger(weekNumberParam) ? weekNumberParam : undefined,
+          })
+          return tags ? jsonResponse(tags) : errorResponse("Tag or material not found", 404)
+        }
+        if (method === "DELETE") {
+          return jsonResponse(await unassignLocalTagFromMaterial(materialId, tagId))
+        }
+      }
+      if (pathSegments.length === 6 && pathSegments[5] === "regions") {
+        const tagId = Number.parseInt(pathSegments[4] || "", 10)
+        if (!Number.isInteger(tagId)) return errorResponse("Invalid tag id")
+        if (method === "GET") {
+          return jsonResponse(await listLocalMaterialTagRegions(materialId, tagId))
+        }
+        if (method === "PUT") {
+          const body = await parseRequestJson<{ regions?: Array<{
+            pageNumber: number
+            pageRotation: number
+            x1: number
+            y1: number
+            x2: number
+            y2: number
+          }> }>(request)
+          const regions = Array.isArray(body?.regions)
+            ? body.regions.map((region, orderIndex) => ({
+                materialId,
+                tagId,
+                pageNumber: Number(region.pageNumber),
+                pageRotation: Number(region.pageRotation),
+                x1: Number(region.x1),
+                y1: Number(region.y1),
+                x2: Number(region.x2),
+                y2: Number(region.y2),
+                orderIndex,
+              }))
+            : []
+          const valid = regions.every((region) =>
+            Number.isInteger(region.pageNumber) &&
+            region.pageNumber >= 1 &&
+            [0, 90, 180, 270].includes(region.pageRotation) &&
+            [region.x1, region.y1, region.x2, region.y2].every(
+              (value) => Number.isFinite(value) && value >= 0 && value <= 1
+            ) &&
+            Math.abs(region.x2 - region.x1) >= 0.005 &&
+            Math.abs(region.y2 - region.y1) >= 0.005
+          )
+          if (!valid) return errorResponse("Las coordenadas no son válidas.")
+          try {
+            return jsonResponse(await replaceLocalMaterialTagRegions(materialId, tagId, regions))
+          } catch (error) {
+            return errorResponse(error instanceof Error ? error.message : "No se pudieron guardar las regiones.", 409)
+          }
+        }
+      }
+    }
+
+    if (pathSegments[3] === "audio-positions") {
+      if (method === "GET") {
+        const positions = await getLocalEntryAudioPositionList(materialId)
+        return positions ? jsonResponse(positions) : errorResponse("Material not found", 404)
+      }
+      if (method === "POST") {
+        const body = await parseRequestJson<{ entryId: number; pageNum: number; xp: number; yp: number }>(request)
+        const position = await saveLocalEntryAudioPosition({
+          materialId,
+          entryId: Number(body?.entryId),
+          pageNum: Number(body?.pageNum),
+          xp: Number(body?.xp),
+          yp: Number(body?.yp),
+        })
+        return position ? jsonResponse(position) : errorResponse("Entry not found", 404)
+      }
+    }
+
+    if (pathSegments[3] === "sync" && method === "POST") {
+      const material = await syncLocalMaterialPdf(materialId, await request.formData())
+      void processLocalDriveSyncQueue()
+      return material ? jsonResponse(material) : errorResponse("Material not found", 404)
+    }
+
+    if (pathSegments[3] === "replace-preview" || pathSegments[3] === "replace-commit") {
+      return errorResponse("La migracion avanzada de reemplazo esta deshabilitada en modo local.", 501)
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-day-entries"])) {
+    if (method === "GET") {
+      const subjectId = String(url.searchParams.get("subjectId") || "").trim()
+      const weekNumberParam = url.searchParams.get("weekNumber")
+      const sessionDate = String(url.searchParams.get("sessionDate") || "").trim()
+      const materialIdParam = url.searchParams.get("materialId")
+      const materialId = materialIdParam ? Number.parseInt(materialIdParam, 10) : null
+      const weekNumber = weekNumberParam != null ? Number.parseInt(String(weekNumberParam), 10) : undefined
+      return jsonResponse(
+        await listLocalSubjectDayEntries({
+          subjectId,
+          weekNumber: Number.isInteger(weekNumber) ? weekNumber : undefined,
+          sessionDate: sessionDate || undefined,
+          materialId: Number.isInteger(materialId) ? materialId : null,
+        })
+      )
+    }
+    if (method === "POST") {
+      const body = await parseRequestJson<{
+        subjectId: string
+        sessionDate: string
+        weekNumber: number
+        weekdayIndex: number
+        materialId: number | null
+        transcriptText: string
+        answerText?: string
+      }>(request)
+      return jsonResponse(
+        await createLocalTextEntry({
+          subjectId: String(body?.subjectId || "").trim(),
+          sessionDate: String(body?.sessionDate || "").trim(),
+          weekNumber: Number(body?.weekNumber),
+          weekdayIndex: Number(body?.weekdayIndex),
+          materialId: typeof body?.materialId === "number" ? body.materialId : null,
+          transcriptText: String(body?.transcriptText || ""),
+          answerText: typeof body?.answerText === "string" ? body.answerText : "",
+        })
+      )
+    }
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-day-entries", "upload-session"]) && method === "POST") {
+    const body = await parseRequestJson<{
+      subjectId: string
+      sessionDate: string
+      weekNumber?: number
+      materialId?: number | null
+      mimeType: string
+      subjectName?: string
+    }>(request)
+    return jsonResponse(
+      await createLocalEntryUploadSession({
+        subjectId: String(body?.subjectId || "").trim(),
+        sessionDate: String(body?.sessionDate || "").trim(),
+        weekNumber: body?.weekNumber,
+        materialId: typeof body?.materialId === "number" ? body.materialId : null,
+        mimeType: String(body?.mimeType || "audio/webm"),
+        subjectName: typeof body?.subjectName === "string" ? body.subjectName : "",
+      })
+    )
+  }
+
+  if (matchesPath(pathSegments, ["api", "subject-day-entries", "complete"]) && method === "POST") {
+    const body = await parseRequestJson<{
+      subjectId: string
+      sessionDate: string
+      weekNumber?: number
+      materialId: number | null
+      driveFileId: string
+      fileName: string
+      pairId: string | null
+      pairRole: "question" | "answer" | null
+    }>(request)
+    return jsonResponse(
+      await completeLocalAudioEntryUpload({
+        subjectId: String(body?.subjectId || "").trim(),
+        sessionDate: String(body?.sessionDate || "").trim(),
+        weekNumber: body?.weekNumber,
+        materialId: typeof body?.materialId === "number" ? body.materialId : null,
+        driveFileId: String(body?.driveFileId || "").trim(),
+        fileName: String(body?.fileName || "").trim(),
+        pairId: typeof body?.pairId === "string" ? body.pairId : null,
+        pairRole: body?.pairRole === "question" || body?.pairRole === "answer" ? body.pairRole : null,
+      })
+    )
+  }
+
+  if (pathSegments[0] === "api" && pathSegments[1] === "subject-day-entries" && pathSegments.length >= 3) {
+    const entryId = Number.parseInt(pathSegments[2] || "", 10)
+    if (!Number.isInteger(entryId)) return errorResponse("Invalid entry id")
+
+    if (pathSegments.length === 3) {
+      if (method === "PATCH") {
+        const body = await parseRequestJson<{
+          answerText?: string | null
+          transcriptText?: string | null
+          customTitle?: string | null
+          practiceState?: "erre" | null
+          isFeatured?: boolean
+          featuredScope?: "entry_scope" | "subject_week"
+          pairRole?: "question" | "answer"
+          targetMaterialId?: number
+        }>(request)
+        const practiceState = body?.practiceState === "erre" ? "erre" : body?.practiceState === null ? null : undefined
+        const pairRole = body?.pairRole === "question" || body?.pairRole === "answer" ? body.pairRole : undefined
+        const entry = await updateLocalEntry(entryId, {
+          answerText: body?.answerText,
+          transcriptText: body?.transcriptText,
+          customTitle: body?.customTitle,
+          practiceState,
+          isFeatured: typeof body?.isFeatured === "boolean" ? body.isFeatured : undefined,
+          featuredScope: body?.featuredScope === "subject_week" ? "subject_week" : "entry_scope",
+          pairRole,
+          targetMaterialId: typeof body?.targetMaterialId === "number" ? body.targetMaterialId : undefined,
+        })
+        return entry ? jsonResponse(entry) : errorResponse("Entry not found", 404)
+      }
+      if (method === "DELETE") {
+        const result = await deleteLocalEntry(entryId)
+        return result ? jsonResponse(result) : errorResponse("Entry not found", 404)
+      }
+    }
+
+    if (pathSegments[3] === "links" && method === "POST") {
+      const body = await parseRequestJson<{ label: string; url: string }>(request)
+      const link = await saveLocalEntryLink(entryId, {
+        label: String(body?.label || ""),
+        url: String(body?.url || ""),
+      })
+      return link ? jsonResponse(link) : errorResponse("Entry not found", 404)
+    }
+
+    if (pathSegments[3] === "audio" && method === "GET") {
+      const entry = await getLocalEntryById(entryId)
+      if (!entry?.drive_file_id) return errorResponse("Audio not found", 404)
+      const file = await getWorkspaceFile(entry.drive_file_id)
+      return new Response(file, {
+        status: 200,
+        headers: {
+          "Content-Type": file.type || entry.drive_mime_type || "audio/webm",
+          "Content-Disposition": `inline; filename="${entry.drive_file_name || file.name}"`,
+        },
+      })
+    }
+  }
+
+  return null
+}
+
+export function LocalFetchInterceptor() {
+  useLayoutEffect(() => {
+    const originalFetch = window.fetch.bind(window)
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request
+          ? input
+          : new Request(typeof input === "string" ? new URL(input, window.location.origin).toString() : input.toString(), init)
+
+      const url = new URL(request.url)
+      if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) {
+        return originalFetch(input, init)
+      }
+      if (
+        request.method.toUpperCase() === "GET" &&
+        (url.pathname === "/api/google/oauth/start" || url.pathname === "/api/google/oauth/callback")
+      ) {
+        return originalFetch(input, init)
+      }
+      if (url.pathname.startsWith("/api/google/drive/")) {
+        const headers = new Headers(request.headers)
+        const token = getReadyDriveConfigToken()
+        if (token) headers.set("x-drive-config-token", token)
+        return originalFetch(new Request(request, { headers }))
+      }
+      if (isTtsServerRequest(url.pathname, request.method) || (url.pathname === "/api/synthesis-voice" && request.method.toUpperCase() === "POST")) {
+        return originalFetch(request)
+      }
+      if (isProtectedInscreenRequest(url.pathname, request.method)) {
+        const configToken = getReadyInscreenConfigToken()
+        const headers = new Headers(request.headers)
+        if (configToken) headers.set(INSCREEN_CONFIG_TOKEN_HEADER, configToken)
+        return originalFetch(new Request(request, { headers }))
+      }
+      if (url.pathname.startsWith("/api/inscreen/config/")) {
+        return originalFetch(input, init)
+      }
+
+      try {
+        const response = await handleLocalApiRequest(request)
+        if (response) {
+          return response
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Local mode request failed."
+        return errorResponse(message, 500)
+      }
+
+      return errorResponse(`Endpoint ${url.pathname} deshabilitado en modo local.`, 501)
+    }
+
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  return null
+}

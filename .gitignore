@@ -1,0 +1,23 @@
+# v0 runtime files
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+
+# Common ignores
+/public/pizarra/
+/test-results/
+/playwright-report/
+node_modules/
+.next/
+.env*.local
+.DS_Store
+.vscode/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+/deployed-*.js
+/deployed-home.html
+visor-pdf-selector-img-main/
+Secuencial/

@@ -1,0 +1,110 @@
+"use client"
+
+import { useEffect, useRef, useState } from "react"
+import { Mic } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { useSubjectVoice } from "@/hooks/use-subject-voice"
+import { cn } from "@/lib/utils"
+import { SubjectVoiceImages, type VoiceImagesHandle } from "@/components/subject-voice-images"
+import { useVoiceLongPress } from "@/hooks/use-voice-long-press"
+
+export function VoiceModeButton({ active, label, onClick, onLongPress }: {
+  active: boolean
+  label: string
+  onClick: () => void
+  onLongPress?: () => void
+}) {
+  const longPress = useVoiceLongPress(onLongPress)
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      onClick={onClick}
+      {...longPress}
+      aria-description={onLongPress ? "Mantené presionado para probar voces en español." : undefined}
+      className={cn(
+        "pointer-events-auto flex h-12 w-12 shrink-0 touch-manipulation select-none items-center justify-center rounded-full bg-[#c7c7c7] text-black transition-colors hover:bg-[#b9b9b9] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-black sm:h-16 sm:w-16",
+        active && "bg-[#b8d3c3] ring-2 ring-[#528169] ring-offset-2 hover:bg-[#a9c7b5]"
+      )}
+    >
+      <Mic aria-hidden="true" className="h-6 w-6 fill-current sm:h-8 sm:w-8" strokeWidth={2.5} />
+    </button>
+  )
+}
+
+export function SubjectVoiceDialog({ subject, onClose, weekNumber }: {
+  subject: { id: string; name: string } | null
+  onClose: () => void
+  weekNumber?: number
+}) {
+  const [paused, setPaused] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const [serviceError, setServiceError] = useState("")
+  const [pdfViewing, setPdfViewing] = useState(false)
+  const imagesRef = useRef<VoiceImagesHandle>(null)
+  const voice = useSubjectVoice(subject?.id ?? null, !paused, attempt, (final, interim) => imagesRef.current?.dictate(final, interim))
+
+  useEffect(() => { setPaused(false) }, [subject?.id])
+
+  useEffect(() => {
+    setServiceError("")
+    if (!subject) return
+    const controller = new AbortController()
+    // Check configuration only. Evaluation awaits the future instructions and question schema.
+    void fetch("/api/subject-voice", { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("El modelo de voz todavía no está disponible.")
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setServiceError("El modelo de voz todavía no está disponible. Podés seguir dictando.")
+      })
+    return () => controller.abort()
+  }, [subject?.id, attempt])
+
+  return (
+    <Dialog open={Boolean(subject)} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent
+        showCloseButton={false}
+        onEscapeKeyDown={(event) => {
+          if (event.ctrlKey || event.altKey || event.metaKey || event.isComposing || imagesRef.current?.escape()) event.preventDefault()
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Backspace" || event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.nativeEvent.isComposing) return
+          const target = event.target as HTMLElement
+          if (target.closest("input, textarea, select, [contenteditable]") && !(target instanceof HTMLInputElement && target.hasAttribute("data-voice-search") && target.value === "")) return
+          event.preventDefault()
+          if (!imagesRef.current?.escape()) onClose()
+        }}
+        className="subject-voice-handwriting inset-0 top-0 left-0 flex h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-white p-0 text-black shadow-none sm:max-w-none"
+      >
+        <div className={cn("pointer-events-none absolute inset-x-5 top-5 z-30 flex items-start justify-between gap-5 sm:inset-x-8 sm:top-8", pdfViewing && "justify-end")}>
+          <DialogTitle className={pdfViewing ? "sr-only" : "max-w-[calc(100%_-_5rem)] rounded bg-white/95 px-1 py-1 text-2xl leading-tight font-normal sm:text-[32px]"}>
+            {subject?.name}
+          </DialogTitle>
+          <VoiceModeButton
+            active={!paused && voice.status !== "error"}
+            label={voice.status === "error" ? "Reintentar micrófono" : paused ? "Activar micrófono" : "Pausar micrófono"}
+            onClick={() => {
+              if (voice.status === "error") {
+                setPaused(false)
+              } else setPaused((value) => !value)
+              setAttempt((value) => value + 1)
+            }}
+          />
+        </div>
+        <DialogDescription className="sr-only">
+          Dictado para {subject?.name}. Escribí para buscar imágenes y fragmentos de PDF de teoría. Escape o Backspace vuelven un nivel; desde el inicio cierran la materia.
+        </DialogDescription>
+        {subject && <SubjectVoiceImages key={`${subject.id}:${weekNumber ?? "current"}`} subjectId={subject.id} weekNumber={weekNumber} ref={imagesRef} onPdfViewing={setPdfViewing} />}
+        <p className="sr-only" role="status" aria-live="polite">
+          {paused ? "Micrófono pausado" : voice.status === "listening" ? "Escuchando" : voice.status === "starting" ? "Activando micrófono" : "Micrófono detenido"}
+        </p>
+        {!pdfViewing && (voice.error || serviceError) && (
+          <p role="status" className="absolute bottom-24 left-5 z-30 max-w-[calc(100%_-_2.5rem)] rounded bg-white/95 px-3 py-2 text-sm text-neutral-600">{voice.error || serviceError}</p>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}

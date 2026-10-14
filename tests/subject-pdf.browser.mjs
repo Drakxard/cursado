@@ -1,0 +1,1017 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+import { createRequire } from "node:module"
+import { build } from "esbuild"
+import { readFile } from "node:fs/promises"
+import path from "node:path"
+import { chromium } from "@playwright/test"
+import postcss from "postcss"
+import tailwind from "@tailwindcss/postcss"
+
+const require = createRequire(import.meta.url)
+const { PDFDocument, StandardFonts, degrees } = require("../public/vendor/pdf-lib.min.js")
+const pdfDocument = await PDFDocument.create()
+const font = await pdfDocument.embedFont(StandardFonts.TimesRoman)
+for (let i = 0; i < 2; i++) {
+  const page = pdfDocument.addPage([600, 800])
+  if (i === 1) page.setRotation(degrees(90))
+  page.drawText("TEOREMA 7.2.2 Transformada de una derivada", { x: 40, y: 740, size: 14, font })
+  page.drawText("La transformada de la derivada es sF(s) - f(0).", { x: 40, y: 690, size: 12, font })
+  page.drawText("Aplique el teorema para resolver el ejercicio.", { x: 40, y: 600, size: 12, font })
+}
+const pdfBytes = Array.from(await pdfDocument.save())
+const bundle = await build({
+  stdin: { contents: `
+    import React, { createRef } from 'react'; import { createRoot } from 'react-dom/client';
+    import { SubjectVoiceImages } from './components/subject-voice-images';
+    import { SubjectVoiceDialog } from './components/subject-voice-dialog';
+    import { setReadyWorkspaceHandle } from './lib/local-workspace-client';
+    import { prepareTheoryPdfs, searchTheoryPdfs } from './lib/client/subject-pdf-search';
+    import { renderPdfFragment } from './lib/client/subject-pdf-crops';
+    import { createRelatedPdf, relatedPdfPages, resolvePdfSource } from './lib/client/subject-pdf-pages';
+    import { loadDiscardHistory, discardItem, undoDiscard, queryDiscardScope, pdfDiscardId } from './lib/client/subject-discard-history';
+    import { correctPdfFragment } from './lib/client/subject-pdf-corrections';
+    import { readPdfCache, writePdfCache } from './lib/client/subject-pdf-cache';
+    import { splitPdfBatches } from './lib/client/subject-pdf-files';
+    import { loadSavedPdfSearches, findSavedPdfSearch } from './lib/client/subject-pdf-history';
+    import { saveVoiceImages, loadVoiceImageGroups, regroupVoiceImages } from './lib/subject-voice-images';
+    import { loadWeekTopics, saveWeekTopics, readWeekTopicImage } from './lib/client/subject-week-topics';
+    setReadyWorkspaceHandle(window.workspaceRoot);
+    window.prepareTheory = async (id='algebra', signal=new AbortController().signal) => {
+      window.preparationProgress = [];
+      return prepareTheoryPdfs(id, signal, value => window.preparationProgress.push(value));
+    };
+    window.searchTheory = async (theory, query) => searchTheoryPdfs(theory, query, new AbortController().signal, () => {});
+    window.createPages = async result => createRelatedPdf(window.pdfFiles.get(result.fileId), result, new AbortController().signal);
+    window.resolveSource = (result, selected) => resolvePdfSource(result, 'algebra', new AbortController().signal, selected);
+    window.relatedPages = relatedPdfPages;
+    window.loadDiscards = () => loadDiscardHistory('algebra');
+    window.discardItem = discardItem; window.undoDiscard = undoDiscard;
+    window.queryScope = queryDiscardScope; window.pdfDiscardId = pdfDiscardId;
+    window.correctPdfFragment = correctPdfFragment;
+    window.readCache = (path, options) => readPdfCache(window.workspaceRoot, path, options);
+    window.writeCache = (path, value) => writePdfCache(window.workspaceRoot, path, value);
+    window.renderFragment = async result => renderPdfFragment(result, new AbortController().signal, () => {});
+    window.savedSearch = async (theory, query) => findSavedPdfSearch(await loadSavedPdfSearches(theory, new AbortController().signal), query);
+    window.findSaved = findSavedPdfSearch;
+    window.saveManualImages = (files, target) => saveVoiceImages('algebra',files,target);
+    window.loadGroups = () => loadVoiceImageGroups('algebra');
+    window.regroup = (ids,destination,pdfs) => regroupVoiceImages('algebra',ids,destination,pdfs);
+    window.loadTopics = loadWeekTopics;
+    window.saveTopics = saveWeekTopics;
+    window.readTopicImage = readWeekTopicImage;
+    window.splitBatches = async file => { const batches = []; for await (const batch of splitPdfBatches(file, new AbortController().signal)) batches.push({pages:batch.pages,size:batch.file?.size,error:batch.error}); return batches; };
+    const voiceRef = createRef();
+    window.pdfEscape = () => voiceRef.current.escape();
+    const root = createRoot(document.getElementById('root'));
+    window.showPdfDialog = () => root.render(<SubjectVoiceDialog subject={{id:'algebra',name:'Álgebra'}} weekNumber={7} onClose={()=>{}} />);
+    window.changePdfSubject = (subjectId,week=7) => root.render(<SubjectVoiceImages key={subjectId+':'+week} subjectId={subjectId} weekNumber={week} ref={voiceRef} />);
+    root.render(<SubjectVoiceImages key="algebra:7" subjectId="algebra" weekNumber={7} ref={voiceRef} />);
+  `, resolveDir: process.cwd(), loader: "tsx" },
+  bundle: true, write: false, platform: "browser", format: "iife",
+  define: { "process.env.NODE_ENV": '"production"' },
+  plugins: [{ name: "local-pdf-fixture", setup(builder) {
+    builder.onLoad({ filter: /local-workspace-data\.ts$/ }, () => ({ loader: "ts", contents: `
+      export async function listLocalSubjectMaterialContainers() { return [{id:1,kind:'theory'}, {id:2,kind:'practice'}, {id:3,kind:'custom'}]; }
+      export async function listLocalSubjectWeekNumbersWithContent() { return [8,7,6]; }
+      export async function listLocalSubjectDayMaterials({subjectId,weekNumber}) { return window.materials.filter(m => m.subject_id===subjectId && m.week_number===weekNumber); }
+      export async function getWorkspaceFile(id) { if (window.denyPdfPermission) throw new DOMException('Denied','NotAllowedError'); if (!window.pdfFiles.has(id)) throw new DOMException('PDF retirado','NotFoundError'); return window.pdfFiles.get(id); }
+    ` }));
+  } }],
+})
+
+async function setup(t, { holdPoll = false } = {}) {
+  const browser = await chromium.launch({ headless: true })
+  t.after(() => browser.close())
+  const page = await browser.newPage()
+  await page.route("https://pdf.test/", (route) => route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' }))
+  await page.route("https://pdf.test/vendor/pdf-lib.min.js", (route) => route.fulfill({ path: "public/vendor/pdf-lib.min.js", contentType: "text/javascript" }))
+  await page.route("https://pdf.test/pdfjs/build/pdf.worker.min.mjs", (route) => route.fulfill({ path: "public/pdfjs/build/pdf.worker.min.mjs", contentType: "text/javascript" }))
+  await page.route("https://pdf.test/pdfjs/**", async route => {
+    const filename = path.join(process.cwd(), 'public', new URL(route.request().url()).pathname);
+    const ext = path.extname(filename);
+    try { await route.fulfill({body:await readFile(filename),contentType:({'.mjs':'text/javascript','.js':'text/javascript','.css':'text/css','.html':'text/html','.json':'application/json','.wasm':'application/wasm'})[ext] ?? 'application/octet-stream'}) }
+    catch { await route.fulfill({status:404,body:''}) }
+  });
+  await page.goto("https://pdf.test/")
+  await page.evaluate(({ bytes, holdPoll }) => {
+    window.holdPoll = holdPoll
+    window.workspaceFiles = new Map()
+    const missing = () => new DOMException("Missing", "NotFoundError")
+    const directory = (prefix = "") => ({
+      queryPermission: async () => "granted",
+      getDirectoryHandle: async (name, { create = false } = {}) => {
+        const path = prefix + name + "/"
+        if (!create && ![...window.workspaceFiles.keys()].some((key) => key.startsWith(path))) throw missing()
+        return directory(path)
+      },
+      getFileHandle: async (name, { create = false } = {}) => {
+        const path = prefix + name
+        if (!create && !window.workspaceFiles.has(path)) throw missing()
+        return {
+          getFile: async () => {
+            if (!window.workspaceFiles.has(path)) throw missing()
+            return new File([window.workspaceFiles.get(path)], name)
+          },
+          createWritable: async () => {
+            let content
+            return {
+              write: async (value) => { if (window.failWrites || window.failWritePath === path) throw new Error("Disco lleno"); content = typeof value === "string" ? new Blob([value]) : value },
+              close: async () => window.workspaceFiles.set(path, content), abort: async () => {},
+            }
+          },
+        }
+      },
+    })
+    window.workspaceRoot = directory()
+    const material = (id, week, container, fileId) => ({ id, subject_id: "algebra", week_number: week, container_id: container,
+      file_name: "apuntes.pdf", drive_file_id: fileId, drive_mime_type: "application/pdf", updated_at: String(id) })
+    window.materials = [material(1, 7, 1, "pdf-1"), material(2, 8, 2, "pdf-practice"), material(3, 8, 3, "pdf-custom"), material(4, 6, 1, "pdf-old")]
+    window.makeMaterial = material
+    window.pdfFiles = new Map(["pdf-1", "pdf-practice", "pdf-custom", "pdf-old"].map((id) => [id, new File([new Uint8Array(bytes)], "apuntes.pdf", { type: "application/pdf" })]))
+    window.pdfRequests = []; window.jobs = new Map(); window.failClef = false
+    const block = (id, type, html, bbox) => ({ id, block_type: type, html, bbox, children: [] })
+    window.fixturePayload = { json: { block_type: "Document", children: [
+      { id: "/page/0", block_type: "Page", bbox: [0, 0, 600, 800], children: [
+        block("/page/0/SectionHeader/0", "SectionHeader", "<h2>TEOREMA 7.2.2 Transformada de una derivada</h2>", [40, 40, 360, 65]),
+        block("/page/0/Text/1", "Text", "<p>La transformada de la derivada es sF(s)-f(0).</p>", [40, 95, 320, 115]),
+        block("/page/0/SectionHeader/2", "SectionHeader", "<h2>Ejercicios</h2>", [40, 160, 360, 175]),
+        block("/page/0/Text/3", "Text", "<p>Aplique el teorema para resolver el ejercicio.</p>", [40, 185, 360, 205]),
+      ] },
+      { id: "/page/1", block_type: "Page", bbox: [0, 0, 800, 600], children: [
+        block("/page/1/SectionHeader/0", "SectionHeader", "<h2>Ejemplo desarrollado de una derivada</h2>", [100, 40, 130, 360]),
+        block("/page/1/Text/1", "Text", "<p>La derivada del ejemplo se obtiene paso a paso.</p>", [150, 40, 175, 320]),
+      ] },
+    ] }, markdown: "Apuntes", metadata: { failed_pages: [] } }
+    window.nativeFetch = window.fetch.bind(window)
+    window.fetch = async (input, options = {}) => {
+      const url = String(input)
+      if (!url.startsWith("/api/")) return window.nativeFetch(input, options)
+      window.pdfRequests.push({ url, method: options.method ?? "GET" })
+      if (url === "/api/subject-voice/pdf-extraction") {
+        const token = "job-" + window.jobs.size
+        window.jobs.set(token, options.body.get('words') === 'true' ? window.wordPayload : window.fixturePayload)
+        return Response.json({ token })
+      }
+      if (url.startsWith("/api/subject-voice/pdf-extraction?")) {
+        const token = new URL(url, location.origin).searchParams.get("token")
+        if (window.holdPoll) {
+          await new Promise((resolve, reject) => {
+            window.releasePoll = resolve
+            options.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })
+          })
+        }
+        return Response.json({ status: "complete", payload: window.jobs.get(token) })
+      }
+      if (url === "/api/subject-voice/pdf-evaluate") {
+        const { candidate } = JSON.parse(options.body)
+        if (window.holdClef) await new Promise((resolve) => { window.releaseClef = resolve })
+        if (window.failClef) return Response.json({ error: "Clef no disponible" }, { status: 503 })
+        const accepted = !candidate.blocks[0].text.includes("Ejercicios")
+        const partialIds = window.mixedPdf ? candidate.blocks.filter((b) => b.type === 'Text').map((b) => b.id) : []
+        return Response.json({ id: candidate.id, accepted, blockIds: accepted ? candidate.blocks.map((b) => b.id).filter(id => !partialIds.includes(id)) : [], partialIds })
+      }
+      if (url === '/api/subject-voice/pdf-refine') {
+        const { units } = JSON.parse(options.body)
+        return Response.json({ ids: units.filter(u => !u.text.includes('Aplique')).map(u => u.id), uncertain: false })
+      }
+      return Response.json({})
+    }
+  }, { bytes: pdfBytes, holdPoll })
+  await page.addStyleTag({content:'html,body,#root{height:100%;margin:0} [data-subject-voice-images]{display:flex;flex-direction:column;height:100%} [data-pdf-view]{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden} [data-pdf-view-frame]{flex:1;min-height:0;width:100%;border:0}'});
+  await page.addScriptTag({ content: bundle.outputFiles[0].text })
+  await page.waitForFunction(() => window.prepareTheory)
+  await page.waitForFunction(() => window.workspaceFiles.size > 0)
+  return page
+}
+
+async function waitForPdfFrame(page) {
+  await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll][data-pdf-ready="true"]').waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-voice-pdf-fragment] img')].every(image => image.complete && image.naturalWidth > 0));
+}
+
+test("prepara diez resultados y continuar el término filtra sin consultar el PDF", async t => {
+  const page = await setup(t)
+  await page.evaluate(() => {
+    window.fixturePayload.json.children = [window.fixturePayload.json.children[0]]
+    window.fixturePayload.json.children[0].children = Array.from({length:10}, (_, i) => [{
+      id:`/page/0/SectionHeader/${i}`, block_type:'SectionHeader',
+      html:`<h2>TEOREMA ${i < 6 ? 7 : 8}.2.${i + 1} Transformada</h2>`,
+      bbox:[40,40+i*50,360,65+i*50],children:[],
+    }, {id:`/page/0/Text/${i}`,block_type:'Text',html:'<p>Enunciado y demostración.</p>',bbox:[40,66+i*50,360,85+i*50],children:[]}]).flat()
+  })
+  // Invalidate the extraction produced by the initial preparation.
+  await page.evaluate(() => {
+    window.materials[0].updated_at='ten-results'
+    for (const key of [...window.workspaceFiles.keys()]) if (/extraction\.json(?:\.|$)/.test(key)) window.workspaceFiles.delete(key)
+    window.dispatchEvent(new Event('focus'))
+  })
+  await page.evaluate(() => window.changePdfSubject('fisica'))
+  await page.waitForFunction(() => document.querySelector('[data-voice-search]')?.value === '')
+  await page.evaluate(() => window.changePdfSubject('algebra'))
+  await page.locator('[data-voice-search]').fill('teorema')
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===10)
+  await page.waitForFunction(() => document.querySelectorAll('[data-pdf-preloaded] [data-pdf-ready="true"]').length===10)
+  const calls = await page.evaluate(() => window.pdfRequests.length)
+  await page.locator('[data-voice-search]').fill('teorema 7')
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===6)
+  assert.equal(await page.evaluate(() => window.pdfRequests.length), calls)
+  await page.locator('[data-voice-search]').fill('teorema 7.2.1')
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===1)
+  await page.locator('[data-voice-search]').fill('teorema')
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===10)
+  assert.equal(await page.evaluate(() => window.pdfRequests.length), calls)
+})
+
+test("continuar mientras Clef responde conserva la búsqueda en curso", async t => {
+  const page = await setup(t)
+  await page.evaluate(() => { window.holdClef = true })
+  await page.locator('[data-voice-search]').fill('derivada')
+  await page.waitForFunction(() => Boolean(window.releaseClef))
+  await page.locator('[data-voice-search]').fill('derivada ejemplo')
+  await page.evaluate(() => { window.holdClef = false; window.releaseClef() })
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===1)
+  assert.match(await page.locator('[data-voice-pdf-id]').innerText(), /Ejemplo/)
+  await page.locator('[data-voice-search]').fill('derivada')
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===2)
+  assert.equal(await page.evaluate(() => window.pdfRequests.filter(request => request.url.endsWith('pdf-evaluate')).length), 2)
+})
+
+test("los globos abren imágenes ya preparadas y ubicadas, y las reutilizan al volver", async t => {
+  const page=await setup(t)
+  const search=page.locator('[data-voice-search]')
+  await search.fill('derivada')
+  await page.waitForFunction(()=>document.querySelectorAll('[data-voice-pdf-id]').length===2)
+  await page.waitForFunction(()=>document.querySelectorAll('[data-pdf-preloaded] [data-pdf-image-scroll][data-pdf-ready="true"]').length===2)
+  await page.evaluate(()=>{
+    const id=document.querySelector('[data-voice-pdf-id]').getAttribute('data-voice-pdf-id')
+    window.preparedFrame=[...document.querySelectorAll('[data-pdf-preloaded]')].find(node=>node.getAttribute('data-pdf-preloaded')===id).querySelector('[data-pdf-image-scroll]')
+    window.subsetLoads=0
+    const load=window.PDFLib.PDFDocument.load
+    window.PDFLib.PDFDocument.load=(...args)=>{window.subsetLoads++;return load(...args)}
+  })
+  await page.locator('[data-voice-pdf-id]').first().click()
+  assert.equal(await page.evaluate(()=>document.querySelector('[data-voice-pdf-fragment] [data-pdf-image-scroll]')===window.preparedFrame),true)
+  assert.equal(await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').getAttribute('data-pdf-ready'),'true')
+  assert.equal(await page.getByText('Abriendo páginas…',{exact:true}).count(),0)
+  await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').evaluate(node=>{node.scrollTop=300})
+  await page.keyboard.press('Backspace')
+  await search.waitFor()
+  await page.waitForFunction(()=>window.preparedFrame.getAttribute('data-pdf-ready')==='true')
+  await page.locator('[data-voice-pdf-id]').first().click()
+  assert.equal(await page.evaluate(()=>document.querySelector('[data-voice-pdf-fragment] [data-pdf-image-scroll]')===window.preparedFrame),true)
+  assert.equal(await page.evaluate(()=>window.subsetLoads),0)
+  const scroll=await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').evaluate(node=>node.scrollTop)
+  assert.ok(scroll<150,`Se conservó el scroll manual de ${scroll}px`)
+})
+
+test("DEFINICI encuentra el término completo y el historial anterior se adapta a páginas", async t => {
+  const page=await setup(t)
+  await page.locator('[data-voice-search]').fill('teorem')
+  await page.locator('[data-voice-pdf-id]').waitFor()
+  const calls=await page.evaluate(()=>window.pdfRequests.length)
+  await page.locator('[data-voice-search]').fill('teorema')
+  await page.locator('[data-voice-pdf-id]').waitFor()
+  assert.equal(await page.evaluate(()=>window.pdfRequests.length),calls)
+  const recovered=await page.evaluate(async()=>{
+    const theory=await window.prepareTheory()
+    const key=[...window.workspaceFiles.keys()].find(key=>key.includes('/clef-pages-v1/') && key.endsWith('search-history-v2.json'))
+    const saved=JSON.parse(await window.workspaceFiles.get(key).text())
+    for(const results of Object.values(saved.queries)) for(const result of results) {result.decision.blockIds=[result.candidate.blocks[0].id];result.decision.partialIds=[]}
+    window.workspaceFiles.set(key.replace('/clef-pages-v1/','/clef-fragments-v1/'),new Blob([JSON.stringify(saved)]))
+    window.workspaceFiles.delete(key)
+    const search=await window.savedSearch(theory,'teorem')
+    return {blocks:search.results[0].decision.blockIds.length,total:search.results[0].candidate.blocks.length}
+  })
+  assert.equal(recovered.blocks,recovered.total)
+  await page.evaluate(()=>{
+    window.fixturePayload=JSON.parse(JSON.stringify(window.fixturePayload).replaceAll('TEOREMA','DEFINICIÓN'))
+    const file=window.pdfFiles.get('pdf-1')
+    window.pdfFiles.set('pdf-definitions',new File([file,'\n%definitions'],'definiciones.pdf',{type:'application/pdf'}))
+    window.materials=[window.makeMaterial(12,7,1,'pdf-definitions')]
+    window.changePdfSubject('fisica')
+  })
+  await page.waitForFunction(()=>document.querySelector('[data-voice-search]')?.value==='')
+  await page.evaluate(()=>window.changePdfSubject('algebra'))
+  await page.locator('[data-voice-search]').fill('DEFINICI')
+  await page.locator('[data-voice-pdf-id]').waitFor()
+  assert.match(await page.locator('[data-voice-pdf-id]').innerText(),/DEFINICIÓN/)
+  assert.equal(await page.locator('[data-voice-search]').inputValue(),'DEFINICI')
+})
+
+test("imágenes a todo el ancho y alto con micrófono y acceso al original en escritorio y móvil", async t => {
+  const css=await postcss([tailwind()]).process(await readFile('app/globals.css','utf8'),{from:'app/globals.css'})
+  for (const viewport of [{width:1366,height:768},{width:390,height:844}]) {
+    const page=await setup(t)
+    await page.setViewportSize(viewport)
+    await page.addStyleTag({content:css.css})
+    await page.evaluate(()=>window.showPdfDialog())
+    await page.locator('[data-voice-search]').fill('teorema')
+    await page.locator('[data-voice-pdf-id]').click()
+    await waitForPdfFrame(page)
+    await page.getByText('Abriendo páginas…',{exact:true}).waitFor({state:'hidden'})
+    const bounds=await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').boundingBox()
+    assert.ok(Math.abs(bounds.x)<1 && Math.abs(bounds.y)<1,JSON.stringify(bounds))
+    assert.ok(Math.abs(bounds.width-viewport.width)<1 && Math.abs(bounds.height-viewport.height)<1,JSON.stringify(bounds))
+    assert.ok((await page.getByRole('heading',{name:'Álgebra'}).boundingBox()).width<=1)
+    assert.equal(await page.getByRole('link',{name:'Abrir PDF original'}).isVisible(),true)
+    const mic=page.getByRole('button',{name:/micrófono/})
+    await mic.waitFor()
+    assert.equal(await mic.isVisible(),true)
+    await page.keyboard.press('Escape')
+    await page.locator('[data-voice-search]').waitFor()
+    assert.equal(await page.getByRole('heading',{name:'Álgebra'}).isVisible(),true)
+  }
+})
+
+test("el visor no repite el título y abre el enunciado exacto después de otro bloque aceptado", async t => {
+  const page = await setup(t)
+  await page.evaluate(async () => {
+    const result = (await window.searchTheory(await window.prepareTheory(), 'teorema')).results[0]
+    const block = result.candidate.blocks[0]
+    result.candidate.blocks = [
+      {...block,id:'context',text:'EJEMPLO 6',page:2,region:{page:2,rotation:90,x1:0.1,y1:0.1,x2:0.9,y2:0.2}},
+      {...block,id:'statement',page:2,region:{page:2,rotation:90,x1:0.1,y1:0.65,x2:0.9,y2:0.75}},
+    ]
+    result.candidate.anchorIds=['statement'];result.decision.blockIds=['context','statement'];result.decision.partialIds=[]
+    await window.regroup([],{id:'exact',name:'Enunciado',color:'#a5d8ff'},[result])
+  })
+  await page.evaluate(()=>window.changePdfSubject('fisica'))
+  await page.waitForFunction(()=>document.querySelector('[data-voice-search]')?.value==='')
+  await page.evaluate(()=>window.changePdfSubject('algebra'))
+  await page.getByRole('button',{name:'Enunciado, 1 elementos',exact:true}).click()
+  await page.locator('[data-voice-pdf-id]').click()
+  await waitForPdfFrame(page)
+  await page.getByText('Abriendo páginas…',{exact:true}).waitFor({state:'hidden'})
+  assert.equal(await page.locator('[data-voice-pdf-fragment] h2').count(),0)
+  const location=await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').evaluate(container => {
+    const image=container.querySelector('img')
+    return {page:Number(image.dataset.pdfImagePage),top:image.getBoundingClientRect().top + .65*image.clientHeight-container.getBoundingClientRect().top,scroll:container.scrollTop}
+  })
+  assert.equal(location.page,2)
+  assert.ok(location.scroll>0)
+  assert.ok(location.top>=0 && location.top<100, `Enunciado a ${location.top}px del borde`)
+  await page.keyboard.press('Backspace')
+  await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').waitFor({state:'hidden'})
+  await page.locator('[data-voice-pdf-id]').waitFor()
+})
+
+test("páginas relacionadas deduplicadas, rotación y atajos en la vista de imágenes", async t => {
+  const page = await setup(t)
+  const data = await page.evaluate(async () => {
+    const result = (await window.searchTheory(await window.prepareTheory(), 'teorema')).results[0]
+    const first = result.candidate.blocks[0]
+    result.candidate.blocks = [{...first,id:'a',page:2},{...first,id:'b',page:1},{...first,id:'c',page:2},{...first,id:'ignored',page:99}]
+    result.decision.blockIds=['a','b'];result.decision.partialIds=['c']
+    const subset = await window.createPages(result)
+    const lib = window.PDFLib
+    const pdf = await lib.PDFDocument.load(await subset.blob.arrayBuffer())
+    return {pages:subset.pages,count:pdf.getPageCount(),rotation:pdf.getPages()[1].getRotation().angle}
+  })
+  assert.deepEqual(data,{pages:[1,2],count:2,rotation:90})
+  await page.locator('[data-voice-search]').fill('derivada')
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===2)
+  await page.locator('[data-voice-pdf-id]').last().click({delay:1150})
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===1)
+  await page.locator('[data-voice-pdf-id]').click()
+  await waitForPdfFrame(page)
+  await page.keyboard.press('Control+z')
+  await page.waitForFunction(async () => (await window.loadDiscards()).every(entry=>entry.undone))
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[data-voice-pdf-fragment] [data-pdf-image-scroll]'))
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===2)
+})
+
+test("un archivo ausente se reasocia por hash y la selección se conserva", async t => {
+  const page=await setup(t)
+  const checks=await page.evaluate(async () => {
+    const result=(await window.searchTheory(await window.prepareTheory(),'teorema')).results[0]
+    const original=window.pdfFiles.get(result.fileId)
+    window.pdfFiles.delete(result.fileId)
+    window.pdfFiles.set('same-copy',original)
+    window.materials=[window.makeMaterial(9,6,1,'same-copy')]
+    const reassociated=await window.resolveSource(result)
+    window.materials=[]
+    let missing,wrong,permission,changed
+    try {await window.resolveSource(result)}catch(error){missing=error.code}
+    try {await window.resolveSource(result,new File(['different'],'otro.pdf'))}catch(error){wrong=error.code}
+    await window.resolveSource(result,original)
+    const restored=await window.resolveSource(result)
+    window.denyPdfPermission=true
+    try {await window.resolveSource(result)}catch(error){permission=error.code}
+    window.denyPdfPermission=false
+    window.pdfFiles.set(result.fileId,new File([original,'changed'],'apuntes.pdf'))
+    try {await window.resolveSource(result)}catch(error){changed=error.code}
+    return {reassociated:reassociated.fileId,missing,wrong,restoredSize:restored.file.size,originalSize:original.size,permission,changed}
+  })
+  assert.equal(checks.reassociated,'same-copy')
+  assert.equal(checks.missing,'missing');assert.equal(checks.wrong,'changed')
+  assert.equal(checks.restoredSize,checks.originalSize)
+  assert.equal(checks.permission,'permission');assert.equal(checks.changed,'changed')
+})
+
+test("recupera respaldos, conserva cachés dañadas y regenera extracción", async t => {
+  const page=await setup(t)
+  const checks=await page.evaluate(async () => {
+    await window.prepareTheory()
+    const path=[...window.workspaceFiles.keys()].find(path=>path.endsWith('extraction.json'))
+    window.workspaceFiles.set(path,new Blob(['{broken']))
+    const before=window.pdfRequests.length
+    const recovered=await window.prepareTheory()
+    const withBackup={files:recovered.files.length,calls:window.pdfRequests.length-before,damaged:[...window.workspaceFiles.keys()].some(key=>key.startsWith(path+'.damaged-'))}
+    window.workspaceFiles.set(path,new Blob(['broken-again']))
+    window.workspaceFiles.delete(path+'.backup')
+    const regenerated=await window.prepareTheory()
+    await window.writeCache('test/user.json',{value:1})
+    await window.writeCache('test/user.json',{value:2})
+    window.workspaceFiles.set('test/user.json',new Blob(['{invalid']))
+    const user=await window.readCache('test/user.json')
+    window.workspaceFiles.set('test/protected.json',new Blob(['invalid']))
+    let protectedError=false
+    try{await window.readCache('test/protected.json')}catch{protectedError=true}
+    return {withBackup,regenerated:regenerated.files.length,user,protectedError}
+  })
+  assert.deepEqual(checks.withBackup,{files:1,calls:0,damaged:true})
+  assert.equal(checks.regenerated,1);assert.deepEqual(checks.user,{value:1});assert.equal(checks.protectedError,true)
+})
+
+test("recupera globos descartados por las correcciones anteriores", async t => {
+  const page=await setup(t)
+  await page.evaluate(async () => {
+    const theory=await window.prepareTheory()
+    const result=(await window.searchTheory(theory,'teorema')).results[0]
+    await window.correctPdfFragment(result)
+    await window.searchTheory(theory,'teorema')
+  })
+  await page.evaluate(()=>window.changePdfSubject('fisica'))
+  await page.waitForFunction(()=>document.querySelector('[data-voice-search]')?.value==='')
+  await page.evaluate(()=>window.changePdfSubject('algebra'))
+  const search=page.locator('[data-voice-search]')
+  await search.fill('teorema')
+  await page.getByText('Sin coincidencias',{exact:true}).waitFor()
+  await page.keyboard.press('Control+z')
+  await page.locator('[data-voice-pdf-id]').waitFor()
+  await page.locator('[data-voice-pdf-id]').click()
+  await waitForPdfFrame(page)
+})
+
+test("borrado fallido conserva el globo y el cartel vence y se recupera con Ctrl+Z", async t => {
+  const page=await setup(t)
+  await page.locator('[data-voice-search]').fill('teorema')
+  const bubble=page.locator('[data-voice-pdf-id]')
+  await bubble.waitFor()
+  await page.evaluate(()=>{window.failWrites=true})
+  await bubble.click({delay:1150})
+  await page.getByRole('alert').filter({hasText:'Disco lleno'}).waitFor()
+  assert.equal(await bubble.count(),1)
+  assert.equal(await page.locator('[data-discard-notice]').count(),0)
+  await page.evaluate(()=>{window.failWrites=false})
+  await bubble.click({delay:1150})
+  await page.getByText('Borrado',{exact:true}).waitFor()
+  await page.locator('[data-discard-notice]').waitFor({state:'hidden',timeout:8000})
+  await page.keyboard.press('Control+z')
+  await bubble.waitFor()
+})
+
+test("el historial serializa operaciones y aísla términos, materias y semanas", async t => {
+  const page=await setup(t)
+  const checks=await page.evaluate(async () => {
+    await Promise.all(['a','b','c'].map(itemId=>window.discardItem('algebra',{scope:'query:uno',kind:'image',itemId})))
+    await window.discardItem('algebra',{scope:'query:dos',kind:'image',itemId:'a'})
+    await window.discardItem('algebra',{scope:'topics:7',kind:'topic',itemId:'topic'})
+    await window.discardItem('algebra',{scope:'topics:8',kind:'topic',itemId:'topic'})
+    await window.discardItem('fisica',{scope:'query:uno',kind:'image',itemId:'a'})
+    await window.undoDiscard('algebra',['query:uno'])
+    const entries=await window.loadDiscards()
+    return {total:entries.length,undone:entries.filter(entry=>entry.undone).map(entry=>entry.itemId),pending:entries.filter(entry=>!entry.undone).map(entry=>entry.scope)}
+  })
+  assert.equal(checks.total,6);assert.deepEqual(checks.undone,['c'])
+  assert.deepEqual(checks.pending,['query:uno','query:uno','query:dos','topics:7','topics:8'])
+})
+
+test("prepara solo la última teoría y abre páginas completas incluso con rotación", async (t) => {
+  const page = await setup(t)
+  await page.waitForFunction(() => [...window.workspaceFiles.keys()].some((path) => path.endsWith("extraction.json")))
+  assert.equal(await page.locator("[data-voice-pdf-id]").count(), 0)
+  await page.locator("[data-voice-search]").fill("teorema")
+  await page.locator("[data-voice-pdf-id]").waitFor()
+  assert.equal(await page.locator("[data-voice-pdf-id]").count(), 1)
+  assert.match(await page.locator("[data-voice-pdf-id]").innerText(), /TEOREMA 7\.2\.2/)
+  assert.doesNotMatch(await page.locator("[data-voice-bubbles]").innerText(), /Teor\u00eda.*Semana/)
+  assert.equal(await page.evaluate(() => window.pdfRequests.filter((r) => r.method === "POST" && r.url.endsWith("pdf-extraction")).length), 1)
+  await page.locator("[data-voice-pdf-id]").click()
+  await waitForPdfFrame(page)
+  assert.equal(await page.locator('[data-voice-pdf-fragment] img').count(), 1);
+  assert.equal(await page.locator('[data-voice-pdf-fragment] iframe').count(), 0);
+  assert.equal(await page.locator('[data-voice-pdf-fragment] img').evaluate(image => image.naturalWidth > 0), true);
+  assert.equal(await page.locator('[data-pdf-crop]').count(), 0);
+  assert.equal(await page.evaluate(() => [...window.workspaceFiles.keys()].filter(key => key.endsWith('.png')).length), 0);
+  assert.equal(await page.evaluate(() => window.pdfEscape()), true)
+  await page.locator("[data-voice-search]").waitFor()
+  assert.equal(await page.locator("[data-voice-search]").inputValue(), "teorema")
+  await page.locator("[data-voice-search]").fill("derivada")
+  await page.waitForFunction(() => document.querySelectorAll("[data-voice-pdf-id]").length === 2)
+  await page.locator("[data-voice-pdf-id]").last().click()
+  await waitForPdfFrame(page)
+  assert.doesNotMatch(await page.locator("[data-voice-pdf-fragment]").innerText(), /Página 2|apuntes\.pdf|Semana/)
+  const original = await page.getByRole("link", {name:"Abrir PDF original"}).getAttribute("href")
+  const target = new URL(original, "https://pdf.test")
+  assert.equal(target.pathname, "/pdfjs/web/viewer.html")
+  assert.equal(target.searchParams.get("workspaceFileId"), "pdf-1")
+  assert.equal(JSON.parse(target.searchParams.get("fragmentRegion")).page, 2)
+})
+
+test("el indicador muestra solo los PDF pendientes y desaparece al terminar", async (t) => {
+  const page = await setup(t, { holdPoll: true })
+  const indicator = page.locator("[data-voice-pdf-progress]")
+  await indicator.waitFor()
+  assert.equal(await indicator.innerText(), "1/1")
+  assert.equal(await indicator.locator("svg.animate-spin").count(), 1)
+  await page.waitForFunction(() => window.releasePoll)
+  await page.evaluate(() => { window.holdPoll = false; window.releasePoll() })
+  await indicator.waitFor({ state: "hidden" })
+  const cached = await page.evaluate(async () => {
+    await window.prepareTheory()
+    return window.preparationProgress.filter(Boolean)
+  })
+  assert.deepEqual(cached, [])
+  const added = await page.evaluate(async () => {
+    const file = window.pdfFiles.get("pdf-1")
+    for (const id of [5, 6]) {
+      const fileId = `pdf-new-${id}`
+      window.pdfFiles.set(fileId, new File([file, `\n%new-${id}`], "nuevo.pdf", { type: "application/pdf" }))
+      window.materials.push(window.makeMaterial(id, 7, 1, fileId))
+    }
+    await window.prepareTheory()
+    return window.preparationProgress
+  })
+  assert.deepEqual(added, [{ current: 1, total: 2 }, { current: 2, total: 2 }, null])
+})
+
+test("repetir consulta no llama servicios; PDF agregado, reemplazado y retirado actualiza solo lo necesario", async (t) => {
+  const page = await setup(t)
+  const first = await page.evaluate(async () => {
+    const theory = await window.prepareTheory()
+    const result = await window.searchTheory(theory, "TEOREMA")
+    return { theory, result, calls: window.pdfRequests.length }
+  })
+  assert.equal(first.theory.week, 7); assert.equal(first.theory.files.length, 1); assert.equal(first.result.results.length, 1)
+  const repeated = await page.evaluate(async () => {
+    const theory = await window.prepareTheory(); await window.searchTheory(theory, "teorema")
+    return window.pdfRequests.length
+  })
+  assert.equal(repeated, first.calls)
+  await page.evaluate(() => {
+    // Different bytes create a new document fingerprint while the original retains its cache.
+    const file = window.pdfFiles.get("pdf-1")
+    window.pdfFiles.set("pdf-new", new File([file, "\n%new"], "nuevo.pdf", { type: "application/pdf" }))
+    window.materials.push(window.makeMaterial(5, 7, 1, "pdf-new"))
+  })
+  const added = await page.evaluate(async () => {
+    const before = window.pdfRequests.length, theory = await window.prepareTheory()
+    const cached = await window.savedSearch(theory, "teo")
+    await window.searchTheory(theory, "teorema")
+    return { files: theory.files.length, requests: window.pdfRequests.slice(before), cached }
+  })
+  assert.equal(added.files, 2)
+  assert.equal(added.cached.complete, false)
+  assert.equal(added.cached.results.length, 1)
+  assert.equal(added.requests.filter((r) => r.method === "POST" && r.url.endsWith("pdf-extraction")).length, 1)
+  await page.evaluate(() => { window.materials = window.materials.filter((m) => m.id !== 1) })
+  const removed = await page.evaluate(async () => window.searchTheory(await window.prepareTheory(), "teorema"))
+  assert.equal(removed.results.length, 1)
+  assert.equal(removed.results[0].fileId, "pdf-new")
+  await page.evaluate(() => {
+    const file = window.pdfFiles.get("pdf-new")
+    window.pdfFiles.set("pdf-new", new File([file, "\n%replacement"], "nuevo.pdf", { type: "application/pdf" }))
+  })
+  assert.equal(await page.evaluate(async () => window.savedSearch(await window.prepareTheory(), "teo")), null)
+  const replaced = await page.evaluate(async () => window.searchTheory(await window.prepareTheory(), "teorema"))
+  assert.notEqual(replaced.results[0].hash, removed.results[0].hash)
+})
+
+test("borrado temporal y Ctrl+Z persisten por término al volver", async t => {
+  const page = await setup(t);
+  const search = page.locator('[data-voice-search]');
+  await search.fill('derivada');
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length === 2);
+  await page.locator('[data-voice-pdf-id]').last().click({delay:1150});
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length === 1);
+  await page.getByText('Borrado',{exact:true}).waitFor();
+  await page.locator('[data-voice-pdf-id]').click({delay:1150});
+  await page.getByText('Sin coincidencias',{exact:true}).waitFor();
+  await page.evaluate(() => window.changePdfSubject('fisica'));
+  await page.waitForFunction(() => document.querySelector('[data-voice-search]')?.value === '');
+  await page.evaluate(() => window.changePdfSubject('algebra'));
+  await search.fill('derivada');
+  await page.getByText('Sin coincidencias',{exact:true}).waitFor();
+  await search.press('Control+z');
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length === 1);
+  await search.press('Control+z');
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length === 2);
+  assert.equal(await search.inputValue(),'derivada');
+  assert.equal((await page.evaluate(() => window.loadDiscards())).filter(entry=>!entry.undone).length,0);
+});
+
+test("recupera búsquedas sin demora y abre páginas sin generar recortes", async (t) => {
+  const page = await setup(t)
+  const search = page.locator("[data-voice-search]")
+  const bubble = page.locator("[data-voice-pdf-id]")
+  await search.fill("teorema")
+  await bubble.waitFor()
+  await page.waitForFunction(() => [...window.workspaceFiles.keys()].some(path => path.endsWith("search-history-v2.json")))
+  await bubble.click()
+  await waitForPdfFrame(page)
+  assert.equal(await page.evaluate(() => [...window.workspaceFiles.keys()].filter(path => path.endsWith(".png")).length), 0)
+  await page.evaluate(() => window.pdfEscape())
+  // Re-mount to discard the hook's memory and reload history from the authorized folder.
+  await page.evaluate(() => window.changePdfSubject("fisica"))
+  await page.waitForFunction(() => document.querySelector('[data-voice-search]')?.value === '')
+  await page.evaluate(() => window.changePdfSubject("algebra"))
+  await page.getByText("Teoría · Semana 7").waitFor({state:"hidden"})
+  const before = await page.evaluate(() => {
+    window.delayedSearches = 0
+    const original = window.setTimeout.bind(window)
+    window.setTimeout = (fn, delay, ...args) => {
+      if (delay === 450) window.delayedSearches++
+      return original(fn,delay,...args)
+    }
+    return window.pdfRequests.length
+  })
+  for (const query of ["te", "teo", "teorema"]) {
+    await search.fill(query)
+    await bubble.waitFor()
+  }
+  await bubble.click()
+  await waitForPdfFrame(page)
+  const cached = await page.evaluate(async () => {
+    const result = (await window.savedSearch(await window.prepareTheory(), "teo")).results[0];
+    const subset = await window.createPages(result);
+    return {count:subset.pages.length,calls:window.pdfRequests.length,delayed:window.delayedSearches};
+  })
+  assert.equal(cached.count, 1)
+  assert.equal(cached.calls, before)
+  assert.equal(cached.delayed, 0)
+})
+
+test("def y el inicio de una palabra recuperan la búsqueda completa anterior", async (t) => {
+  const page = await setup(t)
+  const cached = await page.evaluate(async () => {
+    await window.prepareTheory()
+    const file = window.pdfFiles.get("pdf-1")
+    window.pdfFiles.set("pdf-def", new File([file,"\n%definition"],"definiciones.pdf",{type:"application/pdf"}))
+    window.materials = [window.makeMaterial(9,7,1,"pdf-def")]
+    window.fixturePayload = structuredClone(window.fixturePayload)
+    window.fixturePayload.json.children[0].children[0].html = '<h2>DEFINICIÓN 7.1.2 Orden exponencial</h2>'
+    window.fixturePayload.json.children[0].children[1].html = '<p>Una función tiene orden exponencial si existe una cota exponencial.</p>'
+    const theory = await window.prepareTheory()
+    // Typing this prefix before its full word should not shadow the later successful search.
+    await window.searchTheory(theory,"defi")
+    await window.searchTheory(theory,"definición")
+    const before = window.pdfRequests.length
+    const short = await window.savedSearch(theory,"def")
+    const prefix = await window.savedSearch(theory,"defi")
+    const specific = [{query:"definicion orden",results:short.results,complete:true}]
+    return {short,prefix,calls:window.pdfRequests.length-before,
+      broader:window.findSaved(specific,"definicion"), unfinished:window.findSaved(specific,"defi")}
+  })
+  assert.equal(cached.short.results.length,1)
+  assert.equal(cached.prefix.results.length,1)
+  assert.equal(cached.short.query,"definicion")
+  assert.match(cached.prefix.results[0].title,/DEFINICIÓN/)
+  assert.equal(cached.calls,0)
+  assert.equal(cached.broader.previewOnly,false)
+  assert.equal(cached.unfinished.previewOnly,true)
+})
+
+test("+ guarda globos PDF, abre páginas y permite descartarlos del conjunto", async (t) => {
+  const page = await setup(t)
+  await page.locator('[data-voice-search]').fill('derivada')
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length === 2)
+  await page.getByRole('button',{name:'Nuevo conjunto',exact:true}).click()
+  await page.getByRole('textbox',{name:'Nombre del conjunto',exact:true}).fill('Transformadas guardadas')
+  await page.getByRole('button',{name:'Crear conjunto',exact:true}).click()
+  const group = page.getByRole('button',{name:'Transformadas guardadas, 2 elementos',exact:true})
+  await group.waitFor()
+  const saved = await page.evaluate(() => window.loadGroups())
+  assert.equal(saved.groups[0].images.length,0)
+  assert.equal(saved.groups[0].pdfs.length,2)
+  await group.click()
+  await page.locator('[data-voice-pdf-id]').first().click()
+  await waitForPdfFrame(page)
+  await page.evaluate(() => window.pdfEscape())
+  await page.evaluate(() => window.pdfEscape())
+  // A fresh view reads the saved set from the workspace, without searching again.
+  await page.evaluate(() => window.changePdfSubject('fisica'))
+  await page.waitForFunction(() => !document.body.innerText.includes('Transformadas guardadas'))
+  await page.evaluate(() => window.changePdfSubject('algebra'))
+  await group.waitFor()
+  await group.click()
+  assert.equal(await page.locator('[data-voice-pdf-id]').count(),2)
+  await page.locator('[data-voice-pdf-id]').last().click({delay:1150})
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length === 1)
+  assert.equal((await page.evaluate(() => window.loadGroups())).groups[0].pdfs.length,2)
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length === 2)
+})
+
+test("+ guarda la vista mixta y un fallo al guardar permite reintentar sin duplicar", async (t) => {
+  const page = await setup(t)
+  await page.evaluate(async () => {
+    const canvas = document.createElement('canvas'); canvas.width=canvas.height=10
+    const blob = await new Promise(resolve => canvas.toBlob(resolve,'image/png'))
+    await window.saveManualImages([new File([blob],'teorema propio.png',{type:'image/png'})],{name:'Original',color:'#b2f2bb'})
+  })
+  await page.evaluate(() => window.changePdfSubject('fisica'))
+  await page.waitForFunction(() => !document.body.innerText.includes('Original'))
+  await page.evaluate(() => window.changePdfSubject('algebra'))
+  await page.getByRole('button',{name:'Original, 1 imágenes',exact:true}).waitFor()
+  await page.locator('[data-voice-search]').fill('teorema')
+  await page.locator('[data-voice-pdf-id]').waitFor()
+  assert.equal(await page.locator('[data-voice-image-id]').count(),1)
+  await page.getByRole('button',{name:'Nuevo conjunto',exact:true}).click()
+  await page.getByRole('textbox',{name:'Nombre del conjunto',exact:true}).fill('Vista completa')
+  await page.evaluate(() => {window.failWrites=true})
+  await page.getByRole('button',{name:'Crear conjunto',exact:true}).click()
+  await page.getByRole('alert').filter({hasText:'Disco lleno'}).waitFor()
+  const failed = await page.evaluate(() => window.loadGroups())
+  assert.equal(failed.groups.length,1)
+  assert.equal(failed.groups[0].name,'Original')
+  await page.evaluate(() => {window.failWrites=false})
+  await page.getByRole('button',{name:'Reintentar guardado',exact:true}).click()
+  const group = page.getByRole('button',{name:'Vista completa, 2 elementos',exact:true})
+  await group.waitFor()
+  const saved = await page.evaluate(() => window.loadGroups())
+  assert.equal(saved.groups.length,1)
+  assert.equal(saved.groups[0].images.length,1)
+  assert.equal(saved.groups[0].pdfs.length,1)
+  const repeated = await page.evaluate(async group => window.regroup(group.images.map(image=>image.id),{id:group.id,name:group.name,color:group.color},group.pdfs),saved.groups[0])
+  assert.equal(repeated.groups.length,1)
+  await group.click()
+  assert.equal(await page.locator('[data-voice-image-id]').count(),1)
+  assert.equal(await page.locator('[data-voice-pdf-id]').count(),1)
+})
+
+test("historial de cualquier palabra queda en su materia, semana y contenedor de Teoría", async (t) => {
+  const page = await setup(t)
+  const scopes = await page.evaluate(async () => {
+    const theory = await window.prepareTheory()
+    await window.searchTheory(theory,'derivada')
+    const same = await window.savedSearch(theory,'der')
+    const changed = async fields => {
+      const other = structuredClone(theory)
+      Object.assign(other.files[0].material,fields)
+      return window.savedSearch(other,'der')
+    }
+    return {same,subject:await changed({subject_id:'fisica'}),week:await changed({week_number:8}),container:await changed({container_id:3})}
+  })
+  assert.equal(scopes.same.results.length,2)
+  assert.equal(scopes.subject,null)
+  assert.equal(scopes.week,null)
+  assert.equal(scopes.container,null)
+})
+
+test("tema/temas guarda imágenes manuales por materia y semana sin buscar PDF", async (t) => {
+  const page = await setup(t)
+  const before = await page.evaluate(async () => {await window.prepareTheory();return window.pdfRequests.length})
+  await page.locator('[data-voice-search]').fill('tema')
+  await page.getByText('Arrastrá imágenes para la síntesis de esta semana o tocá aquí para subirlas.',{exact:true}).waitFor()
+  await page.evaluate(async () => {
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=20
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'))
+    window.topicFile=new File([blob],'Resumen de Laplace.png',{type:'image/png'})
+    const transfer=new DataTransfer();transfer.items.add(window.topicFile)
+    document.querySelector('[data-week-topics]').dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}))
+  })
+  const image = page.locator('[data-topic-image-id]')
+  await image.waitFor()
+  assert.match(await image.innerText(),/Resumen de Laplace/)
+  assert.equal(await page.locator('[data-voice-pdf-id]').count(),0)
+  assert.equal((await page.evaluate(()=>window.loadGroups())).groups.length,0)
+  await image.click()
+  await page.getByRole('img',{name:'Resumen de Laplace.png',exact:true}).waitFor()
+  await page.evaluate(()=>window.pdfEscape())
+  await image.waitFor()
+  assert.equal(await page.locator('[data-voice-search]').inputValue(),'tema')
+  await page.evaluate(()=>window.pdfEscape())
+  await page.locator('[data-week-topics]').waitFor({state:'hidden'})
+  await page.locator('[data-voice-search]').fill('temas')
+  await image.waitFor()
+  await page.evaluate(()=>window.changePdfSubject('fisica',7))
+  await page.locator('[data-voice-search]').fill('temas')
+  await page.getByText('Síntesis manual · Semana 7',{exact:true}).waitFor()
+  assert.equal(await image.count(),0)
+  await page.evaluate(()=>window.changePdfSubject('algebra',8))
+  await page.locator('[data-voice-search]').fill('tema')
+  await page.getByText('Síntesis manual · Semana 8',{exact:true}).waitFor()
+  assert.equal(await image.count(),0)
+  await page.evaluate(()=>window.changePdfSubject('algebra',7))
+  await page.locator('[data-voice-search]').fill('TEMAS')
+  await image.waitFor()
+  assert.equal((await page.evaluate(()=>window.loadTopics('algebra',7))).images.length,1)
+  assert.equal((await page.evaluate(()=>window.loadTopics('algebra',8))).images.length,0)
+  const direct = await page.evaluate(async () => window.searchTheory(await window.prepareTheory(),'temas'))
+  assert.deepEqual(direct.results,[])
+  assert.equal(await page.evaluate(()=>window.pdfRequests.length),before)
+})
+
+test("+ sube a temas y un fallo del archivo semanal conserva lo previo y reintenta sin duplicar", async (t) => {
+  const page = await setup(t)
+  await page.locator('[data-voice-search]').fill('temas')
+  await page.locator('[data-week-topics]').waitFor()
+  const png=await page.evaluate(async () => {
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=20
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'))
+    return Array.from(new Uint8Array(await blob.arrayBuffer()))
+  })
+  const upload = async name => {
+    const selected=page.waitForEvent('filechooser')
+    await page.getByRole('button',{name:'Subir imágenes de temas',exact:true}).click()
+    await (await selected).setFiles({name,mimeType:'image/png',buffer:Buffer.from(png)})
+  }
+  await upload('Primero.png')
+  await page.locator('[data-topic-image-id]').waitFor()
+  await page.evaluate(()=>{window.failWritePath='manifests/subject-voice/topics/algebra/week-7.json'})
+  await upload('Segundo.png')
+  await page.getByRole('alert').filter({hasText:'Disco lleno'}).waitFor()
+  assert.equal((await page.evaluate(()=>window.loadTopics('algebra',7))).images.length,1)
+  await page.evaluate(()=>{window.failWritePath=''})
+  await page.getByRole('button',{name:'Reintentar temas',exact:true}).click()
+  await page.waitForFunction(()=>document.querySelectorAll('[data-topic-image-id]').length===2)
+  assert.equal((await page.evaluate(()=>window.loadTopics('algebra',7))).images.length,2)
+  assert.equal(await page.locator('form[aria-label="Crear conjunto"]').count(),0)
+})
+
+test("fallas de Clef se muestran y el reintento conserva la extracción", async (t) => {
+  const page = await setup(t)
+  await page.evaluate(() => { window.failClef = true })
+  await page.locator("[data-voice-search]").fill("teorema")
+  await page.getByText("apuntes.pdf: Clef no disponible", { exact: true }).waitFor()
+  assert.equal(await page.getByText("Sin coincidencias", { exact: true }).count(), 0)
+  assert.equal(await page.locator("[data-voice-pdf-id]").count(), 0)
+  await page.evaluate(() => { window.failClef = false })
+  await page.getByRole("button", { name: "Reintentar PDF" }).click()
+  await page.locator("[data-voice-pdf-id]").waitFor()
+  assert.equal(await page.evaluate(() => window.pdfRequests.filter((r) => r.method === "POST" && r.url.endsWith("pdf-extraction")).length), 1)
+})
+
+test("guarda un trabajo pendiente y lo retoma sin reenviar el PDF", async (t) => {
+  const page = await setup(t)
+  await page.evaluate(async () => { await window.prepareTheory(); window.holdPoll = true })
+  await page.evaluate(() => {
+    const file = window.pdfFiles.get("pdf-1")
+    window.pdfFiles.set("pdf-pending", new File([file, "\n%pending"], "pendiente.pdf", { type: "application/pdf" }))
+    window.materials = [window.makeMaterial(6, 7, 1, "pdf-pending")]
+    window.pendingController = new AbortController()
+    window.pendingPreparation = window.prepareTheory('algebra', window.pendingController.signal).catch(error => ({aborted: error.name === 'AbortError'}))
+  })
+  await page.waitForFunction(() => window.releasePoll)
+  const jobsBefore = await page.evaluate(() => window.jobs.size)
+  assert.equal(await page.evaluate(async () => (await Promise.all([...window.workspaceFiles.entries()].filter(([path]) => path.endsWith("extraction.json")).map(async ([, blob]) => JSON.parse(await blob.text())))).some((state) => state.batches.some((batch) => batch.token))), true)
+  assert.equal(await page.evaluate(async () => {
+    window.pendingController.abort()
+    return (await window.pendingPreparation).aborted
+  }), true)
+  await page.evaluate(async () => { window.holdPoll = false; await window.prepareTheory() })
+  assert.equal(await page.evaluate(() => window.jobs.size), jobsBefore)
+})
+
+test("bloque mixto usa coordenadas por palabra y conserva el recorte y el filtro en caché", async (t) => {
+  const page = await setup(t)
+  await page.evaluate(async () => {
+    await window.prepareTheory()
+    window.mixedPdf = true
+    const file = window.pdfFiles.get('pdf-1')
+    window.pdfFiles.set('pdf-mixed', new File([file, '\n%mixed'], 'mixto.pdf', { type:'application/pdf' }))
+    window.materials = [window.makeMaterial(7, 7, 1, 'pdf-mixed')]
+    window.fixturePayload = { json: { block_type:'Document', children:[{
+      id:'/page/0', block_type:'Page', bbox:[0,0,600,800], children:[
+        {id:'/page/0/SectionHeader/0',block_type:'SectionHeader',bbox:[40,40,360,65],html:'<h2>TEOREMA 7.2.2 Transformada de una derivada</h2>'},
+        {id:'/page/0/Text/1',block_type:'Text',bbox:[40,95,360,205],html:'<p>La transformada de la derivada es sF(s)-f(0). Aplique el teorema en el ejercicio.</p>'},
+      ]
+    }] }, metadata:{failed_pages:[]} }
+    window.wordPayload = { json: { block_type:'Document', children:[{
+      id:'/page/0',block_type:'Page',bbox:[0,0,600,800],children:[
+        {id:'/page/0/Text/1',block_type:'Text',bbox:[40,95,360,205],html:
+          '<p><span data-bbox="40 95 52 115">La</span> <span data-bbox="56 95 120 115">transformada</span> <span data-bbox="125 95 320 115">de la derivada es sF(s)-f(0).</span></p>' +
+          '<p><span data-bbox="40 185 360 205">Aplique el teorema en el ejercicio.</span></p>'},
+      ]
+    }] }, metadata:{failed_pages:[]} }
+    // The provider may put the word spans only in the HTML output, not in JSON blocks.
+    window.wordPayload.html = window.wordPayload.json.children[0].children[0].html
+    window.wordPayload.json.children[0].children[0].html = '<p>Texto sin coordenadas inline en JSON.</p>'
+  })
+  const first = await page.evaluate(async () => {
+    const result = (await window.searchTheory(await window.prepareTheory(), 'teorema')).results[0]
+    const fragment = await window.renderFragment(result)
+    const dimensions = await Promise.all(fragment.images.map(async ({url}) => {
+      const image = new Image(); image.src=url; await image.decode()
+      return {width:image.naturalWidth,height:image.naturalHeight}
+    }))
+    fragment.images.forEach(({url})=>URL.revokeObjectURL(url))
+    window.mixedResult = result
+    return {dimensions,warnings:fragment.warnings,calls:window.pdfRequests.length}
+  })
+  assert.equal(first.dimensions.length,2)
+  assert.equal(first.dimensions[1].height<60,true)
+  assert.deepEqual(first.warnings,[])
+  const second = await page.evaluate(async () => {
+    const fragment = await window.renderFragment(window.mixedResult)
+    fragment.images.forEach(({url})=>URL.revokeObjectURL(url))
+    return window.pdfRequests.length
+  })
+  assert.equal(second,first.calls)
+})
+
+test("si faltan coordenadas de palabras conserva los recortes válidos y avisa", async (t) => {
+  const page = await setup(t)
+  const fragment = await page.evaluate(async () => {
+    await window.prepareTheory()
+    window.mixedPdf = true
+    window.wordPayload = window.fixturePayload
+    const result = (await window.searchTheory(await window.prepareTheory(), "teorema")).results[0]
+    const fragment = await window.renderFragment(result)
+    fragment.images.forEach(({url}) => URL.revokeObjectURL(url))
+    return {count:fragment.images.length,warnings:fragment.warnings}
+  })
+  assert.equal(fragment.count, 1)
+  assert.match(fragment.warnings.join(" "), /coordenadas fiables/)
+})
+
+test("respuestas tardías no mezclan consultas ni materias", async (t) => {
+  const page = await setup(t)
+  await page.evaluate(async () => { await window.prepareTheory(); window.holdClef = true })
+  await page.locator('[data-voice-search]').fill('teorema')
+  await page.waitForFunction(() => window.releaseClef)
+  await page.locator('[data-voice-search]').fill('palabra inexistente')
+  await page.getByText('Sin coincidencias',{exact:true}).waitFor()
+  await page.evaluate(() => { window.holdClef = false; window.releaseClef() })
+  await page.waitForFunction(async () => (await Promise.all([...window.workspaceFiles].filter(([path])=>path.endsWith('.json')).map(async ([,blob])=>blob.text()))).some(text=>text.includes('"query":"teorema"')))
+  assert.equal(await page.locator('[data-voice-pdf-id]').count(),0)
+  await page.locator('[data-voice-search]').fill('teorema')
+  await page.locator('[data-voice-pdf-id]').waitFor()
+  await page.evaluate(()=>window.changePdfSubject('fisica'))
+  await page.waitForFunction(()=>document.querySelector('[data-voice-search]')?.value==='')
+  await page.locator('[data-voice-search]').fill('teorema')
+  await page.getByText('Sin coincidencias',{exact:true}).waitFor()
+  assert.equal(await page.locator('[data-voice-pdf-id]').count(),0)
+})
+
+test("imágenes individuales se descartan por término y dentro del conjunto sin borrar archivos", async t => {
+  const page=await setup(t)
+  await page.evaluate(async () => {
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=10
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'))
+    await window.saveManualImages([new File([blob],'modelo.png',{type:'image/png'})],{name:'Conjunto',color:'#b2f2bb'})
+  })
+  await page.evaluate(()=>window.changePdfSubject('fisica'))
+  await page.waitForFunction(()=>document.querySelector('[data-voice-search]')?.value==='')
+  await page.evaluate(()=>window.changePdfSubject('algebra'))
+  const group=page.getByRole('button',{name:'Conjunto, 1 imágenes',exact:true})
+  await group.waitFor()
+  const search=page.locator('[data-voice-search]')
+  await search.fill('modelo')
+  await page.locator('[data-voice-image-id]').click({delay:1150})
+  await page.locator('[data-voice-image-id]').waitFor({state:'hidden'})
+  await search.fill('model')
+  await page.locator('[data-voice-image-id]').waitFor()
+  await search.fill('modelo')
+  assert.equal(await page.locator('[data-voice-image-id]').count(),0)
+  await search.press('Control+z')
+  await page.locator('[data-voice-image-id]').waitFor()
+  await search.fill('')
+  await group.click()
+  await page.locator('[data-voice-image-id]').click({delay:1150})
+  await page.locator('[data-voice-image-id]').waitFor({state:'hidden'})
+  assert.equal((await page.evaluate(()=>window.loadGroups())).groups[0].images.length,1)
+  await page.evaluate(()=>window.pdfEscape())
+  await page.getByRole('button',{name:'Conjunto, 0 imágenes',exact:true}).click()
+  await page.keyboard.press('Control+z')
+  await page.locator('[data-voice-image-id]').waitFor()
+})
+
+test("Temas descarta y recupera un globo individual con historial semanal", async t => {
+  const page=await setup(t)
+  await page.evaluate(async () => {
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=10
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'))
+    await window.saveTopics('algebra',7,[new File([blob],'resumen.png',{type:'image/png'})])
+  })
+  await page.locator('[data-voice-search]').fill('temas')
+  await page.locator('[data-topic-image-id]').click({delay:1150})
+  await page.locator('[data-topic-image-id]').waitFor({state:'hidden'})
+  assert.equal((await page.evaluate(()=>window.loadTopics('algebra',7))).images.length,1)
+  await page.locator('[data-voice-search]').press('Control+z')
+  await page.locator('[data-topic-image-id]').waitFor()
+})
+
+test("divide documentos largos en lotes de diez páginas preservando las páginas originales", async (t) => {
+  const page = await setup(t)
+  const document = await PDFDocument.create()
+  for (let i=0;i<23;i++) document.addPage([600,800])
+  const bytes = Array.from(await document.save())
+  const batches = await page.evaluate(async bytes => window.splitBatches(new File([new Uint8Array(bytes)],'largo.pdf',{type:'application/pdf'})),bytes)
+  assert.deepEqual(batches.map(b=>b.pages.length),[10,10,3])
+  assert.deepEqual(batches.flatMap(b=>b.pages),Array.from({length:23},(_,i)=>i+1))
+  assert.equal(batches.every(b=>b.size<=3*1024*1024),true)
+})

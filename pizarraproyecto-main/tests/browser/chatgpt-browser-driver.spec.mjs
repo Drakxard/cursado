@@ -1,0 +1,100 @@
+import {test,expect} from '@playwright/test'
+import {consultPage,pageStatus} from '../../scripts/chatgpt-page.mjs'
+import {chromeArguments} from '../../scripts/chatgpt-chrome.mjs'
+
+test('manual sign-in uses normal Chrome and automation is a separate explicit phase',()=>{
+  const manual=chromeArguments('isolated-profile')
+  expect(manual).toContain('--user-data-dir=isolated-profile')
+  expect(manual.some(arg=>/debugging|automation|headless|disable-web-security|stealth/.test(arg))).toBe(false)
+  const connected=chromeArguments('isolated-profile',{automated:true})
+  expect(connected).toContain('--remote-debugging-address=127.0.0.1')
+  expect(connected).toContain('--remote-debugging-port=0')
+})
+
+test('browser automation attaches the exact file, sends once and preserves mathematical notation',async({page})=>{
+  await page.route('https://chatgpt.com/**',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:`
+    <button data-testid="profile-button">Perfil</button><div id="prompt-textarea" contenteditable></div>
+    <input type=file multiple><button data-testid="send-button" disabled>Enviar</button><main></main>
+    <script>
+      window.sent=0;const composer=document.querySelector('#prompt-textarea'),send=document.querySelector('[data-testid=send-button]');
+      composer.addEventListener('input',()=>send.disabled=false);
+      send.onclick=()=>{window.sent++;window.question=composer.textContent;composer.textContent='';const stop=document.createElement('button');stop.dataset.testid='stop-button';document.body.append(stop);setTimeout(()=>{
+        document.querySelector('main').innerHTML='<div data-message-author-role="assistant"><div class="markdown"><h2>Solución</h2><p><strong>Resultado:</strong> <span class="katex"><math><annotation encoding="application/x-tex">\\\\frac{1}{2}</annotation></math></span></p><span class="katex-display"><span class="katex"><math><annotation encoding="application/x-tex">x=\\\\frac{1}{2}</annotation></math></span></span><pre><code>SELECT 1;</code></pre></div></div>';stop.remove();
+      },150)};
+    </script>`}))
+  await page.goto('https://chatgpt.com/')
+  expect(await pageStatus(page)).toEqual({state:'ready'})
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWZkAAAAASUVORK5CYII=','base64')
+  const result=await consultPage(page,{prompt:'Resolvé este ejercicio. <script>wrong()</script>',files:[{name:'ejercicio.png',type:'image/png',data:png.toString('base64')}]},{timeout:10000})
+  expect(await page.evaluate(()=>window.sent)).toBe(1)
+  expect(await page.evaluate(()=>window.question)).toContain('<script>wrong()</script>')
+  expect(await page.locator('input[type=file]').evaluate(async input=>Array.from(new Uint8Array(await input.files[0].arrayBuffer())))).toEqual([...png])
+  expect(result.text).toContain('## Solución');expect(result.text).toContain('$\\frac{1}{2}$');expect(result.text).toContain('$$\nx=\\frac{1}{2}\n$$');expect(result.text).toContain('```\nSELECT 1;\n```')
+  expect(result.html).toContain('annotation encoding="application/x-tex"')
+  expect(result.html).not.toContain('data-testid')
+})
+test('automation stops at login without touching credential fields or submitting a question',async({page})=>{
+  await page.route('https://chatgpt.com/**',r=>r.fulfill({contentType:'text/html',body:'<button>Log in</button><input type=password value="untouched"><div id=prompt-textarea contenteditable></div>'}))
+  await page.goto('https://chatgpt.com/')
+  expect(await pageStatus(page)).toEqual({state:'login'})
+  await expect(consultPage(page,{prompt:'2+2'})).rejects.toThrow('Iniciá sesión')
+  await expect(page.locator('input[type=password]')).toHaveValue('untouched')
+  await expect(page.locator('#prompt-textarea')).toBeEmpty()
+})
+
+test('full-page human verification pauses automation without clicks, reloads or uploads',async({page})=>{
+  let navigations=0
+  await page.route('https://chatgpt.com/**',r=>{navigations++;return r.fulfill({status:403,contentType:'text/html',body:'<title>Just a moment…</title><button onclick="window.clicked=true">Verify you are human</button><input type=file><div id=prompt-textarea contenteditable></div>'})})
+  await page.goto('https://chatgpt.com/')
+  for(let i=0;i<3;i++)expect(await pageStatus(page)).toEqual({state:'verification'})
+  await expect(consultPage(page,{prompt:'Resolvé mi ejercicio',files:[{name:'ejercicio.png',type:'image/png',data:'AA=='}]})).rejects.toThrow('Completá la verificación')
+  expect(navigations).toBe(1)
+  expect(await page.evaluate(()=>Boolean(window.clicked))).toBe(false)
+  expect(await page.locator('input[type=file]').evaluate(input=>input.files.length)).toBe(0)
+  await expect(page.locator('#prompt-textarea')).toBeEmpty()
+})
+
+test('the loading logo is not a login failure and status recovers without navigating',async({page})=>{
+  let navigations=0
+  await page.route('https://chatgpt.com/**',r=>{navigations++;return r.fulfill({contentType:'text/html',body:'<title>ChatGPT</title><main aria-label="Cargando"></main>'})})
+  await page.goto('https://chatgpt.com/')
+  expect(await pageStatus(page)).toEqual({state:'loading'})
+  await expect(consultPage(page,{prompt:'2+2'})).rejects.toThrow('ChatGPT todavía está cargando')
+  await page.evaluate(()=>document.querySelector('main').innerHTML='<button data-testid="profile-button">Perfil</button><div id="prompt-textarea" contenteditable></div>')
+  expect(await pageStatus(page)).toEqual({state:'ready'})
+  expect(navigations).toBe(1)
+})
+
+test('modern ChatGPT uses its accessible editor, file upload and response controls without old test IDs',async({page})=>{
+  await page.route('https://chatgpt.com/**',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:`
+    <button aria-label="Abrir menú de cuenta">Cuenta</button>
+    <form data-chatgpt-composer><div role="textbox" aria-label="Pregunta a ChatGPT" contenteditable="true"></div><button type="submit" aria-label="Enviar" disabled>Enviar</button></form>
+    <input type=file accept="image/*" capture><input type=file accept="image/*,video/*" multiple><input type=file accept="image/*" multiple><input type=file accept="" multiple aria-label="Adjuntar archivos"><main></main>
+    <script>
+      window.sent=0;const form=document.querySelector('form'),editor=form.querySelector('[role=textbox]'),send=form.querySelector('button');
+      editor.addEventListener('input',()=>send.disabled=!editor.textContent.trim());
+      form.onsubmit=event=>{event.preventDefault();window.sent++;window.question=editor.textContent;editor.textContent='';send.disabled=true;
+        const stop=document.createElement('button');stop.setAttribute('aria-label','Detener respuesta');document.body.append(stop);
+        setTimeout(()=>{document.querySelector('main').innerHTML='<div data-user-message-bubble="true">Mi pregunta</div><div data-markdown-copy data-chatgpt-copy-reference><h2>Solución</h2><p>Resultado: <span class="katex"><math><annotation encoding="application/x-tex">\\\\frac{1}{2}</annotation></math></span></p></div>';stop.remove()},150);
+      };
+    </script>`}))
+  await page.goto('https://chatgpt.com/')
+  expect(await pageStatus(page)).toEqual({state:'ready'})
+  const pdf=Buffer.from('%PDF fixture')
+  const result=await consultPage(page,{prompt:'Resolvé el PDF',files:[{name:'ejercicio.pdf',type:'application/pdf',data:pdf.toString('base64')}]},{timeout:10000})
+  expect(await page.evaluate(()=>window.sent)).toBe(1)
+  expect(await page.evaluate(()=>window.question)).toBe('Resolvé el PDF')
+  expect(await page.locator('input[type=file][capture]').evaluate(e=>e.files.length)).toBe(0)
+  expect(await page.locator('input[type=file][accept="image/*"][multiple]').evaluate(e=>e.files.length)).toBe(0)
+  expect(await page.getByLabel('Adjuntar archivos').evaluate(async e=>Array.from(new Uint8Array(await e.files[0].arrayBuffer())))).toEqual([...pdf])
+  expect(result.text).toContain('## Solución');expect(result.text).toContain('$\\frac{1}{2}$')
+  expect(result.text).not.toContain('Mi pregunta')
+})
+
+test('a textarea draft is protected before navigation or submission',async({page})=>{
+  await page.route('https://chatgpt.com/**',r=>r.fulfill({contentType:'text/html',body:'<button data-testid="profile-button">Perfil</button><textarea id="prompt-textarea">Mi borrador</textarea>'}))
+  await page.goto('https://chatgpt.com/')
+  expect(await pageStatus(page)).toEqual({state:'ready'})
+  await expect(consultPage(page,{prompt:'2+2'})).rejects.toThrow('Hay un borrador')
+  await expect(page.locator('#prompt-textarea')).toHaveValue('Mi borrador')
+})

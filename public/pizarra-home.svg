@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 540" role="img" aria-label="Pizarra">
+  <defs>
+    <pattern id="grid" width="29.5" height="29.5" patternUnits="userSpaceOnUse"><rect width="29.5" height="29.5" fill="#ffedb6"/><path d="M29.5 0H0V29.5" fill="none" stroke="#8c8b7c" stroke-opacity=".65" stroke-width="1.3"/></pattern>
+  </defs>
+  <rect width="540" height="540" rx="100" fill="url(#grid)"/>
+  <text x="270" y="214" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="122" fill="#38352b">Pizarra</text>
+  <path d="M270 349C233 307 210 294 185 294C149 294 123 322 123 349S148 403 185 403C212 403 234 386 270 349C306 311 329 294 355 294C393 294 417 321 417 349S391 403 355 403C327 403 307 386 270 349Z" fill="none" stroke="#38352b" stroke-width="24" stroke-linejoin="round"/>
+</svg>
