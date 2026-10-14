@@ -32,5 +32,5 @@ export function servicesStatus(config: Partial<ServicesDraft>): ServicesStatus {
 export function isServicesServerRequest(path: string) {
   return path === '/api/pdf-explanation' || path === '/api/pdf-translate' || path === '/api/synthesis-voice'
     || path === '/api/tts' || path.startsWith('/api/subject-voice') || path.startsWith('/api/storage/azure')
-    || path.startsWith('/api/inscreen/') || path === '/api/ai-chat'
+    || path.startsWith('/api/inscreen/')
 }
