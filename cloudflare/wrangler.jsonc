@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "cursado-realtime",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-14",
+  "workers_dev": true,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [{ "name": "CONTENT_ROOMS", "class_name": "SharedContentRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SharedContentRoom"] }],
+  "r2_buckets": [{ "binding": "CONTENT_FILES", "bucket_name": "estudiodiario" }],
+  "vars": {
+    "CURSADO_ORIGIN": "https://cursado.vercel.app",
+    "CONTENT_PREFIX": "cursado/shared/"
+  }
+}
