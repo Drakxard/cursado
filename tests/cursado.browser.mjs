@@ -3,6 +3,7 @@ import test from 'node:test'
 import { chromium } from '@playwright/test'
 import { build } from 'esbuild'
 import { mkdir } from 'node:fs/promises'
+import { authRuntime } from './cloudflare-runtime.mjs'
 
 const origin = process.env.CURSADO_TEST_URL || 'http://localhost:3000'
 async function browserFor(t) {
@@ -10,6 +11,49 @@ async function browserFor(t) {
   t.after(() => browser.close())
   return browser
 }
+
+test('Cloudflare authentication opens the actual board UI, keeps the scoped session on home and reload, and supports logout and login',async t=>{
+  const backend=authRuntime(origin);t.after(()=>backend.close())
+  const browser=await browserFor(t), context=await browser.newContext({serviceWorkers:'block'}), page=await context.newPage()
+  await page.route('**/pizarra/api/**',async route=>{
+    const incoming=route.request(), path=new URL(incoming.url()).pathname.replace(/^\/pizarra/,'')
+    const headers=new Headers(incoming.headers());headers.set('Origin',origin);headers.set('CF-Connecting-IP','192.0.2.1')
+    const response=await backend.fetch(new Request(`https://backend.test${path}`,{method:incoming.method(),headers,...(incoming.postData()?{body:incoming.postData()}: {})}))
+    return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()})
+  })
+  await page.goto(origin+'/pizarra/')
+  await page.getByLabel('Tu nombre de usuario',{exact:true}).fill('Usuario de prueba')
+  await page.getByLabel('Contraseña',{exact:true}).fill('test-browser-password')
+  await page.getByRole('button',{name:'Crear mi espacio',exact:true}).click()
+  await page.getByRole('button',{name:'Abrir perfil de Usuario de prueba',exact:true}).waitFor()
+  await page.locator('canvas').first().waitFor()
+  await page.waitForFunction(()=>localStorage.getItem('pizarra_activa')?.startsWith('local:'))
+  const cookie=(await context.cookies()).find(cookie=>cookie.name==='pizarra_sid')
+  assert.ok(cookie?.httpOnly&&cookie.secure)
+  assert.equal(cookie.path,'/pizarra/')
+  assert.equal(await page.evaluate(()=>document.cookie.includes('pizarra_sid')),false)
+  await page.keyboard.press('Control+q')
+  await page.waitForURL(origin+'/')
+  backend.restart()
+  await page.goto(origin+'/pizarra/')
+  await page.getByRole('button',{name:'Abrir perfil de Usuario de prueba',exact:true}).waitFor()
+  await page.reload()
+  await page.getByRole('button',{name:'Abrir perfil de Usuario de prueba',exact:true}).click()
+  await page.getByRole('button',{name:'Cambiar de usuario / salir',exact:true}).click()
+  await page.getByRole('heading',{name:'Tu pizarra',exact:true}).waitFor()
+  assert.equal((await context.cookies()).some(cookie=>cookie.name==='pizarra_sid'),false)
+  await page.getByRole('button',{name:'Ingresar',exact:true}).click()
+  await page.getByLabel('Tu nombre de usuario',{exact:true}).fill('usuario de prueba')
+  await page.getByLabel('Contraseña',{exact:true}).fill('incorrect')
+  await page.getByRole('button',{name:'Ingresar a mi espacio',exact:true}).click()
+  await page.getByText(/Nombre o contraseña incorrectos/).waitFor()
+  await page.getByLabel('Contraseña',{exact:true}).fill('test-browser-password')
+  await page.getByRole('button',{name:'Ingresar a mi espacio',exact:true}).click()
+  await page.getByRole('button',{name:'Abrir perfil de Usuario de prueba',exact:true}).waitFor()
+  await page.locator('canvas').first().waitFor()
+  await mkdir('test-results',{recursive:true})
+  await page.screenshot({path:'test-results/cloudflare-pizarra-login.png'})
+})
 
 test('launcher matches both layouts and opens both modules without a study folder prompt', async t => {
   const browser = await browserFor(t)

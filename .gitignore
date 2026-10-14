@@ -15,6 +15,9 @@ node_modules/
 *.tsbuildinfo
 *.log
 .wrangler/
+.dev.vars
+.dev.vars.*
+.vercel/
 .env
 .env.*
 !.env.example

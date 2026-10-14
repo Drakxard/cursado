@@ -6,9 +6,15 @@
   "workers_dev": true,
   "preview_urls": false,
   "durable_objects": {
-    "bindings": [{ "name": "CONTENT_ROOMS", "class_name": "SharedContentRoom" }]
+    "bindings": [
+      { "name": "CONTENT_ROOMS", "class_name": "SharedContentRoom" },
+      { "name": "IDENTITY_DIRECTORY", "class_name": "IdentityDirectory" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SharedContentRoom"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SharedContentRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["IdentityDirectory"] }
+  ],
   "r2_buckets": [{ "binding": "CONTENT_FILES", "bucket_name": "estudiodiario" }],
   "vars": {
     "CURSADO_ORIGIN": "https://cursado.vercel.app",

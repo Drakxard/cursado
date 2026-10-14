@@ -16,11 +16,13 @@ agregarlas o modificarlas, volver a desplegar.
 
 | Variable | Valor |
 | --- | --- |
-| `PIZARRA_BACKEND_URL` | Origen HTTPS del servidor Python existente, por ejemplo `https://pizarra-api.example.com`. Sin `/api`, rutas, parámetros ni credenciales. |
+| `PIZARRA_BACKEND_URL` | `https://cursado-realtime.dariorafael2005.workers.dev` para el acceso Cloudflare. También admite un backend Python compatible. Sin `/api`, rutas, parámetros ni credenciales. |
 
 Se lee durante la compilación. Sin ella, la pizarra ofrece las privadas y copias
-del dispositivo, y la API compartida responde 503. El servidor Python debe
-seguir conectado. En su `hosting.local.json`, actualizar `publicOrigin` al
+del dispositivo, y la API compartida responde 503. Cloudflare permite crear
+usuarios, ingresar y restaurar sesiones; la colaboración y las otras funciones
+remotas están pendientes. Ver [Servicios Cloudflare](cloudflare-servicios.md).
+Si se usa Python, debe seguir conectado. En su `hosting.local.json`, actualizar `publicOrigin` al
 origen HTTPS del nuevo sitio y `backendOrigin` al del servidor; reiniciar Python.
 
 ## Servicios y aplicaciones complementarias

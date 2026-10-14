@@ -10,6 +10,8 @@ Wrangler está fijado a 4.151.0 en los comandos del proyecto.
   `v1` crea su namespace al desplegar. No hay que crear una sala por semana
   manualmente; cada contenido tendrá un ID estable.
 - Binding `CONTENT_FILES`: bucket privado existente `estudiodiario`.
+- Binding `IDENTITY_DIRECTORY`: registro de usuarios y sesiones en SQLite,
+  creado por la migración `v2`, separado del contenido de las salas.
 - Prefijo reservado para la futura colaboración: `cursado/shared/`.
 - Origen de la interfaz: `https://cursado.vercel.app`.
 
@@ -35,20 +37,36 @@ en el panel de Cloudflare. R2 mantiene las condiciones de facturación de la
 cuenta existente.
 
 `GET /health` y `/healthz` comprueban acceso al namespace, SQLite y R2. Una
-respuesta correcta incluye `phase: "infrastructure"` y
+respuesta correcta incluye `phase: "authentication"`, `authenticationReady` y
 `collaborationReady: false`. Se cachea durante 60 segundos.
 
 ## Estado de la integración
 
-Estos recursos preparan el servicio; todavía no implementan login, permisos,
-invitaciones, WebSockets ni sincronización de la Pizarra actual. Las rutas
-`/api/*` y `/recognize/*` responden 501 explícitamente.
+La API implementa creación de usuario (`/api/auth/guest`), ingreso
+(`/api/auth/login`), restauración (`/api/auth/me`), cierre de sesión, avatar y
+cambio de contraseña. El formulario existente conserva esos contratos.
+La biblioteca empieza vacía y la interfaz abre o crea una pizarra privada local.
+El calendario se presenta vacío; sus escrituras, las pizarras compartidas,
+invitaciones, WebSockets y reconocimiento siguen respondiendo 501.
+Las cuentas Python anteriores no se migran automáticamente.
 
-**No configurar todavía esta URL como `PIZARRA_BACKEND_URL` en Vercel.** Esa
-variable continúa apuntando al backend Python compatible, cuando exista.
-El cambio de backend se hará cuando estén implementadas y probadas las rutas
-que consume Pizarra. Reconocimiento y otras funciones Python necesitan una
-solución propia; no quedan implementadas por desplegar un Worker.
+Para usar este acceso, configurar `PIZARRA_BACKEND_URL` en Vercel con
+`https://cursado-realtime.dariorafael2005.workers.dev` y volver a desplegar.
+La cookie se entrega mediante el proxy del mismo origen, es HttpOnly, Secure,
+SameSite=Lax y se limita a `/pizarra/`. Salir revoca la sesión; Ctrl+Q vuelve
+al inicio conservándola.
+
+Cloudflare necesita el secreto estable **AUTH_PEPPER**, independiente de los
+secretos del organizador. Las contraseñas usan PBKDF2-SHA256 con sal aleatoria y
+100.000 iteraciones (límite nativo de Cloudflare), más HMAC-SHA256 con ese secreto.
+Los tokens de sesión son aleatorios y SQLite conserva solamente sus hashes.
+Cambiar la contraseña revoca las otras sesiones. Conservar AUTH_PEPPER estable:
+si cambia, se impediría verificar las contraseñas existentes.
+
+El secreto se respalda en `cloudflare/.dev.vars`, ignorado por Git, y se carga
+como secreto de Wrangler. Desde otra computadora, restaurar ese respaldo de
+manera privada. Las mutaciones verifican el origen y el tamaño de los datos.
+Los límites de intentos por cuenta y red persisten al reiniciar el objeto.
 
 La evolución prevista es una sala por contenido compartido: copia local,
 operaciones identificadas, autorización por sala, presencia temporal,

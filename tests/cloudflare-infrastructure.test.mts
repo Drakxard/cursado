@@ -22,7 +22,7 @@ test('health verifies the SQLite and R2 bindings, caches success, and exposes no
   try {
     const response = await worker.fetch(new Request('https://backend.test/healthz'), env, execution)
     assert.equal(response.status, 200)
-    assert.deepEqual(await response.json(), { ok: true, service: 'cursado-realtime', phase: 'infrastructure', collaborationReady: false, bindings: { durableObjects: true, sqlite: true, r2: true } })
+    assert.deepEqual(await response.json(), { ok: true, service: 'cursado-realtime', phase: 'authentication', authenticationReady: false, collaborationReady: false, bindings: { durableObjects: true, sqlite: true, r2: true } })
     await Promise.all(tasks)
     assert.equal(roomName,'infrastructure-health')
     assert.equal(objectKey,'cursado/shared/infrastructure-health')
@@ -42,7 +42,7 @@ test('a failed binding returns a generic uncached error; unimplemented API route
     assert.equal(response.status,503)
     assert.doesNotMatch(await response.text(),/sensitive/)
     assert.equal(writes,0)
-    const pending = await worker.fetch(new Request('https://backend.test/api/auth/login',{method:'POST'}), {}, {})
+    const pending = await worker.fetch(new Request('https://backend.test/api/boards/board/live-ticket'), {}, {})
     assert.equal(pending.status,501)
     assert.equal((await pending.json()).code,'COLLABORATION_NOT_IMPLEMENTED')
     const method = await worker.fetch(new Request('https://backend.test/health',{method:'POST'}), {}, {})

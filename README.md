@@ -92,8 +92,8 @@ Los apartados siguientes documentan las funciones existentes del organizador.
 
 La infraestructura de la futura colaboración en Cloudflare se configura desde
 `cloudflare/wrangler.jsonc`. Recursos, comandos y estado de integración:
-[Servicios Cloudflare](docs/cloudflare-servicios.md). Ese Worker todavía no
-reemplaza la API Python de Pizarra.
+[Servicios Cloudflare](docs/cloudflare-servicios.md). Ese Worker implementa el
+acceso de Pizarra; las funciones compartidas están pendientes de migración.
 
 La configuración de Vercel se detalla en [docs/vercel-despliegue.md](docs/vercel-despliegue.md).
 GitHub Actions instala ambas aplicaciones, ejecuta sus pruebas, compila Cursado
