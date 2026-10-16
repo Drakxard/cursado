@@ -785,6 +785,16 @@ async function handleLocalApiRequest(request: Request) {
 export function LocalFetchInterceptor() {
   useLayoutEffect(() => {
     const originalFetch = window.fetch.bind(window)
+    const servicesFetch: typeof fetch = async (input, init) => {
+      const response = await originalFetch(input, init)
+      if (!response.ok) {
+        const payload = await response.clone().json().catch(() => null)
+        if (/semilla|INSCREEN_CONFIG_SEED|No se pudo desbloquear User\.Drive/.test(payload?.error || "")) {
+          window.dispatchEvent(new Event("cursado-services-recovery-required"))
+        }
+      }
+      return response
+    }
 
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const request =
@@ -794,34 +804,34 @@ export function LocalFetchInterceptor() {
 
       const url = new URL(request.url)
       if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) {
-        return originalFetch(input, init)
+        return servicesFetch(input, init)
       }
       if (
         request.method.toUpperCase() === "GET" &&
         (url.pathname === "/api/google/oauth/start" || url.pathname === "/api/google/oauth/callback")
       ) {
-        return originalFetch(input, init)
+        return servicesFetch(input, init)
       }
       if (url.pathname.startsWith("/api/google/drive/")) {
         const headers = new Headers(request.headers)
         const token = getReadyDriveConfigToken()
         if (token) headers.set("x-drive-config-token", token)
-        return originalFetch(new Request(request, { headers }))
+        return servicesFetch(new Request(request, { headers }))
       }
       if (isTtsServerRequest(url.pathname, request.method) || (url.pathname === "/api/synthesis-voice" && request.method.toUpperCase() === "POST")) {
         const headers = new Headers(request.headers)
         const token = getReadyInscreenConfigToken()
         if (token && !headers.has(INSCREEN_CONFIG_TOKEN_HEADER)) headers.set(INSCREEN_CONFIG_TOKEN_HEADER, token)
-        return originalFetch(new Request(request, { headers }))
+        return servicesFetch(new Request(request, { headers }))
       }
       if (isServicesServerRequest(url.pathname) || isProtectedInscreenRequest(url.pathname, request.method)) {
         const configToken = getReadyInscreenConfigToken()
         const headers = new Headers(request.headers)
         if (configToken && !headers.has(INSCREEN_CONFIG_TOKEN_HEADER)) headers.set(INSCREEN_CONFIG_TOKEN_HEADER, configToken)
-        return originalFetch(new Request(request, { headers }))
+        return servicesFetch(new Request(request, { headers }))
       }
       if (url.pathname.startsWith("/api/inscreen/config/")) {
-        return originalFetch(input, init)
+        return servicesFetch(input, init)
       }
 
       try {

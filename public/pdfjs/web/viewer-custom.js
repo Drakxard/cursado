@@ -411,7 +411,14 @@
   async function inscreenApiFetch(input, init = {}) {
     const headers = new Headers(init.headers || {});
     headers.set("x-inscreen-config-token", await loadInscreenConfigToken());
-    return fetch(input, { ...init, headers });
+    const response = await fetch(input, { ...init, headers });
+    if (!response.ok) {
+      const payload = await response.clone().json().catch(() => null);
+      if (/semilla|INSCREEN_CONFIG_SEED/.test(payload?.error || "")) {
+        window.parent.postMessage({ type: "cursado-services-recovery-required" }, window.location.origin);
+      }
+    }
+    return response;
   }
   window.addEventListener("message", event => {
     if (event.source === window.parent && event.origin === window.location.origin && event.data?.type === "cursado-services-changed") state.inscreenConfigToken = "";

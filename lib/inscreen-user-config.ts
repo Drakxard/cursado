@@ -30,8 +30,8 @@ const CONFIG_FIELDS = [
   "R2_ENDPOINT",
 ] as const
 
-function getSeed() {
-  const seed = String(process.env.INSCREEN_CONFIG_SEED || "").trim()
+function getSeed(suppliedSeed?: string) {
+  const seed = String(suppliedSeed ?? process.env.INSCREEN_CONFIG_SEED ?? "").trim()
   if (seed.length < 32) throw new Error("INSCREEN_CONFIG_SEED debe tener al menos 32 caracteres.")
   return createHash("sha256").update(seed).digest()
 }
@@ -112,13 +112,13 @@ export function sealInscreenUserConfig(value: unknown) {
   return ["v1", iv.toString("base64url"), cipher.getAuthTag().toString("base64url"), ciphertext.toString("base64url")].join(".")
 }
 
-export function openInscreenUserConfig(token: string) {
+export function openInscreenUserConfig(token: string, suppliedSeed?: string) {
   const parts = String(token || "").split(".")
   const [version, ivValue, tagValue, ciphertextValue] = parts
   if (parts.length !== 4 || version !== "v1" || !ivValue || !tagValue || !ciphertextValue || token.length > 12_000
     || !parts.slice(1).every(part => /^[A-Za-z0-9_-]+$/.test(part))) throw new Error("Configuracion InScreen invalida.")
   try {
-    const decipher = createDecipheriv("aes-256-gcm", getSeed(), Buffer.from(ivValue, "base64url"))
+    const decipher = createDecipheriv("aes-256-gcm", getSeed(suppliedSeed), Buffer.from(ivValue, "base64url"))
     decipher.setAuthTag(Buffer.from(tagValue, "base64url"))
     const plaintext = Buffer.concat([
       decipher.update(Buffer.from(ciphertextValue, "base64url")),

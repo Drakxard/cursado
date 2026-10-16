@@ -12,8 +12,8 @@ const labels: Partial<Record<ServiceField, string>> = {
 }
 const publicFields = new Set<ServiceField>(['storage_azure_container', 'conexiongpt5mini', 'AZURE_OPENAI_DEPLOYMENT', 'CLOUDFLARE_ACCOUNT_ID', 'R2_BUCKET_NAME', 'R2_ENDPOINT'])
 
-export function ServicesEditor({ values, status, initialGroup, busy, error, onChange, onSave, onClose }: {
-  values: ServicesDraft; status: ServicesStatus; initialGroup: ServiceGroup; busy: boolean; error: string
+export function ServicesEditor({ replacingServices = false, values, status, initialGroup, busy, error, onChange, onSave, onClose }: {
+  replacingServices?: boolean; values: ServicesDraft; status: ServicesStatus; initialGroup: ServiceGroup; busy: boolean; error: string
   onChange: (field: ServiceField, value: string) => void; onSave: () => void; onClose: () => void
 }) {
   const [selected, setSelected] = useState<ServiceGroup>(initialGroup)
@@ -23,6 +23,7 @@ export function ServicesEditor({ values, status, initialGroup, busy, error, onCh
     <DialogContent className="max-h-[85dvh] max-w-[calc(100%-2rem)] overflow-y-auto rounded-2xl bg-white p-5 text-slate-900 sm:max-w-lg" aria-describedby="services-editor-description">
       <DialogTitle>Configurar servicios</DialogTitle>
       <DialogDescription id="services-editor-description">Se guardan cifrados en User.Services, dentro de tu carpeta.</DialogDescription>
+      {replacingServices ? <p role="status" className="rounded-lg bg-sky-50 p-3 text-sm text-sky-900">Volvé a pegar las claves de los servicios que usás. Se guardarán cifradas con la semilla actual; las claves anteriores no se pueden conservar. Podés cambiar de servicio para completar varios antes de guardar.</p> : null}
       <form onSubmit={event => { event.preventDefault(); onSave() }} className="space-y-4">
         <label className="block text-sm font-medium">Servicio
           <select aria-label="Servicio" className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3" value={selected} disabled={busy} onChange={event => { setSelected(event.target.value as ServiceGroup); setVisible(false) }}>

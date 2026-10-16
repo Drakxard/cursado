@@ -32,6 +32,10 @@ test("User.InScreen cifra todas las credenciales y solo abre con la semilla del 
 
     process.env.INSCREEN_CONFIG_SEED = "otra-semilla-distinta-con-mas-de-treinta-y-dos"
     assert.throws(() => openInscreenUserConfig(sealed), /No se pudo desbloquear/)
+    assert.deepEqual(openInscreenUserConfig(sealed, "seed-de-prueba-con-mas-de-treinta-y-dos-caracteres"), config)
+    const recovered = sealInscreenUserConfig(openInscreenUserConfig(sealed, "seed-de-prueba-con-mas-de-treinta-y-dos-caracteres"))
+    assert.deepEqual(openInscreenUserConfig(recovered), config)
+    assert.equal(process.env.INSCREEN_CONFIG_SEED, "otra-semilla-distinta-con-mas-de-treinta-y-dos")
   } finally {
     if (previousSeed === undefined) delete process.env.INSCREEN_CONFIG_SEED
     else process.env.INSCREEN_CONFIG_SEED = previousSeed

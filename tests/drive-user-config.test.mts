@@ -16,6 +16,12 @@ test("User.Services cifra Drive sin exponer el refresh token", () => {
     assert.deepEqual(openDriveUserConfig(token), config)
     const request = new Request("https://example.test", { headers: { "x-drive-config-token": token } })
     assert.deepEqual(readDriveUserConfig(request), config)
+    const originalSeed = process.env.INSCREEN_CONFIG_SEED
+    process.env.INSCREEN_CONFIG_SEED = "otra-semilla-distinta-con-mas-de-treinta-y-dos"
+    assert.throws(() => openDriveUserConfig(token), /No se pudo desbloquear/)
+    const recovered = sealDriveUserConfig(openDriveUserConfig(token, originalSeed))
+    assert.deepEqual(openDriveUserConfig(recovered), config)
+    assert.throws(() => openDriveUserConfig(token, "semilla-incorrecta-de-mas-de-treinta-y-dos"), /No se pudo desbloquear/)
   } finally {
     if (previousSeed === undefined) delete process.env.INSCREEN_CONFIG_SEED
     else process.env.INSCREEN_CONFIG_SEED = previousSeed

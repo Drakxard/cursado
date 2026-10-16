@@ -13,8 +13,8 @@ export type DriveUserConfig = {
   email: string
 }
 
-function key() {
-  const seed = String(process.env.INSCREEN_CONFIG_SEED || "").trim()
+function key(suppliedSeed?: string) {
+  const seed = String(suppliedSeed ?? process.env.INSCREEN_CONFIG_SEED ?? "").trim()
   if (seed.length < 32) throw new Error("INSCREEN_CONFIG_SEED debe tener al menos 32 caracteres.")
   return createHash("sha256").update(`drive:${seed}`).digest()
 }
@@ -48,11 +48,11 @@ export function sealDriveUserConfig(value: DriveUserConfig) {
   return ["v1", iv.toString("base64url"), cipher.getAuthTag().toString("base64url"), ciphertext.toString("base64url")].join(".")
 }
 
-export function openDriveUserConfig(token: string) {
+export function openDriveUserConfig(token: string, suppliedSeed?: string) {
   const [version, iv, tag, ciphertext] = token.split(".")
   if (version !== "v1" || !iv || !tag || !ciphertext) throw new Error("Configuracion de Drive invalida.")
   try {
-    const decipher = createDecipheriv("aes-256-gcm", key(), Buffer.from(iv, "base64url"))
+    const decipher = createDecipheriv("aes-256-gcm", key(suppliedSeed), Buffer.from(iv, "base64url"))
     decipher.setAuthTag(Buffer.from(tag, "base64url"))
     return normalize(JSON.parse(Buffer.concat([
       decipher.update(Buffer.from(ciphertext, "base64url")),

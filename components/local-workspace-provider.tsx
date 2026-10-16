@@ -398,6 +398,28 @@ export function LocalWorkspaceProvider({
     enabled ? "prompt" : "granted"
   )
   const [error, setError] = useState("")
+  const [apiReloadOpen, setApiReloadOpen] = useState(false)
+  const [recoveryDismissed, setRecoveryDismissed] = useState(false)
+  const [replacingServices, setReplacingServices] = useState(false)
+  const [replacementProvider, setReplacementProvider] = useState<"azure" | "groq">("azure")
+  const [replacementApi, setReplacementApi] = useState("")
+  const [replacementEndpoint, setReplacementEndpoint] = useState("")
+  const [replacementDeployment, setReplacementDeployment] = useState("gpt-5-mini")
+  const needsSeed = /semilla|INSCREEN_CONFIG_SEED|No se pudo desbloquear User\.Drive/i.test(error)
+  useEffect(() => { if (needsSeed && !recoveryDismissed) setApiReloadOpen(true) }, [needsSeed, recoveryDismissed])
+  useEffect(() => {
+    const openRecovery = () => { setRecoveryDismissed(false); setApiReloadOpen(true) }
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin === window.location.origin && event.data?.type === "cursado-services-recovery-required" && Array.from(document.querySelectorAll("iframe")).some(frame => frame.contentWindow === event.source)) openRecovery()
+    }
+    window.addEventListener("message", onMessage)
+    window.addEventListener("cursado-services-recovery-required", openRecovery)
+    return () => {
+      window.removeEventListener("message", onMessage)
+      window.removeEventListener("cursado-services-recovery-required", openRecovery)
+    }
+  }, [])
+  const dismissApiReload = () => { setRecoveryDismissed(true); setApiReloadOpen(false); setReplacementApi("") }
   const [configStep, setConfigStep] = useState(0)
   const [selectedService, setSelectedService] = useState<ServiceGroup>("azureStorage")
   const [configValues, setConfigValues] = useState<InscreenConfigValues>(EMPTY_INSCREEN_CONFIG)
@@ -692,15 +714,26 @@ export function LocalWorkspaceProvider({
     }
   }
 
-  const saveInscreenConfiguration = async () => {
-    if (!rootHandle || !nextConfigStep()) return
+  const saveInscreenConfiguration = async (fresh = false) => {
+    const draft = fresh ? {
+      ...EMPTY_INSCREEN_CONFIG,
+      ...(replacementProvider === "azure"
+        ? { gpt5mini: replacementApi.trim(), conexiongpt5mini: replacementEndpoint.trim(), AZURE_OPENAI_DEPLOYMENT: replacementDeployment.trim() || "gpt-5-mini" }
+        : { GROQ_API_KEY: replacementApi.trim() }),
+    } : configValues
+    if (!rootHandle || (fresh ? !replacementApi.trim() || (replacementProvider === "azure" && !replacementEndpoint.trim()) : !nextConfigStep())) return
+    if (fresh) {
+      setReplacingServices(true)
+      setReadyInscreenConfigToken("")
+      setReadyDriveConfigToken("")
+    }
     try {
       setSavingConfig(true)
       setError("")
       const sealedResponse = await fetch("/api/inscreen/config/seal", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(getReadyInscreenConfigToken() ? { "x-inscreen-config-token": getReadyInscreenConfigToken() } : {}) },
-        body: JSON.stringify(configValues),
+        body: JSON.stringify(draft),
       })
       const sealedPayload = await sealedResponse.json().catch(() => null) as { token?: string; seedFingerprint?: string; validatedAt?: string; services?: ApiStatus; error?: string } | null
       if (!sealedResponse.ok || !sealedPayload?.token) {
@@ -712,12 +745,16 @@ export function LocalWorkspaceProvider({
       const current = await loadServicesFile(rootHandle)
       const saved = await persistServicesFile(rootHandle, {
         inscreenToken: sealedPayload.token,
-        driveToken: current?.driveToken || getReadyDriveConfigToken(),
+        driveToken: fresh || replacingServices ? "" : current?.driveToken || getReadyDriveConfigToken(),
         seedFingerprint: sealedPayload.seedFingerprint || current?.seedFingerprint || "",
         validatedAt: sealedPayload.validatedAt || new Date().toISOString(),
       })
       setReadyInscreenConfigToken(saved.inscreenToken)
       setReadyDriveConfigToken(saved.driveToken)
+      setReplacingServices(false)
+      setError("")
+      dismissApiReload()
+      if (fresh) { setDriveStatus({ connected: false }); setBootState("ready") }
       setInscreenConfigurationSkipped(false)
       setReadyWorkspaceHandle(rootHandle)
       setApiStatus(status.services ?? sealedPayload.services ?? { groq: false, r2: false })
@@ -871,6 +908,38 @@ export function LocalWorkspaceProvider({
     <LocalWorkspaceContext.Provider value={value}>
       {enabled ? <LocalFetchInterceptor /> : null}
       {!enabled || isReady || canRenderBeforeWorkspaceReady ? children : null}
+      {enabled && rootHandle && apiReloadOpen && !recoveryDismissed ? (
+        <Dialog open onOpenChange={open => { if (!open && !savingConfig) dismissApiReload() }}>
+          <DialogContent className="z-[150] max-h-[85dvh] overflow-y-auto rounded-2xl sm:max-w-sm">
+            <DialogTitle>¿Cargamos tu API?</DialogTitle>
+            <DialogDescription>Pegá tu clave para seguir con PDF.js. Se guarda cifrada.</DialogDescription>
+            <form className="space-y-3" onSubmit={event => { event.preventDefault(); void saveInscreenConfiguration(true) }}>
+              <label className="block text-sm">Proveedor
+                <select value={replacementProvider} disabled={savingConfig} onChange={event => { setReplacementProvider(event.target.value as "azure" | "groq"); setReplacementApi(""); setError("") }} className="mt-1 w-full rounded-lg border bg-background px-3 py-2">
+                  <option value="azure">Microsoft Azure · GPT-5 mini</option><option value="groq">Groq</option>
+                </select>
+              </label>
+              <label className="block text-sm">API key
+                <input type="password" autoComplete="off" spellCheck={false} maxLength={4096} value={replacementApi} onChange={event => setReplacementApi(event.target.value)} disabled={savingConfig} placeholder="Pegá tu clave" className="mt-1 w-full rounded-lg border bg-background px-3 py-2" />
+              </label>
+              {replacementProvider === "azure" ? <>
+                <label className="block text-sm">Endpoint de Azure
+                  <input type="url" value={replacementEndpoint} onChange={event => setReplacementEndpoint(event.target.value)} disabled={savingConfig} placeholder="https://tu-recurso.openai.azure.com" className="mt-1 w-full rounded-lg border bg-background px-3 py-2" />
+                </label>
+                <label className="block text-sm">Nombre del despliegue
+                  <input value={replacementDeployment} onChange={event => setReplacementDeployment(event.target.value)} disabled={savingConfig} placeholder="gpt-5-mini" className="mt-1 w-full rounded-lg border bg-background px-3 py-2" />
+                </label>
+              </> : null}
+              <p className="text-xs text-muted-foreground">{replacementProvider === "azure" ? "Copiá estos datos de tu recurso y despliegue en Azure." : <>Obtené tu clave en <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="underline">Groq</a>.</>}</p>
+              {!needsSeed && error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" disabled={savingConfig} onClick={dismissApiReload} className="rounded-lg px-4 py-2 text-sm text-muted-foreground">Ahora no</button>
+                <button type="submit" disabled={savingConfig || !replacementApi.trim() || (replacementProvider === "azure" && !replacementEndpoint.trim())} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{savingConfig ? "Guardando..." : "Guardar"}</button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      ) : null}
       {isReady && synthesisMigrationError ? <div role="alert" className="fixed bottom-4 left-4 right-4 z-[100] rounded-lg bg-amber-100 p-4 text-sm text-amber-950">
         Síntesis: {synthesisMigrationError} Los originales del navegador se conservaron.
         <button className="ml-3 underline" onClick={() => { void getSynthesisFolderStore().then(() => setSynthesisMigrationError("")).catch((error) => setSynthesisMigrationError(String(error.message || error))) }}>Reintentar migración</button>
@@ -878,7 +947,7 @@ export function LocalWorkspaceProvider({
       {enabled && bootState === "configure" && configStep === 4 ? (
         <ServicesPanel apis={apiStatus} drive={driveStatus} azure={azure} summary={driveSummary} widgetSummary={widgetTargetSummary} servicesFileMessage={servicesFileMessage} busy={savingConfig} error={error} driveCleanupMessage={driveCleanupMessage} onConfigureGroq={() => { setSelectedService("groq"); setConfigValues(EMPTY_INSCREEN_CONFIG); setConfigStep(0) }} onConfigureR2={() => { setConfigValues(EMPTY_INSCREEN_CONFIG); setConfigStep(1) }} onConfigureService={group => { setSelectedService(group); setConfigValues(EMPTY_INSCREEN_CONFIG); setError(""); setConfigStep(0) }} onPair={() => { setConfigStep(3); void createPairingQr() }} onConnect={connectDrive} onDisconnect={() => { void disconnectDrive() }} onSync={() => { void syncDrive() }} onCleanupDrive={() => { void cleanupDriveDuplicates() }} onRetryWidgets={() => { void retryWidgets() }} onClose={finishInscreenConfiguration} />
       ) : enabled && bootState === "configure" && configStep < 2 ? (
-        <ServicesEditor values={configValues} status={apiStatus} initialGroup={configStep === 1 ? "r2" : selectedService} busy={savingConfig} error={error}
+        <ServicesEditor replacingServices={replacingServices} values={configValues} status={apiStatus} initialGroup={configStep === 1 ? "r2" : selectedService} busy={savingConfig} error={error}
           onChange={(field, value) => { setConfigValues(current => ({ ...current, [field]: value })); setError("") }} onSave={() => { void saveInscreenConfiguration() }}
           onClose={() => { setConfigValues(EMPTY_INSCREEN_CONFIG); setError(""); setConfigStep(4) }} />
       ) : enabled && bootState === "configure" ? (
