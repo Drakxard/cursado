@@ -22,7 +22,7 @@ for (let i = 0; i < 2; i++) {
 const pdfBytes = Array.from(await pdfDocument.save())
 const bundle = await build({
   stdin: { contents: `
-    import React, { createRef } from 'react'; import { createRoot } from 'react-dom/client';
+    import React, { createRef } from 'react'; import { createRoot } from 'react-dom/client'; import { flushSync } from 'react-dom';
     import { SubjectVoiceImages } from './components/subject-voice-images';
     import { SubjectVoiceDialog } from './components/subject-voice-dialog';
     import { setReadyWorkspaceHandle } from './lib/local-workspace-client';
@@ -65,7 +65,8 @@ const bundle = await build({
     window.pdfEscape = () => voiceRef.current.escape();
     const root = createRoot(document.getElementById('root'));
     window.showPdfDialog = () => root.render(<SubjectVoiceDialog subject={{id:'algebra',name:'Álgebra'}} weekNumber={7} onClose={()=>{}} />);
-    window.changePdfSubject = (subjectId,week=7) => root.render(<SubjectVoiceImages key={subjectId+':'+week} subjectId={subjectId} weekNumber={week} ref={voiceRef} />);
+    // Commit each simulated navigation before the test can request another one.
+    window.changePdfSubject = (subjectId,week=7) => flushSync(() => root.render(<SubjectVoiceImages key={subjectId+':'+week} subjectId={subjectId} weekNumber={week} ref={voiceRef} />));
     root.render(<SubjectVoiceImages key="algebra:7" subjectId="algebra" weekNumber={7} ref={voiceRef} />);
   `, resolveDir: process.cwd(), loader: "tsx" },
   bundle: true, write: false, platform: "browser", format: "iife",
