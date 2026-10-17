@@ -169,6 +169,26 @@ test('older APKs explain that the native PDF reader requires an update',async()=
     await context.close()
   } finally { await browser.close() }
 })
+
+test('leaving a PDF while it downloads cancels the pending native viewer',async()=>{
+  const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})
+  try {
+    const {context,errors}=await setup(browser)
+    await context.addInitScript(()=>{
+      window.CursadoNative.openPdf=(_id,_revision,requestId)=>{window.pendingPdf=requestId}
+      window.CursadoNative.cancelPdf=requestId=>window.nativeActions.push({cancel:requestId})
+    })
+    const page=await context.newPage()
+    await page.goto('https://workspace.inscreen.local/native/pdf?workspaceFileId=workspace%3A%2F%2Fteoria%2Fcalculo3%2Fmaterial.pdf')
+    await page.waitForFunction(()=>window.pendingPdf)
+    await page.getByRole('button',{name:'Inicio',exact:true}).click()
+    await page.waitForFunction(()=>window.nativeActions.some(action=>action.cancel===window.pendingPdf))
+    await page.evaluate(()=>window.dispatchEvent(new CustomEvent('cursado-native-pdf-result',{detail:{requestId:window.pendingPdf}})))
+    assert.equal(new URL(page.url()).pathname,'/')
+    assert.deepEqual(errors,[])
+    await context.close()
+  } finally { await browser.close() }
+})
 test('missing native files are reported and incompatible bridges never open the workspace',async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})
   try{

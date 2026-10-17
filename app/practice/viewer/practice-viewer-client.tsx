@@ -265,13 +265,14 @@ export function NativePdfLauncher({workspaceFileId,onOpened}: {workspaceFileId:s
   opened.current = onOpened
   useEffect(() => {
     let current = true
+    const controller = new AbortController()
     setError('')
-    void openNativePdf(workspaceFileId).then(() => {
+    void openNativePdf(workspaceFileId, controller.signal).then(() => {
       if (!current) return
       if (opened.current) opened.current()
       else window.dispatchEvent(new Event('cursado-native-pdf-opened'))
     }).catch(error => { if (current) setError(error.message) })
-    return () => { current = false }
+    return () => { current = false; controller.abort() }
   },[workspaceFileId,attempt])
   return <div role={error ? 'alert' : 'status'} style={{padding:24}}>{error || 'Abriendo PDF…'}{error && <button onClick={()=>setAttempt(value=>value+1)}>Reintentar</button>}</div>
 }

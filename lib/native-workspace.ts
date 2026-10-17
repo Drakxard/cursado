@@ -9,6 +9,7 @@ export type NativeWorkspaceBridge = {
   unlink(): void
   openHtml(id: string, revision: string): void
   openPdf?(id: string, revision: string, requestId: string): void
+  cancelPdf?(requestId: string): void
   openExternal(url: string): void
 }
 declare global { interface Window { CursadoNative?: NativeWorkspaceBridge } }
@@ -32,7 +33,7 @@ export function nativePdfHref(workspaceFileId: string, fileName = '') {
   return `/native/pdf?${new URLSearchParams({workspaceFileId,fileName})}`
 }
 
-export function openNativePdf(workspaceFileId: string): Promise<void> {
+export function openNativePdf(workspaceFileId: string, signal?: AbortSignal): Promise<void> {
   const bridge = window.CursadoNative
   if (!bridge?.openPdf) return Promise.reject(new Error('Actualizá InScreen para usar el visor PDF nativo.'))
   const manifest = nativeSnapshot().manifest
@@ -43,6 +44,8 @@ export function openNativePdf(workspaceFileId: string): Promise<void> {
     const finish = (error?: string) => {
       clearTimeout(timer)
       window.removeEventListener('cursado-native-pdf-result', result)
+      signal?.removeEventListener('abort', abort)
+      bridge.cancelPdf?.(requestId)
       error ? reject(new Error(error)) : resolve()
     }
     const result = (event: Event) => {
@@ -50,6 +53,9 @@ export function openNativePdf(workspaceFileId: string): Promise<void> {
       if (detail.requestId === requestId) finish(detail.error)
     }
     const timer = setTimeout(() => finish('No se pudo abrir el PDF. Reintentá.'), 310000)
+    const abort = () => finish('Apertura del PDF cancelada.')
+    if (signal?.aborted) { abort(); return }
+    signal?.addEventListener('abort', abort, {once:true})
     window.addEventListener('cursado-native-pdf-result', result)
     try { bridge.openPdf!(file.id, manifest.revision, requestId) } catch (error) { finish(String(error)) }
   })
