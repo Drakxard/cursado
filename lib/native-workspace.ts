@@ -3,6 +3,7 @@ import type { LibraryManifest } from './workspace-library'
 export type NativeWorkspaceSnapshot = { bridgeVersion: 1; linked: boolean; manifest?: LibraryManifest; available?: Record<string, boolean>; error?: string }
 export type NativeWorkspaceBridge = {
   snapshot(): string
+  home?(): void
   refresh(): void
   pair(): void
   unlink(): void

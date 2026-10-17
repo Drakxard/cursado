@@ -1,12 +1,14 @@
 "use client"
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { isNativeReadOnly } from "@/lib/native-workspace"
 import ImportantProgressView from "@/components/important-progress-view"
 import "./progress-original/theme.css"
 const editing = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=slider], [role=spinbutton]"))
 
 export function StudyImportantTasks({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
+  const [tabsOpen, setTabsOpen] = useState(false)
   const touch = useRef<{ x: number; y: number } | null>(null)
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -22,6 +24,8 @@ export function StudyImportantTasks({ children }: { children: ReactNode }) {
     return () => { window.removeEventListener("keydown", onKey, true) }
   }, [open])
   return <div
+    data-native-study-tabs={isNativeReadOnly() ? (tabsOpen ? "open" : "closed") : undefined}
+    onClick={event => { if (event.target instanceof Element && event.target.closest('[data-study-workspace-tabs] button')) setTabsOpen(false) }}
     style={{ touchAction: "pan-y" }}
     onTouchStart={event => {
       if (event.touches.length !== 1 || editing(event.target) || document.querySelector('[role="dialog"], [role="alertdialog"], [aria-modal="true"]')) { touch.current = null; return }
@@ -35,8 +39,9 @@ export function StudyImportantTasks({ children }: { children: ReactNode }) {
       const dx = event.changedTouches[0].clientX - start.x
       const dy = event.changedTouches[0].clientY - start.y
       if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-        if (!open && dx > 0) setOpen(true)
+        if (!open && dx > 0) { setTabsOpen(false); setOpen(true) }
         if (open && dx < 0) setOpen(false)
+        else if (!open && dx < 0 && isNativeReadOnly()) setTabsOpen(true)
       }
     }}>
     <div hidden={open} inert={open}>{children}</div>

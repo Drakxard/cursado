@@ -36,7 +36,7 @@ async function setup(browser, {legacy = false} = {}) {
   const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true})
   await context.addInitScript(({inventory})=>{
     window.nativeActions=[]
-    window.CursadoNative={snapshot:()=>JSON.stringify({bridgeVersion:1,linked:true,manifest:inventory,available:{}}),pair:()=>window.nativeActions.push('pair'),refresh:()=>window.nativeActions.push('refresh'),unlink:()=>window.nativeActions.push('unlink'),openHtml:()=>window.nativeActions.push('html'),openExternal:url=>window.nativeActions.push(url)}
+    window.CursadoNative={home:()=>window.nativeActions.push('app-home'),snapshot:()=>JSON.stringify({bridgeVersion:1,linked:true,manifest:inventory,available:{}}),pair:()=>window.nativeActions.push('pair'),refresh:()=>window.nativeActions.push('refresh'),unlink:()=>window.nativeActions.push('unlink'),openHtml:()=>window.nativeActions.push('html'),openExternal:url=>window.nativeActions.push(url)}
   },{inventory})
   const errors=[],requests=[]
   context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)))
@@ -58,12 +58,29 @@ test('original home, study, board and PDF work with a native read-only revision 
     const page=await context.newPage()
     await context.setOffline(true)
     await page.goto('https://workspace.inscreen.local/')
+    await page.locator('main').dispatchEvent('touchstart',{touches:[{clientX:70,clientY:350}]})
+    await page.locator('main').dispatchEvent('touchend',{changedTouches:[{clientX:260,clientY:355}]})
+    assert.deepEqual(await page.evaluate(()=>window.nativeActions),['app-home'])
+    await page.evaluate(()=>{window.nativeActions=[]})
     await page.getByRole('link',{name:'Abrir organizador de estudio'}).click()
     await page.getByRole('button',{name:/Cálculo 3/}).waitFor({timeout:20000})
     assert.equal(await page.locator('[data-workspace-write="true"]:visible').count(),0)
     assert.equal(await page.getByText(/Seleccioná.*carpeta|Configuración InScreen/).count(),0)
     assert.equal(await page.getByText('Error al guardar',{exact:true}).count(),0)
     assert.equal(await page.evaluate(async()=> (await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status),403)
+    const study = page.locator('[data-native-study-tabs]')
+    const tabs = page.locator('[data-study-workspace-tabs]>div')
+    assert.equal(await tabs.isVisible(),false)
+    await study.dispatchEvent('touchstart',{touches:[{clientX:300,clientY:450}]})
+    await study.dispatchEvent('touchend',{changedTouches:[{clientX:100,clientY:455}]})
+    assert.equal(await study.getAttribute('data-native-study-tabs'),'open')
+    assert.equal(await tabs.isVisible(),true)
+    await study.dispatchEvent('touchstart',{touches:[{clientX:90,clientY:450}]})
+    await study.dispatchEvent('touchend',{changedTouches:[{clientX:290,clientY:455}]})
+    assert.equal(await study.locator(':scope>div').first().isVisible(),false)
+    assert.deepEqual(await page.evaluate(()=>window.nativeActions),[])
+    await study.dispatchEvent('touchstart',{touches:[{clientX:300,clientY:450}]})
+    await study.dispatchEvent('touchend',{changedTouches:[{clientX:100,clientY:455}]})
     await page.getByRole('button',{name:/C\u00e1lculo 3/}).click()
     const campus = page.getByRole('link',{name:'Campus',exact:true})
     await campus.waitFor({timeout:15000})

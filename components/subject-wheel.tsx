@@ -7387,6 +7387,7 @@ export function SubjectWheel({
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20">
         <div className="flex items-start justify-between gap-3 px-3 py-3 sm:px-4 sm:py-4">
           <nav
+            data-study-workspace-tabs
             aria-label="Pestañas de estudio"
             tabIndex={0}
             className="group/workspace-tabs pointer-events-auto absolute inset-y-0 left-0 h-dvh w-6 outline-none"
@@ -7395,7 +7396,7 @@ export function SubjectWheel({
             <div className="pointer-events-auto flex max-h-[calc(100dvh-8rem)] min-w-0 flex-col items-start gap-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {workspaceTabList.map((tab) => {
                 const isActive = tab.id === activeWorkspaceTab.id
-                const canDragTab = tab.id !== MAIN_WORKSPACE_TAB_ID
+                const canDragTab = !isNativeReadOnly() && tab.id !== MAIN_WORKSPACE_TAB_ID
 
                 return (
                   <button

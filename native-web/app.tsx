@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useState } from 'react'
+import { Component, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SubjectWheel } from '@/components/subject-wheel'
 import { StudyImportantTasks } from '@/components/study-important-tasks'
@@ -23,6 +23,18 @@ class ErrorBoundary extends Component<{children: React.ReactNode}, {error: strin
   static getDerivedStateFromError(error: Error) { return { error: error.message } }
   render() { return this.state.error ? <main role="alert" style={{padding: 24}}><p>{this.state.error}</p><button onClick={() => location.reload()}>Reintentar</button></main> : this.props.children }
 }
+function NativeHome() {
+  const touch = useRef<{x:number;y:number} | null>(null)
+  return <main className={homeStyles.home} style={{touchAction:'pan-y'}}
+    onTouchStart={event => { touch.current = event.touches.length === 1 ? {x:event.touches[0].clientX,y:event.touches[0].clientY} : null }}
+    onTouchCancel={() => { touch.current = null }}
+    onTouchEnd={event => {
+      const start = touch.current; touch.current = null
+      if (!start || !event.changedTouches.length) return
+      const dx = event.changedTouches[0].clientX-start.x, dy = event.changedTouches[0].clientY-start.y
+      if (dx > 80 && dx > Math.abs(dy)*1.5) window.CursadoNative?.home?.()
+    }}><HomeChoices /></main>
+}
 function Routes() {
   const path = usePathname(), params = useSearchParams()
   const session = { email: 'native-reader@app.local', isAdmin: false, allowedSubjectIds: SUBJECT_IDS, expiresAtMs: Number.MAX_SAFE_INTEGER }
@@ -31,7 +43,7 @@ function Routes() {
   if (path === '/practice/viewer') return <PracticeViewerClient materialId={Number(params.get('materialId'))} returnToken={params.get('returnToken') || undefined} />
   if (path === '/pdfjs/web/viewer.html') return <iframe title="PDF" src={path+'?'+params.toString()} style={{width:'100%',height:'100dvh',border:0}} />
   if (path === '/pizarra/' || path === '/pizarra') return <iframe title="Pizarra" src="/pizarra/index.html" style={{width:'100%',height:'100dvh',border:0}} />
-  return <main className={homeStyles.home}><HomeChoices /></main>
+  return <NativeHome />
 }
 function App() {
   const [snapshot, setSnapshot] = useState(() => nativeSnapshot())
