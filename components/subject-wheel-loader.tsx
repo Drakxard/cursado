@@ -1,6 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
+import { StudyImportantTasks } from "@/components/study-important-tasks"
 
 import type { AuthSession } from "@/lib/authz"
 
@@ -26,5 +27,5 @@ export function SubjectWheelLoader({
   authSession: AuthSession
   initialSearchParams?: SubjectWheelSearchParams
 }) {
-  return <DynamicSubjectWheel authSession={authSession} initialSearchParams={initialSearchParams} />
+  return <StudyImportantTasks><DynamicSubjectWheel authSession={authSession} initialSearchParams={initialSearchParams} /></StudyImportantTasks>
 }
