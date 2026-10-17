@@ -45,10 +45,11 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export function getReadyInscreenConfigToken(){return "owner"} export function getReadyWorkspaceHandle(){} export async function loadServicesFile(){} export async function loadWorkspaceHandle(){} export async function queryWorkspacePermission(){return "granted"} export function setReadyInscreenConfigToken(){}' }))
   } }] })
   const module = { exports: {} as { publishLibrary: (root: unknown) => Promise<LibraryManifest> } }
-  const originalFetch = globalThis.fetch, originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window'), originalIndexed = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB')
+  const originalFetch = globalThis.fetch, originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window'), originalIndexed = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB'), originalXhr = Object.getOwnPropertyDescriptor(globalThis, 'XMLHttpRequest')
   Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() })
-  let lastProgress: { error?: string; help?: string } = {}
-  window.addEventListener('cursado-library-progress', event => { lastProgress = (event as CustomEvent).detail })
+  let lastProgress: { error?: string; help?: string; phase?: string; bytesDone?: number; bytesTotal?: number } = {}
+  const reports: typeof lastProgress[] = []
+  window.addEventListener('cursado-library-progress', event => { lastProgress = (event as CustomEvent).detail; reports.push(lastProgress) })
   Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: { databases: async () => [] } })
   globalThis.fetch = async (input, options) => {
     const url = String(input)
@@ -74,6 +75,8 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
       return Response.json(uploaded.has(body.hash) ? { exists: true } : { uploadUrl: `https://upload.fixture/${body.hash}`, headers: {} })
     }
     if (action === 'publish') {
+      assert.equal(lastProgress.phase, 'verifying')
+      assert.equal(lastProgress.bytesDone, lastProgress.bytesTotal)
       if (failCommit) return Response.json({ error: 'Interrupted commit' }, { status: 503 })
       for (const file of body.manifest.files) assert.equal(uploaded.get(file.hash)?.length, file.size)
       assert.equal(body.previousRevision, current?.revision || null)
@@ -93,7 +96,11 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
     assert.equal(lastProgress.help, 'cors')
     assert.equal(commits, 0); assert.equal(current, null)
     failTransfer = false
-    const first = await publish(root), count = uploads
+    const pending = publish(root), joined = publish(root)
+    assert.equal(pending, joined)
+    const first = await pending, count = uploads
+    assert.equal(reports.filter(report => report.phase === 'complete').length, 1)
+    assert.equal(lastProgress.bytesTotal, first.files.reduce((total, file) => total + file.size, 0))
     assert.equal(reused, 1); assert.equal(legacyReads, 3)
     assert.equal(await values.get('teoria/calculo/semana-1/a.pdf')!.text(), 'PDF fixture one')
     assert.equal(await values.get('teoria/calculo/semana-1/lunes/old-b.pdf')!.text(), 'Recovered old PDF')
@@ -111,8 +118,22 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
     assert.equal(lastProgress.help, undefined)
     assert.equal(current!.revision, first.revision)
     forbiddenTransfer = false
+    class UploadRequest {
+      upload: { onprogress?: (event: { loaded: number }) => void } = {}
+      onload?: () => void; onerror?: () => void; status = 0; url = ''; headers: Record<string, string> = {}
+      open(_method: string, url: string) { this.url = url }
+      setRequestHeader(key: string, value: string) { this.headers[key] = value }
+      getResponseHeader() { return null }
+      send(body: Blob) {
+        this.upload.onprogress?.({ loaded: body.size / 2 })
+        void fetch(this.url, { method: 'PUT', headers: this.headers, body }).then(response => { this.status = response.status; this.upload.onprogress?.({ loaded: body.size }); this.onload?.() }).catch(() => this.onerror?.())
+      }
+    }
+    Object.defineProperty(globalThis, 'XMLHttpRequest', { configurable: true, value: UploadRequest })
     failCommit = true
     await assert.rejects(publish(root), /Interrupted commit/)
+    assert.equal(lastProgress.phase, 'error')
+    assert.ok(reports.some(report => report.phase === 'uploading' && Number(report.bytesDone) > 1_000_000 && Number(report.bytesDone) < Number(report.bytesTotal)))
     assert.equal(current!.revision, first.revision)
     const afterFailure = uploads; failCommit = false
     const second = await publish(root)
@@ -126,5 +147,6 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
     globalThis.fetch = originalFetch
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow); else Reflect.deleteProperty(globalThis, 'window')
     if (originalIndexed) Object.defineProperty(globalThis, 'indexedDB', originalIndexed); else Reflect.deleteProperty(globalThis, 'indexedDB')
+    if (originalXhr) Object.defineProperty(globalThis, 'XMLHttpRequest', originalXhr); else Reflect.deleteProperty(globalThis, 'XMLHttpRequest')
   }
 })

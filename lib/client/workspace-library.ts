@@ -10,12 +10,26 @@ type State = { version: 1; workspaceId: string; enabled: boolean; name: string; 
 type Candidate = { path: string; blob: Blob; modified: number }
 let running: Promise<LibraryManifest> | null = null
 let rerun = false
-export type PublicationProgress = { message: string; done: number; total: number; error?: string; help?: 'cors' }
-const report = (progress: PublicationProgress) => window.dispatchEvent(new CustomEvent('cursado-library-progress', { detail: progress }))
+export type PublicationProgress = { message: string; done: number; total: number; phase?: 'preparing' | 'recovering' | 'uploading' | 'verifying' | 'complete' | 'error'; bytesDone?: number; bytesTotal?: number; workspaceId?: string; publishedAt?: string; error?: string; help?: 'cors' }
+let latestProgress: PublicationProgress | null = null
+export const getLibraryPublicationProgress = () => latestProgress
+const report = (progress: PublicationProgress) => { latestProgress = progress; window.dispatchEvent(new CustomEvent('cursado-library-progress', { detail: progress })) }
 class LibraryUploadError extends Error { constructor(message: string, public readonly help?: 'cors') { super(message) } }
-async function uploadToR2(url: string, options: RequestInit, workspaceId: string) {
+async function uploadToR2(url: string, options: RequestInit, workspaceId: string, onProgress: (bytes: number) => void) {
   let response: Response | undefined
-  try { response = await fetch(url, options) } catch { /* Browsers hide R2 error bodies when CORS is absent. */ }
+  try {
+    if (typeof XMLHttpRequest === 'undefined') response = await fetch(url, options)
+    else response = await new Promise<Response>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('PUT', url)
+      Object.entries(options.headers || {}).forEach(([key, value]) => xhr.setRequestHeader(key, value))
+      xhr.upload.onprogress = event => onProgress(event.loaded)
+      xhr.onerror = () => reject(new TypeError('No se pudo transferir a R2.'))
+      xhr.onabort = () => reject(new Error('Transferencia interrumpida.'))
+      xhr.onload = () => resolve(new Response(null, { status: xhr.status, headers: xhr.getResponseHeader('ETag') ? { ETag: xhr.getResponseHeader('ETag')! } : {} }))
+      xhr.send(options.body as Blob)
+    })
+  } catch { /* Browsers hide R2 error bodies when CORS is absent. */ }
   if (response && ![401, 403].includes(response.status)) return response
   if (navigator.onLine === false) throw new Error('Se perdió la conexión. Volvé a conectarte y reintentá la publicación.')
   const diagnosis = await libraryOwnerApi('upload/diagnose', { workspaceId }).catch(() => null)
@@ -183,8 +197,9 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
     state.enabled = options.enable ?? state.enabled; state.name = options.name || state.name
     await writeState(root, state)
     const workspaceId = state.workspaceId
-    const previousSources = await recoverLegacyLibrary(root, { workspaceId, api: libraryOwnerApi, headers: () => ({ 'x-inscreen-config-token': getReadyInscreenConfigToken() }), report: message => report({ message, done: 0, total: 0 }) })
-    report({ message: 'Buscando cambios guardados…', done: 0, total: 0 })
+    const emit = (progress: PublicationProgress) => report({ ...progress, workspaceId })
+    const previousSources = await recoverLegacyLibrary(root, { workspaceId, api: libraryOwnerApi, headers: () => ({ 'x-inscreen-config-token': getReadyInscreenConfigToken() }), report: (message, bytesDone, bytesTotal) => emit({ phase: 'recovering', message, done: 0, total: 0, bytesDone, bytesTotal }) })
+    emit({ phase: 'preparing', message: 'Buscando cambios guardados…', done: 0, total: 0 })
     const current = (await libraryOwnerApi('status', { workspaceId }, 'GET')).manifest as LibraryManifest | null
     const candidates = await scanLibraryFiles(root), files: LibraryFile[] = [], newHashes: State['hashes'] = {}
     for (const c of candidates) {
@@ -196,24 +211,27 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
     const index = await catalog(candidates, files)
     if (current && JSON.stringify(current.files) === JSON.stringify(files) && JSON.stringify(current.items) === JSON.stringify(index.items) && JSON.stringify(current.subjects) === JSON.stringify(index.subjects) && current.name === state.name) {
       await writeState(root, { ...state, hashes: newHashes, publishedAt: current.publishedAt })
-      report({ message: 'Biblioteca actualizada', done: files.length, total: files.length }); return current
+      return current
     }
     await libraryOwnerApi('cors', { workspaceId })
-    let done = 0
+    let done = 0, bytesDone = 0
+    const bytesTotal = files.reduce((total, file) => total + file.size, 0)
     for (let i = 0; i < files.length; i++) {
       const f = files[i], candidate = candidates[i]
-      report({ message: `Subiendo ${f.path}`, done, total: files.length })
+      const uploading = (bytes = 0) => emit({ phase: 'uploading', message: `Subiendo ${f.path}`, done, total: files.length, bytesDone: bytesDone + Math.min(bytes, f.size), bytesTotal })
+      uploading()
       if (!current?.files.some(old => old.hash === f.hash && old.size === f.size)) {
         const session = await libraryOwnerApi('upload', { workspaceId, hash: f.hash, size: f.size, mime: f.mime, ...(previousSources[f.path] ? { previousKey: previousSources[f.path] } : {}) })
         if (session.uploadUrl) {
-          const uploaded = await uploadToR2(session.uploadUrl, { method: 'PUT', headers: session.headers, body: candidate.blob }, workspaceId)
+          const uploaded = await uploadToR2(session.uploadUrl, { method: 'PUT', headers: session.headers, body: candidate.blob }, workspaceId, uploading)
           if (!uploaded.ok) throw new Error(`Falló la subida de ${f.path} (${uploaded.status}).`)
         } else if (session.session) {
           const parts = []
           try {
             for (let part = 1; part <= session.partCount; part++) {
               const signed = await libraryOwnerApi('upload/part', { workspaceId, session: session.session, part })
-              const result = await uploadToR2(signed.url, { method: 'PUT', body: candidate.blob.slice((part - 1) * session.partSize, part * session.partSize) }, workspaceId)
+              const offset = (part - 1) * session.partSize
+              const result = await uploadToR2(signed.url, { method: 'PUT', body: candidate.blob.slice(offset, part * session.partSize) }, workspaceId, bytes => uploading(offset + bytes))
               const etag = result.headers.get('ETag')
               if (!result.ok) throw new Error(`Falló una parte de ${f.path} (${result.status}). Reintentá la publicación.`)
               if (!etag) throw new LibraryUploadError('R2 recibió una parte, pero CORS no permite leer ETag. Abrí «Revisar permisos CORS» y agregá ETag en ExposeHeaders. La publicación anterior se conserva.', 'cors')
@@ -223,13 +241,23 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
           } catch (error) { await libraryOwnerApi('upload/abort', { workspaceId, session: session.session }).catch(() => {}); throw error }
         }
       }
-      done++
+      done++; bytesDone += f.size
+      emit({ phase: 'uploading', message: 'Recursos enviados', done, total: files.length, bytesDone, bytesTotal })
     }
     const inventory: LibraryManifest = { version: 1, workspaceId, revision: crypto.randomUUID(), publishedAt: new Date().toISOString(), name: state.name, files, ...index }
+    emit({ phase: 'verifying', message: 'Verificando los archivos y activando la publicación…', done, total: files.length, bytesDone, bytesTotal })
     await libraryOwnerApi('publish', { workspaceId, previousRevision: current?.revision || null, manifest: inventory })
     await writeState(root, { ...state, hashes: newHashes, publishedAt: inventory.publishedAt })
-    report({ message: 'Biblioteca actualizada', done, total: files.length }); return inventory
+    return inventory
   }
-  running = (navigator.locks ? navigator.locks.request('cursado-library-publication', task) : task()).catch(error => { report({ message: 'Publicación pendiente', done: 0, total: 0, error: error instanceof Error ? error.message : String(error), ...(error instanceof LibraryUploadError ? { help: error.help } : {}) }); throw error }).finally(() => { running = null; if (rerun) { rerun = false; setTimeout(() => { void publishLibrary(root).catch(() => {}) }, 2000) } })
+  report({ phase: 'preparing', message: 'Preparando la sincronización…', done: 0, total: 0 })
+  const synchronize = async () => {
+    let manifest: LibraryManifest
+    do { rerun = false; manifest = await task() } while (rerun)
+    const bytes = manifest.files.reduce((total, file) => total + file.size, 0)
+    report({ phase: 'complete', message: 'Biblioteca sincronizada', workspaceId: manifest.workspaceId, publishedAt: manifest.publishedAt, done: manifest.files.length, total: manifest.files.length, bytesDone: bytes, bytesTotal: bytes })
+    return manifest
+  }
+  running = (navigator.locks ? navigator.locks.request('cursado-library-publication', synchronize) : synchronize()).catch(error => { report({ ...latestProgress, phase: 'error', message: 'Sincronización pendiente', done: latestProgress?.done || 0, total: latestProgress?.total || 0, error: error instanceof Error ? error.message : String(error), ...(error instanceof LibraryUploadError ? { help: error.help } : {}) }); throw error }).finally(() => { running = null })
   return running
 }

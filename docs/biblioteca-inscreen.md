@@ -16,6 +16,14 @@ El botón **❔** abre cuatro pasos ilustrados para elegir el bucket, crear las
 claves, identificar el endpoint S3 y configurar CORS. Incluye enlaces oficiales
 de Cloudflare y permite copiar el JSON CORS con el origen de la web actual.
 
+El panel separa configuración, sincronización y dispositivos en pantallas.
+Mientras recupera, sube o verifica archivos, oculta los dispositivos y el QR,
+incluso si hay una publicación anterior. Informa porcentaje, MB procesados,
+MB pendientes y archivos restantes; las subidas muestran avance dentro de cada
+archivo. El 100 % y la pantalla de QR aparecen después de verificar y activar
+la publicación, incluyendo cambios pendientes. Al reabrir el panel se comprueba
+la carpeta antes de habilitar el QR.
+
 Si una subida queda bloqueada por CORS, **Revisar permisos CORS** abre directamente
 ese paso. Una clave con permisos de objetos puede publicar, pero puede requerir
 agregar la regla desde el panel de Cloudflare. No hace falta cambiar las claves.

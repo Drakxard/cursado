@@ -39,7 +39,7 @@ export async function recoverLegacyLibrary(root: FileSystemDirectoryHandle, opti
   workspaceId: string
   api: (action: string, body: Record<string, unknown>, method?: string) => Promise<any>
   headers: () => Record<string, string>
-  report: (message: string) => void
+  report: (message: string, bytesDone?: number, bytesTotal?: number) => void
 }): Promise<Record<string, string>> {
   const state: Recovery = await read(root, recoveryPath) || { version: 1, finished: false, pending: [], sources: {} }
   if (state.version !== 1 || !Array.isArray(state.pending) || !state.sources || typeof state.sources !== 'object') throw new Error('El registro de recuperación anterior no es válido. Conservá una copia de manifests/workspace-library-recovery.json para revisar el problema.')
@@ -59,26 +59,32 @@ export async function recoverLegacyLibrary(root: FileSystemDirectoryHandle, opti
     else if (value && typeof value === 'object') Object.values(value).forEach(collect)
   }
   documents.forEach(doc => collect(doc.data))
-  for (const file of catalog.files) {
+  const recoverable = catalog.files.filter(file => references.has(aliases.get(file.path) || file.path) || file.path === file.key)
+  const bytesTotal = recoverable.reduce((total, file) => total + file.size, 0)
+  let bytesDone = 0
+  for (const file of recoverable) {
     const path = aliases.get(file.path) || file.path
     if (!isLibraryPath(path) || !isLegacyLibraryKey(file.key)) throw new Error('Archivo de recuperación inválido.')
     if (!references.has(path) && path !== file.key) continue
     let exists = false
     try { await (await handle(root, path)).getFile(); exists = true } catch (error) { if ((error as DOMException).name !== 'NotFoundError') throw error }
     if (!exists || state.pending.includes(path)) {
-      options.report(`Recuperando ${path} desde R2…`)
+      options.report(`Recuperando ${path} desde R2…`, bytesDone, bytesTotal)
       if (!state.pending.includes(path)) state.pending.push(path)
       await write(root, recoveryPath, state)
       const params = new URLSearchParams({ workspaceId: options.workspaceId, key: file.key })
       const response = await fetch(`/api/inscreen/workspace/legacy/object?${params}`, { headers: options.headers(), cache: 'no-store' })
       if (!response.ok || !response.body) throw new Error(`No se pudo recuperar ${path}. Reintentá; tus archivos locales se conservan.`)
       const writer = await (await handle(root, path, true)).createWritable()
-      try { await response.body.pipeTo(writer) }
+      let received = 0
+      try { await response.body.pipeThrough(new TransformStream({ transform(chunk, controller) { received += chunk.byteLength; options.report(`Recuperando ${path} desde R2…`, bytesDone + received, bytesTotal); controller.enqueue(chunk) } })).pipeTo(writer) }
       catch (error) { throw new Error((error as DOMException).name === 'QuotaExceededError' ? `No hay espacio suficiente para recuperar ${path}. Liberá espacio y reintentá; la recuperación conserva lo ya descargado.` : `Se interrumpió la recuperación de ${path}. Reintentá; tus archivos locales se conservan.`) }
       if ((await (await handle(root, path)).getFile()).size !== file.size) throw new Error(`La descarga de ${path} quedó incompleta. Reintentá.`)
       state.pending = state.pending.filter(p => p !== path)
     }
     state.sources[path] = file.key
+    bytesDone += file.size
+    options.report('Revisando la biblioteca recuperada…', bytesDone, bytesTotal)
     await write(root, recoveryPath, state)
   }
   for (const doc of documents) await write(root, doc.path, doc.data)
