@@ -17,6 +17,8 @@ if (window.parent === window) {
   publisher.hidden = true
   publisher.title = 'Publicación de biblioteca'
   document.body.append(publisher)
+  // A board restored by its service worker may have opened without Next.js.
+  window.addEventListener('online', () => { publisher.src = '/biblioteca/publicador' })
 }
 
 createRoot(document.getElementById('root')!).render(
