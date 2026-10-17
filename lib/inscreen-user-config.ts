@@ -1,3 +1,4 @@
+import { normalizeAzureEndpoint } from "./azure-endpoint.ts"
 import { AsyncLocalStorage } from "node:async_hooks"
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
 import { EXTRA_SERVICE_FIELDS, SERVICE_FIELDS, type ExtraServiceField } from './services-config.ts'
@@ -51,14 +52,7 @@ export function normalizeInscreenUserConfig(value: unknown): InscreenUserConfig 
   }
   if ((config.gpt5mini || config.conexiongpt5mini || config.AZURE_OPENAI_DEPLOYMENT) && (!config.gpt5mini || !config.conexiongpt5mini)) throw new Error('Completá la clave y el endpoint de Azure para Verlo.')
   if (config.storage_azure_container && !config.storage_azure) throw new Error('Completá la cadena de conexión de Azure Storage.')
-  if (config.conexiongpt5mini) {
-    let url: URL
-    try { url = new URL(config.conexiongpt5mini) } catch { throw new Error('El endpoint de Azure no es válido.') }
-    const path = url.pathname.replace(/\/+$/, '')
-    if (url.protocol !== 'https:' || !/\.(?:openai\.azure\.com|services\.ai\.azure\.com|cognitiveservices\.azure\.com)$/.test(url.hostname)
-      || url.username || url.password || url.search || url.hash || (url.port && url.port !== '443')
-      || (path && !/^\/openai(?:\/v1)?$/.test(path) && !/^\/api\/projects\/[^/]+(?:\/openai(?:\/v1)?)?$/.test(path))) throw new Error('Usá el endpoint HTTPS oficial del recurso o proyecto Azure, sin /responses ni claves en la URL.')
-  }
+  if (config.conexiongpt5mini) config.conexiongpt5mini = normalizeAzureEndpoint(config.conexiongpt5mini)
   if ((config.cloudflareapi || config.CLOUDFLARE_ACCOUNT_ID) && (!config.cloudflareapi || !config.CLOUDFLARE_ACCOUNT_ID)) throw new Error('Completá el token y el identificador de cuenta de Cloudflare.')
   if (config.CLOUDFLARE_ACCOUNT_ID && !/^[a-f0-9]{32}$/i.test(config.CLOUDFLARE_ACCOUNT_ID)) throw new Error('El identificador de cuenta de Cloudflare debe tener 32 caracteres hexadecimales.')
   if (config.storage_azure) {

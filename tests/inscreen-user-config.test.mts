@@ -113,6 +113,7 @@ test("la aplicacion y el iframe PDF.js envian el sobre cifrado de User.Services"
   assert.doesNotMatch(interceptor, /x-inscreen-config-half/)
   assert.match(viewer, /inscreen\.config-skipped\.v1/)
   assert.match(viewer, /InscreenConfigurationUnavailable/)
-  assert.match(viewer, /inscreenApiFetch\("\/api\/pdf-translate"/)
+  assert.doesNotMatch(viewer, /inscreenApiFetch\("\/api\/pdf-translate"/)
+  assert.match(viewer, /"x-pdf-translation-token": translationToken/)
   assert.doesNotMatch(viewer, /inscreenApiFetch\("\/api\/inscreen\/marker-transcribe"/)
 })

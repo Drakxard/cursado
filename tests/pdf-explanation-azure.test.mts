@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { generateText } from "ai"
 import { azureExplanationConfig, azureExplanationModel } from "../lib/server/pdf-explanation-azure.ts"
+import { normalizeInscreenUserConfig } from "../lib/inscreen-user-config.ts"
 import { explanationFailure } from "../lib/pdf-explanation-errors.ts"
 
 test("Azure configuration accepts the saved project endpoint and resource endpoints", () => {
@@ -36,4 +37,25 @@ test("real Azure SDK uses the project Responses endpoint, secret header and depl
   assert.equal(calls, 1)
   assert.match(explanationFailure({ statusCode: 404 }, "azure").message, /AZURE_OPENAI_DEPLOYMENT/)
   assert.match(explanationFailure({ statusCode: 429 }, "azure").message, /cuota/)
+})
+
+
+test("the full Responses endpoint from Azure is accepted for saved credentials and runtime requests", async t => {
+  const endpoint = "https://modelo-resource.services.ai.azure.com/openai/v1/responses"
+  for (const suffix of ["", "/"]) {
+    const saved = normalizeInscreenUserConfig({ gpt5mini: "test-key", conexiongpt5mini: endpoint + suffix })
+    assert.equal(saved.conexiongpt5mini, "https://modelo-resource.services.ai.azure.com/openai/v1")
+    assert.equal(azureExplanationConfig({gpt5mini:"test-key",conexiongpt5mini:endpoint + suffix})!.baseURL, saved.conexiongpt5mini)
+  }
+  const project = "https://example.services.ai.azure.com/api/projects/study/openai/v1/responses"
+  assert.equal(azureExplanationConfig({gpt5mini:"test-key",conexiongpt5mini:project})!.baseURL, project.replace(/\/responses$/, ""))
+  for (const invalid of [endpoint + "?api-key=secret", endpoint + "#fragment", "https://unrelated.example/openai/v1/responses", "https://example.services.ai.azure.com.evil.test/openai/v1/responses"]) {
+    assert.throws(() => normalizeInscreenUserConfig({gpt5mini:"key",conexiongpt5mini:invalid}))
+  }
+  t.mock.method(globalThis, "fetch", async (url: string) => {
+    assert.equal(String(url), endpoint)
+    return Response.json({ id:"resp-test",created_at:1,model:"gpt-5-mini",status:"completed",output:[{type:"message",id:"msg-test",role:"assistant",content:[{type:"output_text",text:"Listo",annotations:[]}]}],usage:{input_tokens:5,output_tokens:1,total_tokens:6} })
+  })
+  const config = azureExplanationConfig({gpt5mini:"test-key",conexiongpt5mini:endpoint})!
+  assert.equal((await generateText({model:azureExplanationModel(config),prompt:"Hola",maxRetries:0})).text, "Listo")
 })
