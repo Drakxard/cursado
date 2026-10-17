@@ -1,5 +1,22 @@
 (function () {
   const params = new URLSearchParams(location.search);
+  if (params.get("libraryReadOnly") === "1") {
+    document.documentElement.classList.add('pdfjs-library-readonly');
+    const initialize = async event => {
+      if (event.detail?.source !== window) return;
+      parent.document.removeEventListener('webviewerloaded', initialize);
+      document.removeEventListener('webviewerloaded', initialize);
+      window.PDFViewerApplicationOptions.setAll({ disablePreferences: true, disableHistory: true, enableScripting: false, annotationEditorMode: -1 });
+      const app = window.PDFViewerApplication;
+      await app.initializedPromise;
+      app.eventBus.on('pagesinit', () => { app.pdfViewer.currentScaleValue = 'page-width'; });
+      app.eventBus.on('pagerendered', () => parent.postMessage({ type: 'libraryPdfReady' }, location.origin));
+      app.eventBus.on('documenterror', () => parent.postMessage({ type: 'libraryPdfError' }, location.origin));
+    };
+    parent.document.addEventListener('webviewerloaded', initialize);
+    document.addEventListener('webviewerloaded', initialize);
+    return;
+  }
   if (params.get("embeddedReadOnly") !== "1") return;
   document.documentElement.classList.add("pdfjs-embedded-readonly");
   const send = (type, extra = {}) => parent.postMessage({ type, ...extra }, location.origin);

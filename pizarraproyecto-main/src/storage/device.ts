@@ -26,6 +26,8 @@ export async function readDeviceBoard(key: string): Promise<DeviceBoard | undefi
 }
 export async function writeDeviceBoard(board: DeviceBoard) {
   await (await deviceDB).put('boards', board)
+  const channel = new BroadcastChannel('cursado-library-changes')
+  channel.postMessage('saved'); channel.close()
 }
 export async function localLibrary() {
   const db = await deviceDB

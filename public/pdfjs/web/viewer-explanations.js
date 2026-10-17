@@ -47,6 +47,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     const writer = await (await fileHandle(root, path, true)).createWritable();
     try { await writer.write(text); await writer.close(); }
     catch (error) { await writer.abort().catch(() => {}); throw error; }
+    const channel = new BroadcastChannel('cursado-library-changes'); channel.postMessage('saved'); channel.close();
   }
   async function load() {
     if (!app.pdfDocument) throw new Error("Esperá a que termine de cargar el PDF.");

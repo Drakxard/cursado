@@ -12,7 +12,7 @@ export function trackHomeWrites(current: Window) {
     const url = new URL(request?.url ?? String(input), current.location.href)
     const task = original.call(current, input, init)
     // Optional cloud backups don't determine whether the local draft is saved.
-    const backgroundBackup = url.pathname.startsWith('/api/storage/') || url.pathname.startsWith('/api/google/drive/') || url.pathname === '/api/inscreen/widget-targets'
+    const backgroundBackup = url.pathname.startsWith('/api/storage/') || url.pathname.startsWith('/api/google/drive/') || url.pathname === '/api/inscreen/widget-targets' || url.pathname.startsWith('/api/inscreen/workspace/')
     if (url.origin === current.location.origin && url.pathname.startsWith('/api/') && !backgroundBackup && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
       const checked = task.then(response => {
         if (!response.ok) throw new Error('No se pudieron guardar todos los cambios. Reintentá el guardado antes de salir.')

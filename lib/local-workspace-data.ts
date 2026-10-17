@@ -857,6 +857,7 @@ async function writeJsonFile(pathSegments: string[], value: unknown) {
     try {
       await writable.write(JSON.stringify(value, null, 2))
       await writable.close()
+      window.dispatchEvent(new Event('cursado-workspace-saved'))
     } catch (error) {
       await writable.abort().catch(() => {})
       throw error
@@ -893,6 +894,7 @@ async function persistWorkspaceBlob(workspaceId: string, blob: Blob) {
   const writable = await fileHandle.createWritable()
   await writable.write(blob)
   await writable.close()
+  window.dispatchEvent(new Event('cursado-workspace-saved'))
 }
 
 async function deleteWorkspaceBlob(workspaceId: string) {

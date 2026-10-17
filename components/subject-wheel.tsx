@@ -1,5 +1,7 @@
 "use client"
 
+import { SubjectHomeCard } from '@/components/subject-home-card'
+
 import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { ArrowDown, ArrowUp, BarChart3, CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Check, Copy, Eye, FilePenLine, Loader2, Pin, Sparkles, GraduationCap, Pencil, X, Link2, Mic, Pause, Play, Square, Plus } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -7492,7 +7494,7 @@ export function SubjectWheel({
                 const canDeleteSubject = isCustomSubject(card.subject)
 
                 return (
-                  <button
+                  <SubjectHomeCard
                     key={card.subject.id}
                     type="button"
                     onClick={() => {
@@ -7506,17 +7508,10 @@ export function SubjectWheel({
                     onPointerUp={cancelLongPressDelete}
                     onPointerLeave={cancelLongPressDelete}
                     onPointerCancel={cancelLongPressDelete}
-                    className="flex h-[14rem] w-[14rem] flex-col items-center justify-between rounded-full px-5 py-5 text-center text-white shadow-[0_18px_40px_rgba(0,0,0,0.14)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98] sm:h-[16rem] sm:w-[16rem] sm:px-6 sm:py-6"
-                    style={{ backgroundColor: getSubjectVisualColor(card.subject) }}
-                  >
-                    <span className="text-[2.2rem] font-light leading-none sm:text-[2.7rem]">
-                      {card.daysRemainingLabel}
-                    </span>
-                    <span className="text-balance text-[2rem] font-light leading-tight sm:text-[2.8rem]">
-                      {card.displayName}
-                    </span>
-                    <span aria-hidden="true" className="block h-8 sm:h-10" />
-                  </button>
+                    displayName={card.displayName}
+                    daysRemainingLabel={card.daysRemainingLabel}
+                    color={getSubjectVisualColor(card.subject)}
+                  />
                 )
               })}
             </div>

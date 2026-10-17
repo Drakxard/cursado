@@ -8,7 +8,9 @@ import { LuHand, LuStickyNote, LuWorkflow, LuBookOpen, LuCalendarDays } from 're
 import { createNote, defaultConnector, findAnchor, hitsConnector, isConnector, materializeConnector, mergeVisual,
   pointsBounds, refKey, remapConnector, detachTargets, transformVisual, visualBounds } from './canvas/visualObjects'
 import type { ShapeItem, ShapeKind, Bounds, ObjectRef, TargetGeometry } from './canvas/visualObjects'
-import { paintVisual, paintLabel } from './canvas/visualRendering'
+import { paintShape } from './canvas/paintShape'
+import StaticTable, { tableChrome, tableFontSize, tableSize, labelColumn, TABLE_ROW_HEADER, TABLE_TITLE_HEIGHT, TABLE_COL_HEADER } from './components/StaticTable'
+import type { SheetItem, SheetCell } from './components/StaticTable'
 import { academicTemplate } from './canvas/academicTemplates'
 import { editableResponse } from './assistant/editableResponse'
 import type { TemplateId } from './canvas/academicTemplates'
@@ -168,8 +170,7 @@ type RemoteLiveStroke = {stroke:Stroke;done:boolean;updated:number}
 type SaveStatus = 'loading' | 'saved' | 'pending' | 'error' | 'local' | 'copy'
 type Camera = { x: number; y: number; zoom: number }
 type EditingText = { id: string; x: number; y: number; value: string; color: string; fontSize: number }
-type SheetCell = { input: string; display?: string; backgroundColor?: string; textColor?: string }
-type SheetItem = { id: string; name: string; x: number; y: number; cellWidth: number; cellHeight: number; cells: SheetCell[][]; rotation?: number }
+
 // Los videos son referencias a YouTube, no archivos descargados ni HTML arbitrario.
 type YouTubeItem = { id: string; videoId: string; x: number; y: number; width: number; height: number; start?: number; end?: number; groupId?:string; zIndex?:number }
 type VideoSync = { video_id: string; position: number; playing: boolean; start: number; end: number | null; at: number; serial: number }
@@ -414,38 +415,6 @@ const EXCEL_ENDPOINT = () => `${API_BASE}/api/excel`
 const MAX_EXCEL_ROWS = 180
 const MAX_EXCEL_COLS = 32
 const blankCell = (): SheetCell => ({ input: '' })
-const labelColumn = (index: number): string => {
-  let name = ''
-  for (let value = index + 1; value; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + (value - 1) % 26) + name
-  return name
-}
-const TABLE_ROW_HEADER = 38
-const TABLE_TITLE_HEIGHT = 32
-const TABLE_COL_HEADER = 27
-function tableChrome(table: SheetItem) {
-  // Los encabezados antes eran constantes, incluso cuando la tabla crecía mucho.
-  // Usar un mismo factor evita que las columnas y la barra se vean diminutas.
-  const widthRatio = Math.max(.25, table.cellWidth / 114)
-  const heightRatio = Math.max(.25, table.cellHeight / 33)
-  const factor = Math.max(1, Math.min(6, Math.sqrt(widthRatio * heightRatio)))
-  return {
-    factor,
-    rowHeader: Math.round(TABLE_ROW_HEADER * factor),
-    title: Math.round(TABLE_TITLE_HEIGHT * factor),
-    colHeader: Math.round(TABLE_COL_HEADER * factor),
-    chromeFont: Math.round(12 * factor),
-  }
-}
-function tableFontSize(table: SheetItem): number {
-  return Math.max(12, Math.min(90, 13 * tableChrome(table).factor))
-}
-function tableSize(table: SheetItem): Bounds {
-  const cols = Math.max(1, ...table.cells.map(row => row.length))
-  const chrome = tableChrome(table)
-  return { x: table.x, y: table.y, width: chrome.rowHeader + cols * table.cellWidth,
-    height: chrome.title + chrome.colHeader + table.cells.length * table.cellHeight }
-}
-// Solo se aceptan enlaces reales de YouTube. El id del video se valida antes de
 // construir el iframe; jamás se inyecta HTML proporcionado por el portapapeles.
 function parseYouTubeLink(input: string): {videoId:string;start:number}|null {
   let url: URL
@@ -777,35 +746,7 @@ function InlineTableEditor({ table, camera, anchorRef, onChange, onCellChange, o
 
 /** Vista pasiva de las tablas: usa la misma grilla HTML que el editor.
  * Al cambiar entre selección y no selección no cambian las medidas ni la tipografía. */
-function StaticTable({table}:{table:SheetItem}) {
-  const rows=table.cells.length
-  const cols=Math.max(1,...table.cells.map(row=>row.length))
-  const size=tableSize(table)
-  const chrome=tableChrome(table)
-  const evaluate=createFormulaEvaluator(table.cells)
-  return <div className="sheet-static-table" data-table-id={table.id} style={{left:table.x,top:table.y,width:size.width,height:size.height,zIndex:((table as {zIndex?:number}).zIndex??100000)*2,transform:`rotate(${table.rotation||0}rad)`,transformOrigin:'center center'}}>
-    <div className="sheet-inline-title" style={{height:chrome.title,fontSize:Math.max(14,chrome.chromeFont*1.15)}}>{table.name||'Tabla'}</div>
-    <div className="sheet-inline-cells" style={{
-      gridTemplateColumns:`${chrome.rowHeader}px repeat(${cols},${table.cellWidth}px)`,
-      gridTemplateRows:`${chrome.colHeader}px repeat(${rows},${table.cellHeight}px)`,
-      "--sheet-font-size": `${tableFontSize(table)}px`,
-      "--sheet-chrome-font-size": `${chrome.chromeFont}px`
-    } as CSSProperties}>
-      <div className="sheet-inline-corner" />
-      {Array.from({length:cols},(_,c)=><div className="sheet-inline-heading" key={`head-${c}`}>{labelColumn(c)}</div>)}
-      {table.cells.map((row,r)=><Fragment key={r}>
-        <div className="sheet-inline-heading sheet-inline-rowheading" style={{gridColumn:1,gridRow:r+2}}>{r+1}</div>
-        {Array.from({length:cols},(_,c)=>{
-          const cell=row[c]
-          return <div key={`${r}:${c}`} className="sheet-display-cell" style={{
-            gridColumn:c+2,gridRow:r+2,
-            backgroundColor:cell?.backgroundColor||'#fff',color:cell?.textColor||'#1f2937'
-          }}><span className="sheet-display-value">{evaluate(r,c)}</span></div>
-        })}
-      </Fragment>)}
-    </div>
-  </div>
-}
+
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -1457,52 +1398,8 @@ function App() {
     if(!onPaper)paintOnPaper(ctx,()=>drawText(ctx,item,true))
   }
 
-  function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeItem,resolve=resolveObject) {
-    const {x, y, width: w, height: h, kind} = shape
-    const color = isBoardCanvas(ctx) ? colorVisibleEnOscuro(shape.color) : shape.color
-    ctx.save()
-    if (shape.rotation) {
-      const center = {x:x+w/2,y:y+h/2}
-      ctx.translate(center.x,center.y);ctx.rotate(shape.rotation);ctx.translate(-center.x,-center.y)
-    }
-    if(paintVisual(ctx,shape,resolve,color,isBoardCanvas(ctx)&&themeRef.current==='dark')){ctx.restore();return}
-    ctx.strokeStyle = color
-    ctx.lineWidth = isBoardCanvas(ctx) ? Math.max(shape.strokeWidth, 1.35 / Math.max(cameraRef.current.zoom, .01)) : shape.strokeWidth
-    ctx.lineJoin = 'round'; ctx.lineCap = 'round'
-    ctx.beginPath()
-    if (kind === 'line' || kind === 'arrow' || kind === 'double-arrow') {
-      const leftY=shape.reverse?y:y+h, rightY=shape.reverse?y+h:y
-      const x1=shape.backwards?x+w:x, y1=shape.backwards?rightY:leftY
-      const x2=shape.backwards?x:x+w, y2=shape.backwards?leftY:rightY
-      ctx.moveTo(x1,y1);ctx.lineTo(x2,y2)
-      const angle=Math.atan2(y2-y1,x2-x1), head=Math.min(19,Math.max(9,Math.min(Math.abs(w),Math.abs(h))*.23))
-      if (kind !== 'line') {
-        ctx.moveTo(x2-head*Math.cos(angle-.55),y2-head*Math.sin(angle-.55));ctx.lineTo(x2,y2)
-        ctx.lineTo(x2-head*Math.cos(angle+.55),y2-head*Math.sin(angle+.55))
-      }
-      if(kind==='double-arrow'){
-        ctx.moveTo(x1+head*Math.cos(angle-.55),y1+head*Math.sin(angle-.55));ctx.lineTo(x1,y1)
-        ctx.lineTo(x1+head*Math.cos(angle+.55),y1+head*Math.sin(angle+.55))
-      }
-    } else if(kind==='rectangle') ctx.rect(x,y,w,h)
-    else if(kind==='rounded') ctx.roundRect(x,y,w,h,Math.max(3,Math.min(18,w*.15,h*.15)))
-    else if(kind==='circle'||kind==='ellipse') ctx.ellipse(x+w/2,y+h/2,Math.max(.2,kind==='circle'?Math.min(w,h)/2:w/2),Math.max(.2,kind==='circle'?Math.min(w,h)/2:h/2),0,0,Math.PI*2)
-    else if(kind==='diamond') { ctx.moveTo(x+w/2,y);ctx.lineTo(x+w,y+h/2);ctx.lineTo(x+w/2,y+h);ctx.lineTo(x,y+h/2);ctx.closePath() }
-    else if(kind==='triangle'||kind==='triangle-down') {
-      ctx.moveTo(x+w/2,kind==='triangle'?y:y+h)
-      ctx.lineTo(x+w,kind==='triangle'?y+h:y);ctx.lineTo(x,kind==='triangle'?y+h:y);ctx.closePath()
-    } else if(kind==='hexagon') {
-      ctx.moveTo(x+w*.25,y);ctx.lineTo(x+w*.75,y);ctx.lineTo(x+w,y+h/2)
-      ctx.lineTo(x+w*.75,y+h);ctx.lineTo(x+w*.25,y+h);ctx.lineTo(x,y+h/2);ctx.closePath()
-    } else if(kind==='cylinder') {
-      const ry=Math.max(4,Math.min(h*.18,22))
-      ctx.ellipse(x+w/2,y+ry,w/2,ry,0,Math.PI,0)
-      ctx.moveTo(x,y+ry);ctx.lineTo(x,y+h-ry)
-      ctx.ellipse(x+w/2,y+h-ry,w/2,ry,0,0,Math.PI*2)
-      ctx.moveTo(x+w,y+h-ry);ctx.lineTo(x+w,y+ry)
-      ctx.moveTo(x+w,y+ry);ctx.ellipse(x+w/2,y+ry,w/2,ry,0,0,Math.PI)
-    }
-    ctx.stroke();paintLabel(ctx,shape,color);ctx.restore()
+  function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeItem, resolve=resolveObject) {
+    paintShape(ctx,shape,resolve,isBoardCanvas(ctx)?colorVisibleEnOscuro(shape.color):shape.color,isBoardCanvas(ctx)&&themeRef.current==='dark',isBoardCanvas(ctx)?1.35/Math.max(cameraRef.current.zoom,.01):0)
   }
 
   /** La cámara está en coordenadas de pantalla; no hay que recalcular geometría al desplazarla. */

@@ -47,6 +47,7 @@ export function createSynthesisFolderStore(root: FileSystemDirectoryHandle) {
     const expected = typeof value === "string" ? new Blob([value]) : value
     const [writtenHash, expectedHash] = await Promise.all([digest(await readback.arrayBuffer()), digest(await expected.arrayBuffer())])
     if (writtenHash !== expectedHash) throw new Error("No se pudo verificar el guardado de Síntesis en la carpeta.")
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('cursado-workspace-saved'))
   }
   async function digest(bytes: BufferSource) {
     return Array.from(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("")

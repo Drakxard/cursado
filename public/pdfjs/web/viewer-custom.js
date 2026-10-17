@@ -1,5 +1,5 @@
 (function () {
-  if (new URLSearchParams(window.location.search).get("embeddedReadOnly") === "1") return;
+  if (new URLSearchParams(window.location.search).get("embeddedReadOnly") === "1" || new URLSearchParams(window.location.search).get("libraryReadOnly") === "1") return;
   const hasInitialPresentationQuery = String(
     new URLSearchParams(window.location.search).get("presentationTagIds") || ""
   ).trim().length > 0;

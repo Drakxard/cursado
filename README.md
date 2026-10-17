@@ -1,5 +1,9 @@
 # cursado
 
+La biblioteca personal para InScreen permite publicar materiales y pizarras
+privadas en R2 y leerlos sin conexión desde Android. Usa el mismo visor PDF.js y
+recursos visuales de Cursado. [Configuración, uso y APK](docs/biblioteca-inscreen.md).
+
 Comunidad de estudiantes, intentando estudiar
 
 Este repositorio integra el organizador de estudio (Next.js, en la raíz) y la

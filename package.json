@@ -29,6 +29,7 @@
   "dependencies": {
     "@ai-sdk/azure": "^4.0.100",
     "@ai-sdk/gateway": "^4.0.111",
+    "@aws-crypto/sha256-js": "5.2.0",
     "@aws-sdk/client-s3": "^3.1010.0",
     "@aws-sdk/s3-request-presigner": "^3.1010.0",
     "@azure/storage-blob": "^12.34.0",
