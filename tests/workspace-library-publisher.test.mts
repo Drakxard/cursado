@@ -7,7 +7,7 @@ import type { LibraryManifest } from '../lib/workspace-library.ts'
 
 test('publisher skips unchanged content, excludes secrets, retries interrupted commits and publishes deletions', async () => {
   const values = new Map<string, File>(), directories = new Set(['']), uploaded = new Map<string, Uint8Array>()
-  let modified = Date.now(), uploads = 0, commits = 0, failCommit = false, current: LibraryManifest | null = null
+  let modified = Date.now(), uploads = 0, commits = 0, failCommit = false, failTransfer = true, current: LibraryManifest | null = null
   const missing = () => new DOMException('Not found', 'NotFoundError')
   function directory(prefix: string): unknown {
     const dir = {
@@ -40,17 +40,20 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
   const module = { exports: {} as { publishLibrary: (root: unknown) => Promise<LibraryManifest> } }
   const originalFetch = globalThis.fetch, originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window'), originalIndexed = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB')
   Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() })
+  let lastProgress: { error?: string; help?: string } = {}
+  window.addEventListener('cursado-library-progress', event => { lastProgress = (event as CustomEvent).detail })
   Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: { databases: async () => [] } })
   globalThis.fetch = async (input, options) => {
     const url = String(input)
     if (url.startsWith('https://upload.fixture/')) {
+      if (failTransfer) throw new TypeError('Failed to fetch')
       const hash = url.split('/').at(-1)!, bytes = new Uint8Array(await (options!.body as Blob).arrayBuffer())
       assert.equal(createHash('sha256').update(bytes).digest('hex'), hash)
       uploaded.set(hash, bytes); uploads++; return new Response('', { status: 200 })
     }
     const action = url.split('/workspace/')[1].split('?')[0], body = options?.body ? JSON.parse(String(options.body)) : {}
     if (action === 'status') return Response.json({ manifest: current })
-    if (action === 'cors') return Response.json({ ok: true })
+    if (action === 'cors') return Response.json({ ok: true, corsManaged: false })
     if (action === 'upload') return Response.json(uploaded.has(body.hash) ? { exists: true } : { uploadUrl: `https://upload.fixture/${body.hash}`, headers: {} })
     if (action === 'publish') {
       if (failCommit) return Response.json({ error: 'Interrupted commit' }, { status: 503 })
@@ -63,6 +66,10 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
   try {
     new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports)
     const publish = module.exports.publishLibrary
+    await assert.rejects(publish(root), /Tu clave no permite configurar CORS automáticamente/)
+    assert.equal(lastProgress.help, 'cors')
+    assert.equal(commits, 0); assert.equal(current, null)
+    failTransfer = false
     const first = await publish(root), count = uploads
     assert.equal(first.files.some(f => /User.Services|drive-sync/.test(f.path)), false)
     assert.equal(first.items.find(i => i.id === 'material:1')?.fileId, first.files.find(f => f.path.endsWith('a.pdf'))?.id)

@@ -9,8 +9,16 @@ type State = { version: 1; workspaceId: string; enabled: boolean; name: string; 
 type Candidate = { path: string; blob: Blob; modified: number }
 let running: Promise<LibraryManifest> | null = null
 let rerun = false
-export type PublicationProgress = { message: string; done: number; total: number; error?: string }
+export type PublicationProgress = { message: string; done: number; total: number; error?: string; help?: 'cors' }
 const report = (progress: PublicationProgress) => window.dispatchEvent(new CustomEvent('cursado-library-progress', { detail: progress }))
+class LibraryUploadError extends Error { readonly help = 'cors' as const }
+async function uploadToR2(url: string, options: RequestInit, corsManaged: boolean) {
+  try { return await fetch(url, options) }
+  catch {
+    if (navigator.onLine === false) throw new Error('Se perdió la conexión. Volvé a conectarte y reintentá la publicación.')
+    throw new LibraryUploadError(`No se pudo transferir el archivo a R2. ${corsManaged ? 'Revisá la conexión y los permisos CORS del bucket.' : 'Tu clave no permite configurar CORS automáticamente. Permití esta web en Settings → CORS policy de tu bucket.'} Abrí «Revisar permisos CORS» para ver los pasos. La publicación anterior se conserva.`)
+  }
+}
 export async function libraryRoot() {
   const root = getReadyWorkspaceHandle() || await loadWorkspaceHandle()
   if (!root || await queryWorkspacePermission(root, 'readwrite') !== 'granted') throw new Error('Seleccioná o autorizá tu carpeta de Cursado para publicar.')
@@ -185,7 +193,7 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
       await writeState(root, { ...state, hashes: newHashes, publishedAt: current.publishedAt })
       report({ message: 'Biblioteca actualizada', done: files.length, total: files.length }); return current
     }
-    await libraryOwnerApi('cors', { workspaceId })
+    const { corsManaged } = await libraryOwnerApi('cors', { workspaceId })
     let done = 0
     for (let i = 0; i < files.length; i++) {
       const f = files[i], candidate = candidates[i]
@@ -193,16 +201,17 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
       if (!current?.files.some(old => old.hash === f.hash && old.size === f.size)) {
         const session = await libraryOwnerApi('upload', { workspaceId, hash: f.hash, size: f.size, mime: f.mime })
         if (session.uploadUrl) {
-          const uploaded = await fetch(session.uploadUrl, { method: 'PUT', headers: session.headers, body: candidate.blob })
+          const uploaded = await uploadToR2(session.uploadUrl, { method: 'PUT', headers: session.headers, body: candidate.blob }, corsManaged)
           if (!uploaded.ok) throw new Error(`Falló la subida de ${f.path} (${uploaded.status}).`)
         } else if (session.session) {
           const parts = []
           try {
             for (let part = 1; part <= session.partCount; part++) {
               const signed = await libraryOwnerApi('upload/part', { workspaceId, session: session.session, part })
-              const result = await fetch(signed.url, { method: 'PUT', body: candidate.blob.slice((part - 1) * session.partSize, part * session.partSize) })
+              const result = await uploadToR2(signed.url, { method: 'PUT', body: candidate.blob.slice((part - 1) * session.partSize, part * session.partSize) }, corsManaged)
               const etag = result.headers.get('ETag')
-              if (!result.ok || !etag) throw new Error(`Falló una parte de ${f.path}. Comprobá CORS y la conexión.`)
+              if (!result.ok) throw new Error(`Falló una parte de ${f.path} (${result.status}). Reintentá la publicación.`)
+              if (!etag) throw new LibraryUploadError('R2 recibió una parte, pero CORS no permite leer ETag. Abrí «Revisar permisos CORS» y agregá ETag en ExposeHeaders. La publicación anterior se conserva.')
               parts.push({ ETag: etag, PartNumber: part })
             }
             await libraryOwnerApi('upload/complete', { workspaceId, session: session.session, parts })
@@ -216,6 +225,6 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
     await writeState(root, { ...state, hashes: newHashes, publishedAt: inventory.publishedAt })
     report({ message: 'Biblioteca actualizada', done, total: files.length }); return inventory
   }
-  running = (navigator.locks ? navigator.locks.request('cursado-library-publication', task) : task()).catch(error => { report({ message: 'Publicación pendiente', done: 0, total: 0, error: error instanceof Error ? error.message : String(error) }); throw error }).finally(() => { running = null; if (rerun) { rerun = false; setTimeout(() => { void publishLibrary(root).catch(() => {}) }, 2000) } })
+  running = (navigator.locks ? navigator.locks.request('cursado-library-publication', task) : task()).catch(error => { report({ message: 'Publicación pendiente', done: 0, total: 0, error: error instanceof Error ? error.message : String(error), ...(error instanceof LibraryUploadError ? { help: error.help } : {}) }); throw error }).finally(() => { running = null; if (rerun) { rerun = false; setTimeout(() => { void publishLibrary(root).catch(() => {}) }, 2000) } })
   return running
 }

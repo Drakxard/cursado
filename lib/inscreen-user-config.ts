@@ -74,7 +74,9 @@ export function normalizeInscreenUserConfig(value: unknown): InscreenUserConfig 
   const r2Fields = [config.R2_BUCKET_NAME, config.R2_ACCESS_KEY_ID, config.R2_SECRET_ACCESS_KEY, config.R2_ENDPOINT]
   if (r2Fields.some(Boolean) && !r2Fields.every(Boolean)) throw new Error("Completa todos los campos de Cloudflare R2.")
   if (config.R2_ENDPOINT) {
-    const endpoint = new URL(config.R2_ENDPOINT)
+    let endpoint: URL
+    try { endpoint = new URL(config.R2_ENDPOINT) }
+    catch { throw new Error('Endpoint S3 inválido. Copiá la dirección HTTPS de Cloudflare R2, por ejemplo https://TU_ACCOUNT_ID.r2.cloudflarestorage.com. No va tu nombre de usuario ni el nombre del bucket.') }
     if (
       endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.port ||
       endpoint.pathname !== "/" || endpoint.search || endpoint.hash ||

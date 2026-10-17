@@ -7,7 +7,7 @@ const steps = [
   { title: 'Elegí tu bucket', description: 'Entrá a Cloudflare y abrí R2 Object Storage. Si ya tenés un bucket para tus materias, usá ese. Si no, creá uno y anotá su nombre. Puede seguir siendo privado.', link: 'https://developers.cloudflare.com/r2/buckets/create-buckets/' },
   { title: 'Creá las claves de R2', description: 'En el inicio de R2 buscá API Tokens → Manage y creá un token de cuenta o usuario. Elegí Object Read & Write y limitá el acceso al bucket de tus materias.', link: 'https://developers.cloudflare.com/r2/api/tokens/' },
   { title: 'Copiá los datos para S3', description: 'Al crear el token, Cloudflare muestra Access Key ID, Secret Access Key y el endpoint S3. Copialos en los campos del mismo nombre de Cursado. En Bucket va el nombre del paso 1. Guardá las claves: Secret Access Key se muestra solo al crearla.', link: 'https://developers.cloudflare.com/r2/get-started/s3/' },
-  { title: 'Permití las subidas desde esta web', description: 'En tu bucket abrí Settings → CORS policy y agregá esta configuración. Después volvé a Cursado, completá los datos y pulsá Comenzar a subir. Al terminar aparecerá el QR para InScreen.', link: 'https://developers.cloudflare.com/r2/buckets/cors/' },
+  { title: 'Permití las subidas desde esta web', description: 'En tu bucket abrí Settings → CORS policy → Add CORS policy (o Edit) y pegá esta regla en la pestaña JSON. Si ya hay reglas para otras apps, conservá esas reglas y agregá esta. Pulsá Save y esperá hasta 30 segundos. Volvé a Cursado y reintentá la publicación sin cambiar las claves. Al terminar aparecerá el QR para InScreen.', link: 'https://developers.cloudflare.com/r2/buckets/cors/' },
 ]
 
 function R2Illustration({ step }: { step: number }) {
@@ -27,9 +27,9 @@ function R2Illustration({ step }: { step: number }) {
   </svg><figcaption>Ilustración orientativa · Los nombres pueden variar según el idioma de Cloudflare.</figcaption></figure>
 }
 
-export function R2SetupGuide({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function R2SetupGuide({ open, onOpenChange, initialStep = 0 }: { open: boolean; onOpenChange: (open: boolean) => void; initialStep?: number }) {
   const [step, setStep] = useState(0), [copied, setCopied] = useState(false)
-  useEffect(() => { if (open) { setStep(0); setCopied(false) } }, [open])
+  useEffect(() => { if (open) { setStep(Math.max(0, Math.min(steps.length - 1, initialStep))); setCopied(false) } }, [open, initialStep])
   const cors = JSON.stringify([{ AllowedOrigins: [typeof window !== 'undefined' ? window.location.origin : 'https://cursado.vercel.app'], AllowedMethods: ['GET', 'HEAD', 'PUT'], AllowedHeaders: ['content-type', 'x-amz-*'], ExposeHeaders: ['ETag'], MaxAgeSeconds: 3600 }], null, 2)
   return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="r2-guide-overlay" /><Dialog.Content className="r2-guide" onEscapeKeyDown={event => event.stopPropagation()}>
     <div className="r2-guide-heading"><div><span className="r2-guide-eyebrow">AYUDA PARA CONECTAR R2</span><Dialog.Title>Paso {step + 1} de {steps.length} · {steps[step].title}</Dialog.Title></div><Dialog.Close className="r2-guide-close" aria-label="Cerrar guía de R2"><X size={22} /></Dialog.Close></div>

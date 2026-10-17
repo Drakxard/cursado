@@ -42,6 +42,12 @@ test('saved R2 stays hidden and is reused; missing R2 has an illustrated guide; 
         await page.getByRole('img', { name: 'QR para vincular InScreen' }).waitFor()
         assert.equal(sealCalls, 0)
         assert.equal(await page.evaluate(() => (window as unknown as { __publishes: number }).__publishes), 1)
+        await page.evaluate(() => window.dispatchEvent(new CustomEvent('cursado-library-progress', { detail: { message: 'Publicación pendiente', done: 0, total: 0, error: 'Revisá los permisos CORS del bucket.', help: 'cors' } })))
+        await page.getByRole('button', { name: 'Revisar permisos CORS' }).click()
+        await page.getByRole('heading', { name: /Paso 4 de 4/ }).waitFor()
+        await page.keyboard.press('Escape')
+        await page.getByRole('button', { name: 'Cómo conseguir y configurar R2' }).click()
+        await page.getByRole('heading', { name: /Paso 1 de 4/ }).waitFor()
       } else if (scenario === 'none') {
         await page.getByLabel('Endpoint S3', { exact: true }).waitFor()
         assert.equal(await page.getByLabel('Endpoint S3', { exact: true }).getAttribute('type'), 'url')

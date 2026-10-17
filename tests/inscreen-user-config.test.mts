@@ -4,6 +4,7 @@ import test from "node:test"
 
 import {
   buildInscreenConfigCookie,
+  normalizeInscreenUserConfig,
   openInscreenUserConfig,
   openInscreenUserConfigParts,
   readInscreenUserConfig,
@@ -19,6 +20,10 @@ const config = {
   R2_SECRET_ACCESS_KEY: "r2-secret",
   R2_ENDPOINT: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
 }
+
+test('an autofilled user name in Endpoint S3 explains which Cloudflare address is required', () => {
+  assert.throws(() => normalizeInscreenUserConfig({ ...config, R2_ENDPOINT: 'Rafa' }), /Endpoint S3 inválido.*No va tu nombre de usuario/)
+})
 
 test("User.InScreen cifra todas las credenciales y solo abre con la semilla del despliegue", () => {
   const previousSeed = process.env.INSCREEN_CONFIG_SEED

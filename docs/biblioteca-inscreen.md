@@ -16,6 +16,10 @@ El botón **❔** abre cuatro pasos ilustrados para elegir el bucket, crear las
 claves, identificar el endpoint S3 y configurar CORS. Incluye enlaces oficiales
 de Cloudflare y permite copiar el JSON CORS con el origen de la web actual.
 
+Si una subida queda bloqueada por CORS, **Revisar permisos CORS** abre directamente
+ese paso. Una clave con permisos de objetos puede publicar, pero puede requerir
+agregar la regla desde el panel de Cloudflare. No hace falta cambiar las claves.
+
 La primera publicación habilita el QR, válido cinco minutos. En la primera pestaña
 de InScreen, **Vincular con nuevo dispositivo** abre el escáner. Se admiten varios
 celulares por espacio y una biblioteca activa por celular. Reemplazarla requiere

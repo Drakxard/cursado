@@ -32,6 +32,7 @@ export function WorkspaceLibraryButton() {
   const [open, setOpen] = useState(false), [root, setRoot] = useState<FileSystemDirectoryHandle | null>(null)
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [configured, setConfigured] = useState<boolean | null>(null)
   const [editing, setEditing] = useState(false), [help, setHelp] = useState(false), [connectionSource, setConnectionSource] = useState('')
+  const [helpStep, setHelpStep] = useState(0)
   const [publishedAt, setPublishedAt] = useState(''), [workspaceId, setWorkspaceId] = useState('')
   const [progress, setProgress] = useState<PublicationProgress | null>(null), [devices, setDevices] = useState<Device[]>([])
   const [qr, setQr] = useState(''), [expires, setExpires] = useState(0), [now, setNow] = useState(Date.now())
@@ -75,6 +76,7 @@ export function WorkspaceLibraryButton() {
     await run(async () => {
       if (!root) throw new Error('Elegí la carpeta que contiene tus materiales.')
       const connection = await libraryConnection(root)
+      setProgress(null)
       if (!connection.configured || editing && Object.values(credentials).some(Boolean)) await saveCredentials()
       else { setConfigured(true); setConnectionSource(connection.source) }
       setEditing(false)
@@ -107,7 +109,7 @@ export function WorkspaceLibraryButton() {
   return <>
     <button className="library-share" aria-label="Sincronizar dispositivos" onClick={() => setOpen(true)}><Share2 size={35} /></button>
     {open && <div className="library-overlay" onClick={() => setOpen(false)}><section role="dialog" aria-modal="true" aria-labelledby="library-title" className="library-panel" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setOpen(false) }}>
-      <header><h1 id="library-title">Sincronizá tus dispositivos</h1><div className="library-header-actions"><button aria-label="Cómo conseguir y configurar R2" title="Ayuda para conectar R2" onClick={() => setHelp(true)}>❔</button><button aria-label="Cerrar" onClick={() => setOpen(false)}><X /></button></div></header>
+      <header><h1 id="library-title">Sincronizá tus dispositivos</h1><div className="library-header-actions"><button aria-label="Cómo conseguir y configurar R2" title="Ayuda para conectar R2" onClick={() => { setHelpStep(0); setHelp(true) }}>❔</button><button aria-label="Cerrar" onClick={() => setOpen(false)}><X /></button></div></header>
       <p>Publicá tu biblioteca y llevala en InScreen. Podrás leerla también sin internet.</p>
       <button disabled={busy} onClick={() => void chooseFolder()}><FolderOpen size={18} /> {root ? root.name : 'Elegir carpeta de Cursado'}</button>
       {configured === null && busy && <p role="status">Buscando tu conexión guardada…</p>}
@@ -117,9 +119,10 @@ export function WorkspaceLibraryButton() {
       {(configured === false && root || editing) && <div className="library-config"><h2>Conectar Cloudflare R2</h2><div className="library-fields">{Object.keys(credentials).map(key => <label key={key}>{({ R2_BUCKET_NAME: 'Bucket', R2_ENDPOINT: 'Endpoint S3', R2_ACCESS_KEY_ID: 'Access Key ID', R2_SECRET_ACCESS_KEY: 'Secret Access Key' } as Record<string, string>)[key]}<input name={`cursado-library-${key.toLowerCase()}`} type={key.includes('KEY') ? 'password' : key === 'R2_ENDPOINT' ? 'url' : 'text'} autoComplete={key.includes('KEY') ? 'new-password' : 'off'} spellCheck={false} autoCapitalize="none" placeholder={key === 'R2_ENDPOINT' ? 'https://TU_ACCOUNT_ID.r2.cloudflarestorage.com' : editing ? 'Vacío conserva el valor actual' : ''} value={credentials[key as keyof typeof credentials]} onChange={e => setCredentials(current => ({ ...current, [key]: e.target.value }))} /></label>)}</div><p className="library-field-hint">El Endpoint S3 es una dirección que comienza con https://; lo encontrás junto a las claves de R2.</p></div>}
       <button className="library-primary" disabled={busy || !root || configured === null} onClick={() => void upload()}><RefreshCw size={18} /> {busy ? 'Procesando…' : publishedAt ? 'Actualizar ahora' : 'Comenzar a subir'}</button>
       {progress && <div role="status"><p>{progress.message}</p>{progress.total > 0 && <progress max={progress.total} value={progress.done} />}{progress.error && <p className="library-error">{progress.error}</p>}</div>}
-      {error && <p role="alert" className="library-error">{error}</p>}
+      {error && error !== progress?.error && <p role="alert" className="library-error">{error}</p>}
+      {progress?.help === 'cors' && <button onClick={() => { setHelpStep(3); setHelp(true) }}>❔ Revisar permisos CORS</button>}
       {publishedAt && <><p>Última publicación: {new Date(publishedAt).toLocaleString('es-AR')}</p><div className="library-devices"><div><h2>Actuales</h2>{devices.filter(d => d.enabled).length === 0 && <p>Todavía no hay dispositivos vinculados.</p>}{devices.filter(d => d.enabled).map(d => <div className="library-device" key={d.deviceId}><span>{d.name}<small>{new Date(d.createdAt).toLocaleDateString('es-AR')}</small></span><button disabled={busy} onClick={() => void run(async () => { await libraryOwnerApi('devices/revoke', { workspaceId, deviceId: d.deviceId }); await refreshDevices(workspaceId) })}>Desvincular</button></div>)}</div><div className="library-qr"><h2>Nuevos con QR</h2>{qr && now < expires ? <><img src={qr} alt="QR para vincular InScreen" /><p>Vence en {Math.ceil((expires - now) / 1000)} s</p></> : <p>Generá un QR y escanealo desde InScreen.</p>}<button disabled={busy} onClick={() => void run(() => createQr())}><QrCode size={18} /> Generar nuevo QR</button></div></div></>}
     </section></div>}
-    <R2SetupGuide open={help && open} onOpenChange={setHelp} />
+    <R2SetupGuide open={help && open} onOpenChange={setHelp} initialStep={helpStep} />
   </>
 }

@@ -10,6 +10,7 @@ test('publication commits only complete inventories; QR claims, device isolation
   type ObjectValue = { body: string; etag: string; size: number; metadata: Record<string, string> }
   const objects = new Map<string, ObjectValue>()
   let sequence = 0
+  let corsRules: Record<string, unknown>[] = [], corsWrites = 0, corsForbidden = false
   const failure = (status: number) => Object.assign(new Error(`R2 ${status}`), { $metadata: { httpStatusCode: status } })
   const execute = async (command: { kind: string; input: Record<string, unknown> }) => {
     const input = command.input, key = String(input.Key || ''), old = objects.get(key)
@@ -22,8 +23,8 @@ test('publication commits only complete inventories; QR claims, device isolation
         objects.set(key, { body, etag: String(++sequence), size: Buffer.byteLength(body), metadata: {} }); return {}
       }
       case 'ListObjectsV2Command': return { Contents: [...objects.keys()].filter(k => k.startsWith(String(input.Prefix))).map(Key => ({ Key })) }
-      case 'GetBucketCorsCommand': throw failure(404)
-      case 'PutBucketCorsCommand': return {}
+      case 'GetBucketCorsCommand': if (corsForbidden) throw failure(403); return { CORSRules: corsRules }
+      case 'PutBucketCorsCommand': corsRules = (input.CORSConfiguration as { CORSRules: Record<string, unknown>[] }).CORSRules; corsWrites++; return {}
       default: return {}
     }
   }
@@ -52,6 +53,17 @@ test('publication commits only complete inventories; QR claims, device isolation
     const token = new URL(uri).searchParams.get('token')
     return handler(new Request('https://cursado.example/api/inscreen/workspace/pairing/redeem', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, installationId, name: 'Android de prueba' }) }), 'pairing/redeem')
   }
+  assert.equal((await (await owner('cors')).json()).corsManaged, true)
+  assert.equal(corsWrites, 1)
+  assert.deepEqual(corsRules[0].AllowedOrigins, ['https://cursado.example'])
+  await owner('cors'); assert.equal(corsWrites, 1)
+  // A matching origin and PUT alone do not allow upload metadata or expose ETag.
+  corsRules[0].AllowedHeaders = []
+  await owner('cors'); assert.equal(corsWrites, 2)
+  assert.deepEqual(corsRules[0].AllowedHeaders, ['content-type', 'x-amz-*'])
+  corsForbidden = true
+  assert.equal((await (await owner('cors')).json()).corsManaged, false)
+  corsForbidden = false
   assert.equal((await owner('pairing/create')).status, 409)
   assert.equal((await owner('publish', { manifest: inventory })).status, 400)
   assert.equal(objects.has(root + 'current.json'), false)

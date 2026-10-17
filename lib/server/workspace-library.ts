@@ -55,7 +55,7 @@ async function setupCors(s: ReturnType<typeof storage>, origin: string) {
   catch (error) { if (!missing(error)) throw error; rules = [] }
   const id = `cursado-library-${new URL(origin).hostname}`.slice(0, 255)
   const rule = { ID: id, AllowedOrigins: [origin], AllowedMethods: ['GET', 'HEAD', 'PUT'], AllowedHeaders: ['content-type', 'x-amz-*'], ExposeHeaders: ['ETag'], MaxAgeSeconds: 3600 }
-  if (rules.some(r => r.ID === id && JSON.stringify(r.AllowedOrigins) === JSON.stringify(rule.AllowedOrigins) && r.ExposeHeaders?.includes('ETag') && r.AllowedMethods?.includes('PUT'))) return
+  if (rules.some(r => r.ID === id && JSON.stringify(r.AllowedOrigins) === JSON.stringify(rule.AllowedOrigins) && r.ExposeHeaders?.some(h => h.toLowerCase() === 'etag') && rule.AllowedMethods.every(m => r.AllowedMethods?.includes(m)) && rule.AllowedHeaders.every(h => r.AllowedHeaders?.some(allowed => allowed === '*' || allowed.toLowerCase() === h)))) return
   await s.client.send(new PutBucketCorsCommand({ Bucket: s.bucket, CORSConfiguration: { CORSRules: [...rules.filter(r => r.ID !== id), rule] } }))
 }
 export async function handleLibraryRequest(request: Request, action: string) {
