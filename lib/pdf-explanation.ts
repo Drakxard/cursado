@@ -1,3 +1,5 @@
+export const DEFAULT_EXPLANATION_INSTRUCTIONS = "Que sea en HTML, visualización simple e intuitiva con interactividad, tratando de sumergir al tema descubriéndolo secuencialmente."
+
 export function explanationInput(body: unknown) {
   const data = body as Record<string, unknown> | null
   const question = typeof data?.question === "string" ? data.question.trim() || "Explicalo" : ""
@@ -5,15 +7,17 @@ export function explanationInput(body: unknown) {
   if (!question || question.length > 2000 || !transcription || transcription.length > 180_000) {
     throw new Error("Ingresá una duda y una transcripción de página válidas.")
   }
+  const instructions = data?.instructions
+  if (instructions !== undefined && (typeof instructions !== "string" || !instructions.trim() || instructions.length > 4000)) throw new Error("La instrucción final no es válida.")
   const image = data?.image
   if (image !== undefined && (typeof image !== "string" || image.length > 4_000_000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image))) {
     throw new Error("La región adjunta no es una imagen válida.")
   }
-  return { question, transcription, ...(typeof image === "string" ? { image } : {}) }
+  return { question, transcription, ...(typeof instructions === "string" ? { instructions: instructions.trim() } : {}), ...(typeof image === "string" ? { image } : {}) }
 }
 
-export function explanationPrompt(question: string, transcription: string) {
-  return `${question}\n\n${transcription}`
+export function explanationPrompt(question: string, transcription: string, instructions = DEFAULT_EXPLANATION_INSTRUCTIONS) {
+  return `${question}\n\n${transcription}\n\n${instructions}`
 }
 
 export function explanationHtml(text: string) {

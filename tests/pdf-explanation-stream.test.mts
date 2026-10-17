@@ -1,3 +1,4 @@
+import { DEFAULT_EXPLANATION_INSTRUCTIONS } from "../lib/pdf-explanation.ts"
 import assert from "node:assert/strict"
 import test from "node:test"
 import { readFileSync } from "node:fs"
@@ -30,19 +31,19 @@ test("selected region reaches the model alongside the prompt and transcription",
   await parts(explanationStream(model, "Explicá este gráfico", "Texto de la página", { provider: "azure", image }))
   const content = model.doStreamCalls[0].prompt[0].content
   assert.equal(content[0].type, "text")
-  assert.equal(content[0].text, "Explicá este gráfico\n\nTexto de la página")
+  assert.equal(content[0].text, "Explicá este gráfico\n\nTexto de la página\n\n" + DEFAULT_EXPLANATION_INSTRUCTIONS)
   assert.equal(content[1].type, "file")
   assert.equal(content[1].mediaType, "image/png")
   assert.equal(content[1].data.type, "data")
   assert.equal(content[1].data.data, image.split(",")[1])
 })
 
-test("the model receives only the user's request and transcription, without tools or design instructions", async () => {
+test("the model receives the request, transcription and final visual instructions without tools", async () => {
   const model = textModel(html)
   const question = "Hacé un HTML minimalista con un gráfico"
   await parts(explanationStream(model, question, "Página transcrita"))
   const request = model.doStreamCalls[0]
-  assert.deepEqual(request.prompt, [{ role: "user", content: [{ type: "text", text: question + "\n\nPágina transcrita" }], providerOptions: undefined }])
+  assert.deepEqual(request.prompt, [{ role: "user", content: [{ type: "text", text: question + "\n\nPágina transcrita\n\n" + DEFAULT_EXPLANATION_INSTRUCTIONS }], providerOptions: undefined }])
   assert.equal(request.tools, undefined)
   assert.deepEqual(request.toolChoice, { type: "auto" }) // SDK default; no tools are supplied.
   assert.equal(request.abortSignal, undefined)

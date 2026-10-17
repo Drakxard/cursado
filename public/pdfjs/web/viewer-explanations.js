@@ -9,6 +9,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   };
   const toolbar = document.getElementById("toolbarViewerRight");
   if (!toolbar) return;
+  const instructionKey = "pdf-explanation-instructions.v1";
+  const defaultInstructions = "Que sea en HTML, visualización simple e intuitiva con interactividad, tratando de sumergir al tema descubriéndolo secuencialmente.";
+  const getInstructions = () => { try { return localStorage.getItem(instructionKey)?.trim() || defaultInstructions; } catch { return defaultInstructions; } };
   let documentState = null, loading = null, modal = null, restoring = false;
   let saving = Promise.resolve();
   const editors = new Map();
@@ -278,18 +281,41 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     };
     div.classList.add("pdf-explanation-text");
     div.title = "Clic para ver la explicación; arrastrá para ubicarla";
-    let drag = null;
+    let drag = null, holdTimer = null, editing = false;
+    const commit = editor.commit.bind(editor);
+    editor.commit = () => {
+      commit();
+      if (!editing) return;
+      editing = false;
+      delete div.dataset.explanationEditing;
+      entry.annotation = editor.serialize() || entry.annotation;
+      entry.position = { x: editor.x, y: editor.y };
+      persist(state).catch(report);
+    };
+    editor.editorDiv.addEventListener("blur", () => {
+      setTimeout(() => { if (editing && !editor.editorDiv.contains(document.activeElement)) editor.commit(); }, 0);
+    });
+    div.title = "Clic para ver; mantener presionado para editar; arrastrar para mover";
     div.addEventListener("pointerdown", event => {
-      if (event.button !== 0 || event.target.closest(".editToolbar, .resizers")) return;
+      if (editing || event.button !== 0 || event.target.closest(".editToolbar, .resizers")) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       drag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, startX: editor.x, startY: editor.y, moved: false };
       div.setPointerCapture(event.pointerId);
+      holdTimer = setTimeout(() => {
+        if (!drag || drag.moved) return;
+        drag.held = true;
+        editing = true;
+        div.dataset.explanationEditing = "true";
+        editor.enableEditMode();
+        editor.editorDiv.focus({ preventScroll: true });
+      }, 550);
     }, true);
     div.addEventListener("pointermove", event => {
       if (!drag || drag.pointer !== event.pointerId) return;
       const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
-      if (Math.hypot(dx, dy) > 5) drag.moved = true;
+      if (drag.held) return;
+      if (Math.hypot(dx, dy) > 5) { drag.moved = true; clearTimeout(holdTimer); }
       if (!drag.moved) return;
       const [tx, ty] = editor.screenToPageTranslation(dx, dy);
       const [width, height] = editor.parentDimensions;
@@ -299,9 +325,12 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     });
     const finish = event => {
       if (!drag || drag.pointer !== event.pointerId) return;
+      clearTimeout(holdTimer);
+      const held = drag.held;
       const moved = drag.moved;
       drag = null;
       if (div.hasPointerCapture(event.pointerId)) div.releasePointerCapture(event.pointerId);
+      if (held) return;
       if (moved) {
         editor.commit();
         entry.annotation = editor.serialize() || entry.annotation;
@@ -314,12 +343,12 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     div.addEventListener("pointerup", finish);
     div.addEventListener("pointercancel", finish);
     div.addEventListener("click", event => {
-      if (event.target.closest(".editToolbar, .resizers")) return;
+      if (editing || event.target.closest(".editToolbar, .resizers")) return;
       event.preventDefault(); event.stopImmediatePropagation();
     }, true);
-    div.addEventListener("dblclick", event => { event.preventDefault(); event.stopImmediatePropagation(); }, true);
+    div.addEventListener("dblclick", event => { if (editing) return; event.preventDefault(); event.stopImmediatePropagation(); }, true);
     div.addEventListener("keydown", event => {
-      if (event.target.closest(".editToolbar, .resizers")) return;
+      if (editing || event.target.closest(".editToolbar, .resizers")) return;
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopImmediatePropagation(); openHtml(entry); }
     }, true);
   }
@@ -382,8 +411,27 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     view.node.setAttribute("aria-modal", "false");
     star.setAttribute("aria-expanded", "true");
     const form = document.createElement("form");
-    form.innerHTML = '<label hidden for="pdf-explanation-model">Modelo gratuito de AI Gateway</label><div class="pdf-explanation-model-row"><select id="pdf-explanation-model" disabled><option value="">Cargando modelos…</option></select><button type="button" class="pdf-explanation-refresh" title="Actualizar modelos gratuitos" aria-label="Actualizar modelos gratuitos">↻</button></div><p class="pdf-explanation-model-status" role="status"></p><textarea aria-label="?Qu? quer?s entender?" id="pdf-explanation-question" maxlength="2000" rows="4" placeholder="Explicalo · Enter para generar; Shift+Enter para otra línea"></textarea><div class="pdf-explanation-loading" hidden><span class="pdf-explanation-spinner" aria-hidden="true"></span><span class="pdf-explanation-elapsed">Cargando…</span></div><p class="pdf-explanation-progress" role="status" aria-live="polite"></p><button type="submit">Generar explicación</button>';
+    form.innerHTML = '<label hidden for="pdf-explanation-model">Modelo gratuito de AI Gateway</label><div class="pdf-explanation-model-row" hidden><select id="pdf-explanation-model" disabled><option value="">Cargando modelos…</option></select><button type="button" class="pdf-explanation-refresh" title="Actualizar modelos gratuitos" aria-label="Actualizar modelos gratuitos">↻</button></div><p class="pdf-explanation-model-status" role="status"></p><textarea aria-label="?Qu? quer?s entender?" id="pdf-explanation-question" maxlength="2000" rows="4" placeholder="Explicalo · Enter para generar; Shift+Enter para otra línea"></textarea><div class="pdf-explanation-loading" hidden><span class="pdf-explanation-spinner" aria-hidden="true"></span><span class="pdf-explanation-elapsed">Cargando…</span></div><p class="pdf-explanation-progress" role="status" aria-live="polite"></p><button type="submit">Generar explicación</button>';
     view.panel.append(form);
+    const settings = document.createElement("button");
+    settings.type = "button"; settings.className = "pdf-explanation-icon";
+    settings.textContent = "⚙"; settings.title = "Editar instrucción final"; settings.setAttribute("aria-label", settings.title);
+    const header = view.panel.querySelector("header");
+    header.insertBefore(settings, header.lastElementChild);
+    const preferences = document.createElement("div"); preferences.className = "pdf-explanation-preferences"; preferences.hidden = true;
+    preferences.innerHTML = '<label>Instrucción final<textarea maxlength="4000" rows="5" aria-label="Instrucción final"></textarea></label><button type="button">Guardar</button><p role="alert"></p>';
+    const instructionInput = preferences.querySelector("textarea");
+    instructionInput.value = getInstructions();
+    view.panel.append(preferences);
+    settings.addEventListener("click", () => {
+      preferences.hidden = !preferences.hidden; form.hidden = !preferences.hidden;
+      if (!preferences.hidden) instructionInput.focus();
+    });
+    preferences.querySelector("button").addEventListener("click", () => {
+      if (!instructionInput.value.trim()) return;
+      try { localStorage.setItem(instructionKey, instructionInput.value.trim()); preferences.hidden = true; form.hidden = false; input.focus(); }
+      catch { preferences.querySelector('[role="alert"]').textContent = "No se pudo guardar la instrucción."; }
+    });
     const input = form.querySelector("textarea"), status = form.querySelector(".pdf-explanation-progress"), submit = form.querySelector('button[type="submit"]');
     const modelSelect = form.querySelector("select"), modelStatus = form.querySelector(".pdf-explanation-model-status"), refresh = form.querySelector(".pdf-explanation-refresh");
     const loadingIndicator = form.querySelector(".pdf-explanation-loading"), elapsed = form.querySelector(".pdf-explanation-elapsed");
@@ -494,7 +542,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     async function loadModels() {
       const revision = ++modelsRevision;
       modelSelect.disabled = true; refresh.disabled = true;
-      modelStatus.hidden = false;
+      modelStatus.hidden = true;
       modelStatus.textContent = "Consultando el modelo de explicación…";
       try {
         const response = await servicesFetch("/api/pdf-explanation", { cache: "no-store" });
@@ -519,6 +567,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       } catch (error) {
         if (revision !== modelsRevision || modal !== view) return;
         modelSelect.replaceChildren(new Option("No se pudo cargar la lista", ""));
+        modelStatus.hidden = false;
         modelStatus.textContent = error.message;
         throw error;
       } finally { if (revision === modelsRevision) { modelSelect.disabled = generating || !modelSelect.value; refresh.disabled = generating; } }
@@ -579,7 +628,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         debug.transcription = text;
         const image = await captureRegion();
         if (image) debug.region = { ...region };
-        const html = await window.requestPdfExplanation(question, text, message => { status.textContent = `${selectedModel} · ${message}`; }, debug, selectedModel, image, servicesFetch);
+        const html = await window.requestPdfExplanation(question, text, message => { status.textContent = `${selectedModel} · ${message}`; }, debug, selectedModel, image, servicesFetch, getInstructions());
         debug.html = html;
         debug.stage = "guardar-html-y-nota";
         const pdfPage = await state.pdf.getPage(page);

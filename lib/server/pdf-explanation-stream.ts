@@ -3,7 +3,7 @@ import { explanationHtml, explanationPrompt } from "../pdf-explanation.ts"
 import { explanationFailure } from "../pdf-explanation-errors.ts"
 
 export function explanationStream(model: LanguageModel, question: string, transcription: string,
-  options: { fallbackModels?: string[]; maxOutputTokens?: number; reasoning?: "none" | "low"; image?: string; provider?: "azure" | "gateway" } = {}) {
+  options: { instructions?: string; fallbackModels?: string[]; maxOutputTokens?: number; reasoning?: "none" | "low"; image?: string; provider?: "azure" | "gateway" } = {}) {
   let failureDiagnostics: ReturnType<typeof explanationFailure>["diagnostics"] | undefined
   const reportError = (error: unknown) => {
     const failure = explanationFailure(error, options.provider)
@@ -15,9 +15,9 @@ export function explanationStream(model: LanguageModel, question: string, transc
   const result = streamText({
     model,
     ...(options.image ? { messages: [{ role: "user" as const, content: [
-      { type: "text" as const, text: explanationPrompt(question, transcription) },
+      { type: "text" as const, text: explanationPrompt(question, transcription, options.instructions) },
       { type: "file" as const, data: options.image, mediaType: options.image.slice(5, options.image.indexOf(";")) },
-    ] }] } : { prompt: explanationPrompt(question, transcription) }),
+    ] }] } : { prompt: explanationPrompt(question, transcription, options.instructions) }),
     reasoning: options.reasoning ?? "none",
     maxOutputTokens: options.provider === "azure" ? (options.maxOutputTokens ?? 12_000) : Math.min(options.maxOutputTokens ?? 1_800, 1_800),
     ...(options.provider === "azure"

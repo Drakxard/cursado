@@ -42,7 +42,7 @@ async function handlePOST(request: Request) {
   try {
     const azure = azureExplanationConfig()
     if (azure) return explanationStream(azureExplanationModel(azure), input.question, input.transcription,
-      { maxOutputTokens: 12_000, reasoning: "low", provider: "azure", image: input.image })
+      { maxOutputTokens: 12_000, reasoning: "low", provider: "azure", image: input.image, instructions: input.instructions })
   } catch (error) {
     const failure = explanationFailure(error, "azure")
     return Response.json({ error: error instanceof Error && !failure.diagnostics.status ? error.message : failure.message,
@@ -61,7 +61,7 @@ async function handlePOST(request: Request) {
       gateway(selected.id),
       input.question,
       input.transcription,
-      { maxOutputTokens: selected.maxOutputTokens, image: input.image },
+      { maxOutputTokens: selected.maxOutputTokens, image: input.image, instructions: input.instructions },
     )
   } catch (error) {
     if (error instanceof FreeExplanationModelsError) return Response.json({ error: error.message, stage: "catalogo-modelos-gratuitos" }, { status: 503 })
