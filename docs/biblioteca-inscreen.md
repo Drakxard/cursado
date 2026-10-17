@@ -6,6 +6,16 @@ no está configurado y pulsá **Comenzar a subir**. Las credenciales existentes 
 conservan cifradas en `User.Services`. Esta función solo necesita R2: Groq y Marker
 siguen siendo independientes.
 
+El panel reutiliza R2 de `User.Services` (también recupera su respaldo y el
+formato anterior `User.InScreen`) o la configuración del despliegue. Muestra
+**R2 conectado**, sin pedir las claves de nuevo. **Cambiar configuración** abre
+los campos; dejar uno vacío conserva su valor. Si un archivo no puede abrirse,
+se informa el problema para recuperar la configuración.
+
+El botón **❔** abre cuatro pasos ilustrados para elegir el bucket, crear las
+claves, identificar el endpoint S3 y configurar CORS. Incluye enlaces oficiales
+de Cloudflare y permite copiar el JSON CORS con el origen de la web actual.
+
 La primera publicación habilita el QR, válido cinco minutos. En la primera pestaña
 de InScreen, **Vincular con nuevo dispositivo** abre el escáner. Se admiten varios
 celulares por espacio y una biblioteca activa por celular. Reemplazarla requiere

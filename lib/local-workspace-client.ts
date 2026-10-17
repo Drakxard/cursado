@@ -56,9 +56,11 @@ export async function loadServicesFile(rootHandle: FileSystemDirectoryHandle) {
   try {
     return await readServicesFileByName(rootHandle, SERVICES_FILE_NAME)
   } catch (error) {
-    if (error instanceof DOMException && error.name === "NotFoundError") return null
     try { return await readServicesFileByName(rootHandle, SERVICES_BACKUP_FILE_NAME) }
-    catch { throw error }
+    catch (backupError) {
+      if (error instanceof DOMException && error.name === "NotFoundError" && backupError instanceof DOMException && backupError.name === "NotFoundError") return null
+      throw error
+    }
   }
 }
 

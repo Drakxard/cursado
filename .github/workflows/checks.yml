@@ -44,6 +44,8 @@ jobs:
       - run: npm run test:voice
       - run: npm run test:synthesis-paste
       - run: npm run test:services
+      - name: Conexión R2 guardada y guía ilustrada
+        run: node --test --experimental-strip-types tests/workspace-library-panel.browser.mts
       - run: npm run build
       - name: Pruebas del servidor Python con base temporal
         run: python pizarraproyecto-main/tests/hosting_namespace.test.py

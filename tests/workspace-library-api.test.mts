@@ -30,7 +30,7 @@ test('publication commits only complete inventories; QR claims, device isolation
   const commands = ['GetObjectCommand', 'HeadObjectCommand', 'PutObjectCommand', 'GetBucketCorsCommand', 'PutBucketCorsCommand', 'CreateMultipartUploadCommand', 'UploadPartCommand', 'CompleteMultipartUploadCommand', 'AbortMultipartUploadCommand', 'ListObjectsV2Command']
   const fixtures: Record<string, string> = {
     '@/lib/authz': 'export async function requireAuthSession(){return {response:null}}',
-    '@/lib/inscreen-user-config': 'export function readInscreenUserConfig(request){if(request.headers.get("x-inscreen-config-token")!=="owner")throw Error("Missing configuration");return {R2_BUCKET_NAME:"fixture",R2_ENDPOINT:"https://fixture.r2.cloudflarestorage.com",R2_ACCESS_KEY_ID:"key",R2_SECRET_ACCESS_KEY:"secret"}} export function getInscreenR2Config(config){return config}',
+    '@/lib/inscreen-user-config': 'export function readInscreenUserConfig(request){if(request.headers.get("x-inscreen-config-token")!=="owner")throw Error("Missing configuration");return {R2_BUCKET_NAME:"fixture",R2_ENDPOINT:"https://fixture.r2.cloudflarestorage.com",R2_ACCESS_KEY_ID:"key",R2_SECRET_ACCESS_KEY:"secret"}} export function getInscreenR2Config(config){return config} export function normalizeInscreenUserConfig(config){return config}',
     '@aws-sdk/client-s3': `export class S3Client {send(command){return globalThis.__libraryExecute(command)}}\n${commands.map(name => `export class ${name} {constructor(input){this.input=input;this.kind='${name}'}}`).join('\n')}`,
     '@aws-sdk/s3-request-presigner': 'export async function getSignedUrl(client,command){return "https://fixture.r2.cloudflarestorage.com/"+command.input.Key}',
   }

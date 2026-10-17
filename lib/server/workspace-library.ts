@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand, GetBucketCorsCommand, PutBucketCorsCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, type CORSRule } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { requireAuthSession } from '@/lib/authz'
-import { readInscreenUserConfig, getInscreenR2Config, type InscreenR2Config } from '@/lib/inscreen-user-config'
+import { type InscreenR2Config } from '@/lib/inscreen-user-config'
+import { workspaceLibraryConfig } from './workspace-library-config'
 import { libraryHash, libraryId, validateLibraryManifest, type LibraryManifest } from '@/lib/workspace-library'
 import { openLibraryToken, sealLibraryToken } from './workspace-library-tokens'
 
@@ -46,7 +47,7 @@ async function ownerAccess(request: Request, id: string) {
   if (auth.response) throw new LibraryError(401, 'Ingresá a Cursado.')
   const origin = request.headers.get('origin')
   if (origin && origin !== new URL(request.url).origin) throw new LibraryError(403, 'Origen inválido.')
-  return { workspaceId: libraryId(id), r2: getInscreenR2Config(readInscreenUserConfig(request)) }
+  return { workspaceId: libraryId(id), r2: workspaceLibraryConfig(request).r2 }
 }
 async function setupCors(s: ReturnType<typeof storage>, origin: string) {
   let rules: CORSRule[]
@@ -63,6 +64,12 @@ export async function handleLibraryRequest(request: Request, action: string) {
     const url = new URL(request.url), method = request.method
     const body = method === 'GET' ? {} : await request.json() as Record<string, unknown>
     const origin = url.origin
+    if (action === 'config' && method === 'GET') {
+      const auth = await requireAuthSession()
+      if (auth.response) return auth.response
+      const { source } = workspaceLibraryConfig(request)
+      return Response.json({ ok: true, configured: source !== 'none', source }, { headers })
+    }
     if (action === 'pairing/redeem' && method === 'POST') {
       let a: Access
       try { a = openLibraryToken<Access>('pairing', String(body.token || '')) } catch { throw new LibraryError(400, 'QR inválido.') }

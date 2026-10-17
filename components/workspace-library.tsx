@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { Share2, X, RefreshCw, QrCode, FolderOpen } from 'lucide-react'
+import { R2SetupGuide } from '@/components/r2-setup-guide'
+import { libraryConnection } from '@/lib/client/workspace-library-connection'
 import { libraryOwnerApi, libraryRoot, publishLibrary, readLibraryState, type PublicationProgress } from '@/lib/client/workspace-library'
-import { getReadyInscreenConfigToken, loadServicesFile, loadWorkspaceHandle, persistServicesFile, pickWorkspaceRootHandle, requestWorkspacePermission, setReadyInscreenConfigToken, setReadyWorkspaceHandle } from '@/lib/local-workspace-client'
+import { getReadyInscreenConfigToken, loadServicesFile, loadWorkspaceHandle, persistServicesFile, pickWorkspaceRootHandle, queryWorkspacePermission, requestWorkspacePermission, setReadyInscreenConfigToken, setReadyWorkspaceHandle } from '@/lib/local-workspace-client'
 
 export function WorkspaceLibraryPublisher() {
   useEffect(() => {
@@ -28,7 +30,8 @@ export function WorkspaceLibraryPublisher() {
 type Device = { deviceId: string; name: string; enabled: boolean; createdAt: string }
 export function WorkspaceLibraryButton() {
   const [open, setOpen] = useState(false), [root, setRoot] = useState<FileSystemDirectoryHandle | null>(null)
-  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [configured, setConfigured] = useState(false)
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [configured, setConfigured] = useState<boolean | null>(null)
+  const [editing, setEditing] = useState(false), [help, setHelp] = useState(false), [connectionSource, setConnectionSource] = useState('')
   const [publishedAt, setPublishedAt] = useState(''), [workspaceId, setWorkspaceId] = useState('')
   const [progress, setProgress] = useState<PublicationProgress | null>(null), [devices, setDevices] = useState<Device[]>([])
   const [qr, setQr] = useState(''), [expires, setExpires] = useState(0), [now, setNow] = useState(Date.now())
@@ -40,16 +43,10 @@ export function WorkspaceLibraryButton() {
   }, [])
   async function inspect(handle: FileSystemDirectoryHandle) {
     setRoot(handle); setReadyWorkspaceHandle(handle)
-    const services = await loadServicesFile(handle)
-    setReadyInscreenConfigToken(services?.inscreenToken || '')
-    let ready = false
-    if (services?.inscreenToken) {
-      const response = await fetch('/api/inscreen/config/status', { headers: { 'x-inscreen-config-token': services.inscreenToken }, cache: 'no-store' })
-      const status = await response.json()
-      if (!response.ok) throw new Error(status.error || 'No se pudieron abrir los servicios.')
-      ready = Boolean(status.services?.r2)
-    }
-    setConfigured(ready)
+    setConfigured(null); setEditing(false)
+    const connection = await libraryConnection(handle)
+    const ready = connection.configured
+    setConfigured(ready); setConnectionSource(connection.source)
     const state = await readLibraryState(handle)
     setWorkspaceId(state?.workspaceId || ''); setPublishedAt(state?.publishedAt || '')
     if (state && ready) await refreshDevices(state.workspaceId)
@@ -57,7 +54,7 @@ export function WorkspaceLibraryButton() {
   async function run(work: () => Promise<void>) { setBusy(true); setError(''); try { await work() } catch (err) { setError(err instanceof Error ? err.message : String(err)) } finally { setBusy(false) } }
   async function chooseFolder() {
     await run(async () => {
-      const stored = await loadWorkspaceHandle()
+      const stored = root ? null : await loadWorkspaceHandle()
       const handle = stored && await requestWorkspacePermission(stored, 'readwrite') === 'granted' ? stored : await pickWorkspaceRootHandle()
       await inspect(handle)
     })
@@ -77,7 +74,10 @@ export function WorkspaceLibraryButton() {
   async function upload() {
     await run(async () => {
       if (!root) throw new Error('Elegí la carpeta que contiene tus materiales.')
-      if (!configured || Object.values(credentials).some(Boolean)) await saveCredentials()
+      const connection = await libraryConnection(root)
+      if (!connection.configured || editing && Object.values(credentials).some(Boolean)) await saveCredentials()
+      else { setConfigured(true); setConnectionSource(connection.source) }
+      setEditing(false)
       const manifest = await publishLibrary(root, { enable: true })
       setWorkspaceId(manifest.workspaceId); setPublishedAt(manifest.publishedAt)
       await refreshDevices(manifest.workspaceId)
@@ -90,24 +90,36 @@ export function WorkspaceLibraryButton() {
   }
   useEffect(() => {
     if (!open) return
-    void run(async () => { const handle = await libraryRoot().catch(() => null); if (handle) await inspect(handle) })
-    const interval = setInterval(() => { setNow(Date.now()); if (workspaceId) void refreshDevices(workspaceId).catch(() => {}) }, 5000)
-    return () => clearInterval(interval)
+    setConfigured(null); setEditing(false)
+    void run(async () => {
+      const handle = await loadWorkspaceHandle()
+      if (handle && await queryWorkspacePermission(handle, 'readwrite') === 'granted') await inspect(handle)
+      else { const connection = await libraryConnection(); setConfigured(connection.configured); setConnectionSource(connection.source) }
+    })
     // Opening the panel loads services without prompting for filesystem permission.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+  useEffect(() => {
+    if (!open) return
+    const interval = setInterval(() => { setNow(Date.now()); if (workspaceId) void refreshDevices(workspaceId).catch(() => {}) }, 5000)
+    return () => clearInterval(interval)
   }, [open, workspaceId])
   return <>
     <button className="library-share" aria-label="Sincronizar dispositivos" onClick={() => setOpen(true)}><Share2 size={35} /></button>
     {open && <div className="library-overlay" onClick={() => setOpen(false)}><section role="dialog" aria-modal="true" aria-labelledby="library-title" className="library-panel" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setOpen(false) }}>
-      <header><h1 id="library-title">Sincronizá tus dispositivos</h1><button aria-label="Cerrar" onClick={() => setOpen(false)}><X /></button></header>
+      <header><h1 id="library-title">Sincronizá tus dispositivos</h1><div className="library-header-actions"><button aria-label="Cómo conseguir y configurar R2" title="Ayuda para conectar R2" onClick={() => setHelp(true)}>❔</button><button aria-label="Cerrar" onClick={() => setOpen(false)}><X /></button></div></header>
       <p>Publicá tu biblioteca y llevala en InScreen. Podrás leerla también sin internet.</p>
       <button disabled={busy} onClick={() => void chooseFolder()}><FolderOpen size={18} /> {root ? root.name : 'Elegir carpeta de Cursado'}</button>
-      {!configured && <p>Necesitás conectar Cloudflare R2 para subir tus recursos.</p>}
-      <details open={!configured}><summary>{configured ? 'R2 conectado · Cambiar configuración' : 'Configurar Cloudflare R2'}</summary><div className="library-fields">{Object.keys(credentials).map(key => <label key={key}>{({ R2_BUCKET_NAME: 'Bucket', R2_ENDPOINT: 'Endpoint S3', R2_ACCESS_KEY_ID: 'Access Key ID', R2_SECRET_ACCESS_KEY: 'Secret Access Key' } as Record<string, string>)[key]}<input type={key.includes('KEY') ? 'password' : 'text'} autoComplete="off" value={credentials[key as keyof typeof credentials]} onChange={e => setCredentials(current => ({ ...current, [key]: e.target.value }))} /></label>)}</div></details>
-      <button className="library-primary" disabled={busy || !root} onClick={() => void upload()}><RefreshCw size={18} /> {busy ? 'Publicando…' : publishedAt ? 'Actualizar ahora' : 'Comenzar a subir'}</button>
+      {configured === null && busy && <p role="status">Buscando tu conexión guardada…</p>}
+      {configured && <div className="library-connected"><div><strong>✓ R2 conectado</strong><p>{connectionSource === 'workspace' ? 'Usando la conexión guardada en esta carpeta.' : 'Usando la conexión que ya tenías en Cursado.'}</p></div><button disabled={busy} onClick={() => setEditing(!editing)}>{editing ? 'Cancelar cambios' : 'Cambiar configuración'}</button></div>}
+      {configured === false && !root && <p>Elegí tu carpeta para buscar la conexión que ya tenías guardada.</p>}
+      {configured === false && root && <p>No encontramos R2 en esta carpeta. Si ya lo configuraste, elegí la carpeta que usabas en Estudio. También podés conectarlo acá con la ayuda ❔.</p>}
+      {(configured === false && root || editing) && <div className="library-config"><h2>Conectar Cloudflare R2</h2><div className="library-fields">{Object.keys(credentials).map(key => <label key={key}>{({ R2_BUCKET_NAME: 'Bucket', R2_ENDPOINT: 'Endpoint S3', R2_ACCESS_KEY_ID: 'Access Key ID', R2_SECRET_ACCESS_KEY: 'Secret Access Key' } as Record<string, string>)[key]}<input name={`cursado-library-${key.toLowerCase()}`} type={key.includes('KEY') ? 'password' : key === 'R2_ENDPOINT' ? 'url' : 'text'} autoComplete={key.includes('KEY') ? 'new-password' : 'off'} spellCheck={false} autoCapitalize="none" placeholder={key === 'R2_ENDPOINT' ? 'https://TU_ACCOUNT_ID.r2.cloudflarestorage.com' : editing ? 'Vacío conserva el valor actual' : ''} value={credentials[key as keyof typeof credentials]} onChange={e => setCredentials(current => ({ ...current, [key]: e.target.value }))} /></label>)}</div><p className="library-field-hint">El Endpoint S3 es una dirección que comienza con https://; lo encontrás junto a las claves de R2.</p></div>}
+      <button className="library-primary" disabled={busy || !root || configured === null} onClick={() => void upload()}><RefreshCw size={18} /> {busy ? 'Procesando…' : publishedAt ? 'Actualizar ahora' : 'Comenzar a subir'}</button>
       {progress && <div role="status"><p>{progress.message}</p>{progress.total > 0 && <progress max={progress.total} value={progress.done} />}{progress.error && <p className="library-error">{progress.error}</p>}</div>}
       {error && <p role="alert" className="library-error">{error}</p>}
       {publishedAt && <><p>Última publicación: {new Date(publishedAt).toLocaleString('es-AR')}</p><div className="library-devices"><div><h2>Actuales</h2>{devices.filter(d => d.enabled).length === 0 && <p>Todavía no hay dispositivos vinculados.</p>}{devices.filter(d => d.enabled).map(d => <div className="library-device" key={d.deviceId}><span>{d.name}<small>{new Date(d.createdAt).toLocaleDateString('es-AR')}</small></span><button disabled={busy} onClick={() => void run(async () => { await libraryOwnerApi('devices/revoke', { workspaceId, deviceId: d.deviceId }); await refreshDevices(workspaceId) })}>Desvincular</button></div>)}</div><div className="library-qr"><h2>Nuevos con QR</h2>{qr && now < expires ? <><img src={qr} alt="QR para vincular InScreen" /><p>Vence en {Math.ceil((expires - now) / 1000)} s</p></> : <p>Generá un QR y escanealo desde InScreen.</p>}<button disabled={busy} onClick={() => void run(() => createQr())}><QrCode size={18} /> Generar nuevo QR</button></div></div></>}
     </section></div>}
+    <R2SetupGuide open={help && open} onOpenChange={setHelp} />
   </>
 }

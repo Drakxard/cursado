@@ -4,6 +4,7 @@ import { deleteR2Object, downloadR2Object, uploadR2Object } from "@/lib/r2"
 import { listGroqGenerationModels } from "@/lib/groq-models"
 import { INSCREEN_CONFIG_TOKEN_HEADER, getInscreenConfigSeedFingerprint, normalizeInscreenUserConfig, readInscreenUserConfig, sealInscreenUserConfig, withInscreenRuntimeConfig, type InscreenUserConfig } from "@/lib/inscreen-user-config"
 import { servicesStatus } from '@/lib/services-config'
+import { workspaceLibraryConfig } from '@/lib/server/workspace-library-config'
 
 export const runtime = "nodejs"
 
@@ -15,6 +16,10 @@ export async function POST(request: Request) {
     let previous: Partial<InscreenUserConfig> = {}
     if (request.headers.get(INSCREEN_CONFIG_TOKEN_HEADER)) previous = readInscreenUserConfig(request)
     const updates = body && typeof body === "object" ? Object.fromEntries(Object.entries(body).filter(([, value]) => String(value || "").trim())) : {}
+    if (["R2_BUCKET_NAME", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ENDPOINT"].some(field => field in updates) && !servicesStatus(previous).r2) {
+      const existing = workspaceLibraryConfig(request)
+      if (existing.source === 'deployment') previous = { ...previous, ...existing.r2 }
+    }
     const config = normalizeInscreenUserConfig({ ...previous, ...updates })
     if ("GROQ_API_KEY" in updates) await withInscreenRuntimeConfig(config, () => listGroqGenerationModels())
     if (["R2_BUCKET_NAME", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ENDPOINT"].some((field) => field in updates)) {
