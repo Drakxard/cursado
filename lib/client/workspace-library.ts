@@ -214,10 +214,13 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
       return current
     }
     await libraryOwnerApi('cors', { workspaceId })
-    let done = 0, bytesDone = 0
+    const confirmed = new Set((current?.files || []).map(file => `${file.hash}:${file.size}`))
+    let done = files.filter(file => confirmed.has(`${file.hash}:${file.size}`)).length
+    let bytesDone = files.reduce((total, file) => total + (confirmed.has(`${file.hash}:${file.size}`) ? file.size : 0), 0)
     const bytesTotal = files.reduce((total, file) => total + file.size, 0)
     for (let i = 0; i < files.length; i++) {
       const f = files[i], candidate = candidates[i]
+      if (confirmed.has(`${f.hash}:${f.size}`)) continue
       const uploading = (bytes = 0) => emit({ phase: 'uploading', message: `Subiendo ${f.path}`, done, total: files.length, bytesDone: bytesDone + Math.min(bytes, f.size), bytesTotal })
       uploading()
       if (!current?.files.some(old => old.hash === f.hash && old.size === f.size)) {

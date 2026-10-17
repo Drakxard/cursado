@@ -116,6 +116,7 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
     forbiddenTransfer = true
     await assert.rejects(publish(root), /SignatureDoesNotMatch/)
     assert.equal(lastProgress.help, undefined)
+    assert.equal(Number(lastProgress.bytesTotal) - Number(lastProgress.bytesDone), 8 * 1024 * 1024 + 1)
     assert.equal(current!.revision, first.revision)
     forbiddenTransfer = false
     class UploadRequest {
