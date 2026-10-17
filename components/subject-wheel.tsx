@@ -7378,7 +7378,12 @@ export function SubjectWheel({
       {/* Header */}
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20">
         <div className="flex items-start justify-between gap-3 px-3 py-3 sm:px-4 sm:py-4">
-          <div className="flex min-w-0 flex-col gap-1.5">
+          <nav
+            aria-label="Pestañas de estudio"
+            tabIndex={0}
+            className="group/workspace-tabs pointer-events-auto absolute inset-y-0 left-0 h-dvh w-6 outline-none"
+          >
+          <div className="pointer-events-none invisible absolute left-3 top-3 flex min-w-0 -translate-x-2 flex-col gap-1.5 opacity-0 transition-[opacity,transform,visibility] duration-200 group-hover/workspace-tabs:pointer-events-auto group-hover/workspace-tabs:visible group-hover/workspace-tabs:translate-x-0 group-hover/workspace-tabs:opacity-100 group-focus-within/workspace-tabs:pointer-events-auto group-focus-within/workspace-tabs:visible group-focus-within/workspace-tabs:translate-x-0 group-focus-within/workspace-tabs:opacity-100 motion-reduce:transition-none sm:left-4 sm:top-4 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:visible [@media(hover:none)]:translate-x-0 [@media(hover:none)]:opacity-100">
             <div className="pointer-events-auto flex max-h-[calc(100dvh-8rem)] min-w-0 flex-col items-start gap-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {workspaceTabList.map((tab) => {
                 const isActive = tab.id === activeWorkspaceTab.id
@@ -7453,19 +7458,14 @@ export function SubjectWheel({
                   <span>Guardando...</span>
                 </>
               )}
-              {combinedSaveStatus === "saved" && (
-                <>
-                  <Check className="h-3.5 w-3.5 text-green-500" />
-                  <span className="text-green-500">Guardado</span>
-                </>
-              )}
               {combinedSaveStatus === "error" && (
                 <span className="text-red-500">Error al guardar</span>
               )}
             </div>
           </div>
+          </nav>
 
-          <div className="pointer-events-auto shrink-0">
+          <div className="pointer-events-auto ml-auto shrink-0">
             <VoiceModeButton
               active={isVoiceModeEnabled}
               label={isVoiceModeEnabled ? "Desactivar modo de voz" : "Activar modo de voz"}

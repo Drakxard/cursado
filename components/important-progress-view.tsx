@@ -1,9 +1,59 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from "react"
 import { Button } from "@/components/progress-original/button"
 import { Input } from "@/components/progress-original/input"
 import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X } from "lucide-react"
+
+function CalendarGestures({ children, onMonthChange }: { children: ReactNode; onMonthChange: (direction: number) => void }) {
+  const surface = useRef<HTMLDivElement>(null)
+  const start = useRef<{ x: number; y: number } | null>(null)
+  const suppressClick = useRef(false)
+  useEffect(() => {
+    const element = surface.current
+    if (!element) return
+    let lastChange = -Infinity
+    let delta = 0
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey || !event.deltaY) return
+      event.preventDefault()
+      const now = performance.now()
+      if (now - lastChange < 250) return
+      const movement = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element.clientHeight : 1)
+      if (Math.sign(movement) !== Math.sign(delta)) delta = 0
+      delta += movement
+      if (Math.abs(delta) < 40) return
+      onMonthChange(Math.sign(delta))
+      delta = 0
+      lastChange = now
+    }
+    element.addEventListener("wheel", wheel, { passive: false })
+    return () => element.removeEventListener("wheel", wheel)
+  }, [onMonthChange])
+  return <div ref={surface} data-calendar-gestures className="bg-card p-4 rounded-lg shadow-lg w-full max-w-3xl" style={{ touchAction: "pan-y" }}
+    onTouchStart={event => {
+      event.stopPropagation()
+      suppressClick.current = false
+      start.current = event.touches.length === 1 ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null
+    }}
+    onTouchCancel={event => { event.stopPropagation(); start.current = null }}
+    onTouchEnd={event => {
+      event.stopPropagation()
+      const origin = start.current
+      start.current = null
+      if (!origin || !event.changedTouches.length) return
+      const dx = event.changedTouches[0].clientX - origin.x
+      const dy = event.changedTouches[0].clientY - origin.y
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        suppressClick.current = true
+        onMonthChange(dx < 0 ? 1 : -1)
+      }
+    }}
+    onClickCapture={event => {
+      if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false }
+    }}
+  >{children}</div>
+}
 
 function TopicChip({ topic, onRemove }: { topic: string; onRemove: () => void }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -168,6 +218,9 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   const [eventZoom, setEventZoom] = useState(2)
   const [isCalendarMode, setIsCalendarMode] = useState(false)
   const [calendarDate, setCalendarDate] = useState(new Date())
+  const moveCalendarMonth = useCallback((direction: number) => {
+    setCalendarDate(prev => new Date(prev.getFullYear(), prev.getMonth() + direction, 1))
+  }, [])
   const [calendarSelection, setCalendarSelection] = useState<
     { taskId: string; tableIndex: number } | null
   >(null)
@@ -527,7 +580,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   if (isCalendarMode) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="bg-card p-4 rounded-lg shadow-lg w-full max-w-3xl">
+        <CalendarGestures onMonthChange={moveCalendarMonth}>
           <div className="flex items-center justify-between mb-4 gap-2">
             <Button
               variant="ghost"
@@ -598,7 +651,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
               Haz clic en una fecha para asignar los días restantes de este evento.
             </p>
           )}
-        </div>
+        </CalendarGestures>
       </div>
     )
   }
