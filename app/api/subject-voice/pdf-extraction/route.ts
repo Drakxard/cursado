@@ -1,5 +1,5 @@
 import { requireAuthSession } from "@/lib/authz"
-import { INSCREEN_CONFIG_TOKEN_HEADER, withInscreenUserConfig } from "@/lib/inscreen-user-config"
+import { INSCREEN_CONFIG_TOKEN_HEADER, withInscreenUserConfig, openInscreenUserConfig, withInscreenRuntimeConfig } from "@/lib/inscreen-user-config"
 import { DatalabJobError, pollDatalabFragments, submitDatalabFragments } from "@/lib/server/datalab-fragments"
 import { PDF_BATCH_BYTES } from "@/lib/subject-pdf-search"
 
@@ -24,6 +24,16 @@ async function handle(request: Request) {
   }
 }
 function configuredHandle(request: Request) {
+  const datalabToken = request.headers.get("x-datalab-config-token")
+  if (datalabToken) {
+    try {
+      const config = openInscreenUserConfig(datalabToken)
+      if (!config.datalab) throw new Error()
+      return withInscreenRuntimeConfig(config, () => handle(request))
+    } catch {
+      return Response.json({ error: "Clave de Datalab no disponible. Volvé a cargarla.", datalabConfigurationRequired: true }, { status: 428 })
+    }
+  }
   if (!request.headers.get(INSCREEN_CONFIG_TOKEN_HEADER)) return handle(request)
   return withInscreenUserConfig(request, () => handle(request))
 }

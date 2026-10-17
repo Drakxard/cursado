@@ -1,7 +1,7 @@
 "use client"
 
 import { getWorkspaceFile, listLocalSubjectDayMaterials, listLocalSubjectMaterialContainers, listLocalSubjectWeekNumbersWithContent } from "../local-workspace-data"
-import { getReadyInscreenConfigToken } from "../local-workspace-client"
+import { datalabHeaders } from "./datalab-config"
 import { buildPdfCandidates, normalizePdfQuery, parsePdfExtraction, pdfResultTitle, PDF_EXTRACTION_VERSION, PDF_FILTER_VERSION, type PdfBlock, type PdfDecision, type PdfExtraction, type PdfSearchResult } from "../subject-pdf-search"
 import { inPdfCacheQueue, pdfWorkspaceRoot, readPdfCache, writePdfCache } from "./subject-pdf-cache"
 import { pdfHash, splitPdfBatches } from "./subject-pdf-files"
@@ -26,10 +26,6 @@ export function theoryScopeSignature(scope: { week: number | null; materials: Su
   return JSON.stringify([scope.week, scope.materials.map((m) => [m.id, m.drive_file_id, m.updated_at])])
 }
 const extractionPath = (hash: string) => `manifests/subject-voice/pdf/${PDF_EXTRACTION_VERSION}/${hash}/extraction.json`
-function headers() {
-  const token = getReadyInscreenConfigToken()
-  return token ? { "x-inscreen-config-token": token } : undefined
-}
 async function responseJson<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => null)
   if (!response.ok) throw new Error(data?.error ?? `No se pudo procesar el PDF (HTTP ${response.status}).`)
@@ -48,7 +44,7 @@ async function finishJob(token: string, signal: AbortSignal) {
   const deadline = Date.now() + 10 * 60 * 1000
   while (Date.now() < deadline) {
     signal.throwIfAborted()
-    const result = await responseJson<{ status: string; payload?: Record<string, unknown> }>(await fetch(`/api/subject-voice/pdf-extraction?${new URLSearchParams({ token })}`, { headers: headers(), signal, cache: "no-store" }))
+    const result = await responseJson<{ status: string; payload?: Record<string, unknown> }>(await fetch(`/api/subject-voice/pdf-extraction?${new URLSearchParams({ token })}`, { headers: await datalabHeaders(), signal, cache: "no-store" }))
     if (result.status === "complete" && result.payload) return result.payload
     if (result.status !== "processing") throw new Error("El estado de extracción no es válido.")
     await delay(signal)
@@ -58,7 +54,7 @@ async function finishJob(token: string, signal: AbortSignal) {
 async function submit(file: File, words = false) {
   const form = new FormData(); form.set("file", file); if (words) form.set("words", "true")
   // Do not cancel submission on navigation: persist the accepted job before honoring cancellation.
-  const job = await responseJson<{ token: string }>(await fetch("/api/subject-voice/pdf-extraction", { method: "POST", headers: headers(), body: form, signal: AbortSignal.timeout(55_000) }))
+  const job = await responseJson<{ token: string }>(await fetch("/api/subject-voice/pdf-extraction", { method: "POST", headers: await datalabHeaders(), body: form, signal: AbortSignal.timeout(55_000) }))
   if (typeof job.token !== "string" || !job.token) throw new Error("Falta el identificador de extracción.")
   return job.token
 }
@@ -116,7 +112,14 @@ export async function prepareTheoryPdfs(subjectId: string, signal: AbortSignal, 
           if ("error" in batch) { current.error = batch.error; await writePdfCache(root, path, state); continue }
           try {
             if (!current.token) { current.token = await submit(batch.file); await writePdfCache(root, path, state) }
-            const payload = await finishJob(current.token, signal)
+            let payload: Record<string, unknown>
+            try { payload = await finishJob(current.token, signal) }
+            catch (error) {
+              if (!(error instanceof Error) || !/El seguimiento.*(?:venció|no es válido)/.test(error.message)) throw error
+              current.token = await submit(batch.file)
+              await writePdfCache(root, path, state)
+              payload = await finishJob(current.token, signal)
+            }
             current.extraction = parsePdfExtraction(payload, batch.pages)
             delete current.error; delete current.token
             await writePdfCache(root, path, state)
@@ -124,7 +127,7 @@ export async function prepareTheoryPdfs(subjectId: string, signal: AbortSignal, 
             signal.throwIfAborted()
             // Keep transient pending jobs. Expired/failed jobs can be resubmitted on explicit retry.
             const message = error instanceof Error ? error.message : "No se pudo extraer el lote."
-            if (/venció|no pudo completar/.test(message)) delete current.token
+            if (/venció|no es válido|no pudo completar/.test(message)) delete current.token
             current.error = message
             await writePdfCache(root, path, state)
           }
@@ -236,7 +239,7 @@ export async function refinedPageWords(result: PdfSearchResult, page: number, si
       await writePdfCache(root, path, state)
       return state.payload!
     } catch (error) {
-      if (error instanceof Error && /venció|no pudo completar/.test(error.message)) { delete state.token; await writePdfCache(root, path, state) }
+      if (error instanceof Error && /venció|no es válido|no pudo completar/.test(error.message)) { delete state.token; await writePdfCache(root, path, state) }
       throw error
     }
   })

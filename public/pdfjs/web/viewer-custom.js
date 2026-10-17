@@ -1229,6 +1229,63 @@
     state.translateButton.setAttribute("aria-label", state.translateButton.title);
   }
 
+  let translationToken = "";
+  let translationConfigPromise = null;
+
+  async function ensureTranslationConfiguration(replace = false) {
+    if (translationToken) return true;
+    try {
+      if (replace) throw new Error("replace");
+      const root = await ensureWorkspaceRootHandle();
+      const file = await (await root.getFileHandle("User.Translation")).getFile();
+      const saved = JSON.parse(await file.text());
+      if (saved.version === 1 && typeof saved.token === "string" && saved.token) {
+        translationToken = saved.token;
+        return true;
+      }
+    } catch {}
+    if (translationConfigPromise) return translationConfigPromise;
+    translationConfigPromise = new Promise(resolve => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "pdfjs-custom-translation-prompt-backdrop";
+      backdrop.dataset.open = "true";
+      backdrop.innerHTML = '<form class="pdfjs-custom-translation-prompt" role="dialog" aria-modal="true" aria-labelledby="translation-api-title"><h2 id="translation-api-title">Agregá tu API para traducir</h2><p>Usá una clave de <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">Groq</a>. Se guarda cifrada, separada de la estrella.</p><label>API key<input name="apiKey" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="gsk_..." required style="box-sizing:border-box;width:100%;margin-top:8px;padding:10px;border:1px solid #ccc;border-radius:8px"></label><p role="alert"></p><div class="pdfjs-custom-modal-actions"><button type="button" data-variant="ghost">Ahora no</button><button type="submit" data-variant="primary">Guardar</button></div></form>';
+      document.body.append(backdrop);
+      const form = backdrop.querySelector("form");
+      const input = form.elements.apiKey;
+      const alert = form.querySelector('[role="alert"]');
+      const buttons = form.querySelectorAll("button");
+      const previousFocus = document.activeElement;
+      const finish = value => { input.value = ""; backdrop.remove(); previousFocus?.focus(); resolve(value); };
+      buttons[0].onclick = () => finish(false);
+      form.onkeydown = event => { if (event.key === "Escape" && !input.disabled) { event.preventDefault(); finish(false); } };
+      form.onsubmit = async event => {
+        event.preventDefault();
+        if (input.disabled || !input.value.trim()) return;
+        input.disabled = true;
+        buttons.forEach(button => { button.disabled = true; });
+        buttons[1].textContent = "Guardando...";
+        alert.textContent = "";
+        try {
+          const response = await fetch("/api/pdf-translate/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: input.value.trim() }) });
+          const payload = await response.json();
+          if (!response.ok || !payload.token) throw new Error(payload.error || "No se pudo guardar la clave.");
+          const root = await ensureWorkspaceRootHandle();
+          const file = await root.getFileHandle("User.Translation", { create: true });
+          const writable = await file.createWritable();
+          try { await writable.write(JSON.stringify({ version: 1, token: payload.token })); } finally { await writable.close(); }
+          const saved = JSON.parse(await (await file.getFile()).text());
+          if (saved.token !== payload.token) throw new Error("No se pudo verificar el guardado.");
+          translationToken = payload.token;
+          finish(true);
+        } catch (error) { alert.textContent = error.message || "No se pudo guardar la clave."; }
+        finally { input.disabled = false; buttons.forEach(button => { button.disabled = false; }); buttons[1].textContent = "Guardar"; }
+      };
+      input.focus();
+    }).finally(() => { translationConfigPromise = null; });
+    return translationConfigPromise;
+  }
+
   async function toggleTranslationMode() {
     if (state.translationMode) {
       state.translationMode = false;
@@ -1236,12 +1293,7 @@
       showToast("Traduccion consecutiva desactivada.", "info");
       return;
     }
-    try {
-      await assertInscreenConfigurationAvailable();
-    } catch {
-      showToast(INSCREEN_CONFIGURATION_MESSAGE, "error", 5000);
-      return;
-    }
+    if (!await ensureTranslationConfiguration()) return;
     state.translationMode = true;
     refreshTranslationButton();
     if (state.selectedText && state.selectedTextRect) {
@@ -1401,13 +1453,7 @@
   }
 
   async function translateSelectedText() {
-    try {
-      await assertInscreenConfigurationAvailable();
-    } catch {
-      closeTranslationPopover();
-      showToast(INSCREEN_CONFIGURATION_MESSAGE, "error", 5000);
-      return;
-    }
+    if (!await ensureTranslationConfiguration()) return;
     if (!state.selectedText || !state.selectedTextRect) {
       showToast("Selecciona texto del PDF para traducir.", "info");
       return;
@@ -1417,13 +1463,19 @@
     state.translationRequestId = requestId;
     showTranslationPopover("Traduciendo...");
     try {
-      const response = await inscreenApiFetch("/api/pdf-translate", {
+      const response = await fetch("/api/pdf-translate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-pdf-translation-token": translationToken },
         body: JSON.stringify({ text: sourceText, promptTemplate: getTranslationPrompt() }),
       });
       const payload = await readJsonish(response);
       if (requestId !== state.translationRequestId) return;
+      if (payload?.translationConfigurationRequired) {
+        translationToken = "";
+        closeTranslationPopover();
+        if (await ensureTranslationConfiguration(true)) await translateSelectedText();
+        return;
+      }
       if (!response.ok) {
         throw new Error(getErrorMessage(payload, "No se pudo traducir el texto."));
       }

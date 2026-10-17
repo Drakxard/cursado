@@ -15,7 +15,7 @@ async function handleGET() {
   if (auth.response) return auth.response
   try {
     const azure = azureExplanationConfig()
-    if (azure) return Response.json({ provider: "azure", models: [{ id: azure.deployment, name: "GPT-5 mini · Azure" }] }, { headers: { "Cache-Control": "no-store" } })
+    if (azure) return Response.json({ provider: "azure", models: [{ id: azure.deployment, name: `${azure.deployment} · Azure` }] }, { headers: { "Cache-Control": "no-store" } })
     return Response.json({ models: await freeExplanationModels(process.env.PDF_EXPLANATION_MODEL) }, { headers: { "Cache-Control": "no-store" } })
   } catch (error) {
     if (getInscreenRuntimeSecret('gpt5mini') || process.env.gpt5mini || process.env.AZURE_OPENAI_API_KEY) return Response.json({ error: error instanceof Error ? error.message : "Revisá la configuración de Azure." }, { status: 503 })

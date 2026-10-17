@@ -196,7 +196,7 @@ test('API card defaults to Azure, offers Groq and saves a new encrypted configur
   await card.getByLabel('Proveedor').selectOption('azure')
   await card.getByLabel('API key', { exact: true }).fill('azure-new-secret')
   await card.getByLabel('Endpoint de Azure').fill('https://example.openai.azure.com')
-  await card.getByLabel('Nombre del despliegue').fill('my-gpt-5-mini')
+  await card.getByLabel('Modelo (nombre del despliegue)').fill('my-gpt-5-mini')
   await card.getByRole('button', { name: 'Guardar', exact: true }).click()
   await card.waitFor({ state: 'hidden' })
   const saved = JSON.parse(await page.evaluate(() => window.fixtureFiles.get('User.Services')))

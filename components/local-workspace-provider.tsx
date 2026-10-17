@@ -916,7 +916,7 @@ export function LocalWorkspaceProvider({
             <form className="space-y-3" onSubmit={event => { event.preventDefault(); void saveInscreenConfiguration(true) }}>
               <label className="block text-sm">Proveedor
                 <select value={replacementProvider} disabled={savingConfig} onChange={event => { setReplacementProvider(event.target.value as "azure" | "groq"); setReplacementApi(""); setError("") }} className="mt-1 w-full rounded-lg border bg-background px-3 py-2">
-                  <option value="azure">Microsoft Azure · GPT-5 mini</option><option value="groq">Groq</option>
+                  <option value="azure">Microsoft Azure</option><option value="groq">Groq</option>
                 </select>
               </label>
               <label className="block text-sm">API key
@@ -926,11 +926,11 @@ export function LocalWorkspaceProvider({
                 <label className="block text-sm">Endpoint de Azure
                   <input type="url" value={replacementEndpoint} onChange={event => setReplacementEndpoint(event.target.value)} disabled={savingConfig} placeholder="https://tu-recurso.openai.azure.com" className="mt-1 w-full rounded-lg border bg-background px-3 py-2" />
                 </label>
-                <label className="block text-sm">Nombre del despliegue
+                <label className="block text-sm">Modelo (nombre del despliegue)
                   <input value={replacementDeployment} onChange={event => setReplacementDeployment(event.target.value)} disabled={savingConfig} placeholder="gpt-5-mini" className="mt-1 w-full rounded-lg border bg-background px-3 py-2" />
                 </label>
               </> : null}
-              <p className="text-xs text-muted-foreground">{replacementProvider === "azure" ? "Copiá estos datos de tu recurso y despliegue en Azure." : <>Obtené tu clave en <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="underline">Groq</a>.</>}</p>
+              <p className="text-xs text-muted-foreground">{replacementProvider === "azure" ? "Misma clave y endpoint; elegí el modelo con su nombre de despliegue en Azure." : <>Obtené tu clave en <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="underline">Groq</a>.</>}</p>
               {!needsSeed && error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
               <div className="flex justify-end gap-2 pt-1">
                 <button type="button" disabled={savingConfig} onClick={dismissApiReload} className="rounded-lg px-4 py-2 text-sm text-muted-foreground">Ahora no</button>

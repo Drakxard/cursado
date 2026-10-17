@@ -80,7 +80,7 @@ const bundle = await build({
   } }],
 })
 
-async function setup(t, { holdPoll = false } = {}) {
+async function setup(t, { holdPoll = false, datalabMissing = false } = {}) {
   const browser = await chromium.launch({ headless: true })
   t.after(() => browser.close())
   const page = await browser.newPage()
@@ -179,6 +179,18 @@ async function setup(t, { holdPoll = false } = {}) {
     }
   }, { bytes: pdfBytes, holdPoll })
   await page.addStyleTag({content:'html,body,#root{height:100%;margin:0} [data-subject-voice-images]{display:flex;flex-direction:column;height:100%} [data-pdf-view]{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden} [data-pdf-view-frame]{flex:1;min-height:0;width:100%;border:0}'});
+  if (datalabMissing) await page.evaluate(() => {
+    const previousFetch = window.fetch
+    window.fetch = async (input, options = {}) => {
+      const path = String(input)
+      if (path === '/api/subject-voice/pdf-extraction/config') {
+        window.submittedDatalabKey = JSON.parse(options.body).apiKey
+        return Response.json({ token: 'encrypted-datalab-fixture' })
+      }
+      if (path.startsWith('/api/subject-voice/pdf-extraction') && options.headers?.['x-datalab-config-token'] !== 'encrypted-datalab-fixture') return Response.json({ error: 'No se pudo desbloquear User.Services con la semilla de este despliegue.' }, {status:428})
+      return previousFetch(input, options)
+    }
+  })
   await page.addScriptTag({ content: bundle.outputFiles[0].text })
   await page.waitForFunction(() => window.prepareTheory)
   await page.waitForFunction(() => window.workspaceFiles.size > 0)
@@ -1014,4 +1026,17 @@ test("divide documentos largos en lotes de diez páginas preservando las página
   assert.deepEqual(batches.map(b=>b.pages.length),[10,10,3])
   assert.deepEqual(batches.flatMap(b=>b.pages),Array.from({length:23},(_,i)=>i+1))
   assert.equal(batches.every(b=>b.size<=3*1024*1024),true)
+})
+
+
+test("Datalab card replaces an unreadable service key and retries OCR", async t => {
+  const page = await setup(t, { datalabMissing: true })
+  const card = page.getByRole('dialog', { name: 'Agregar API de Datalab' })
+  await card.waitFor()
+  await card.getByLabel('API key', {exact:true}).fill('new-datalab-key')
+  await card.getByRole('button', {name:'Guardar y reintentar'}).click()
+  await card.waitFor({state:'hidden'})
+  await page.waitForFunction(() => window.pdfRequests.some(request => request.method === 'POST' && request.url === '/api/subject-voice/pdf-extraction'))
+  assert.equal(await page.evaluate(() => window.submittedDatalabKey), 'new-datalab-key')
+  assert.equal(await page.getByRole('button', {name:'Agregar API de Datalab',exact:true}).count(), 0)
 })

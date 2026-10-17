@@ -13,6 +13,8 @@ import type { PdfSearchResult } from "@/lib/subject-pdf-search"
 import { SubjectImageBubble } from "@/components/subject-image-bubble"
 import { discardItem, undoDiscard, loadDiscardHistory, isDiscarded, queryDiscardScope, pdfDiscardId, type DiscardEntry } from "@/lib/client/subject-discard-history"
 import { normalizePdfQuery } from "@/lib/subject-pdf-search"
+import { DatalabApiCard } from "@/components/datalab-api-card"
+import { needsDatalabConfiguration } from "@/lib/client/datalab-config"
 import { LoaderCircle } from "lucide-react"
 
 export type VoiceImagesHandle = { escape: () => boolean; dictate: (final: string, interim: string) => void }
@@ -34,6 +36,12 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
   const topicsRef = useRef<WeekTopicsHandle>(null)
   const [topicsViewing, setTopicsViewing] = useState(false)
   const pdf = useSubjectPdfSearch(subjectId, query)
+  const [datalabCardOpen, setDatalabCardOpen] = useState(false)
+  const [dismissedDatalabError, setDismissedDatalabError] = useState("")
+  const datalabError = pdf.errors.filter(needsDatalabConfiguration).join("\n")
+  useEffect(() => {
+    if (datalabError && datalabError !== dismissedDatalabError) setDatalabCardOpen(true)
+  }, [datalabError, dismissedDatalabError])
   const [history, setHistory] = useState<DiscardEntry[]>([])
   const [historyReady, setHistoryReady] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -366,9 +374,10 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
         <span>{pdf.progress.current}/{pdf.progress.total}</span>
       </div>}
       {pdf.searching && <p role="status" className="absolute bottom-24 left-1/2 z-20 -translate-x-1/2 rounded bg-white/95 px-3 py-2 text-center text-sm">Filtrando coincidencias en los PDF…</p>}
+      {datalabCardOpen && <DatalabApiCard onClose={() => { setDatalabCardOpen(false); setDismissedDatalabError(datalabError) }} onSaved={() => { setDatalabCardOpen(false); setDismissedDatalabError(""); pdf.retry() }} />}
       {pdf.errors.length > 0 && <div className="absolute bottom-24 left-5 z-40 max-h-28 max-w-[calc(100%_-_2.5rem)] overflow-y-auto rounded bg-white/95 px-3 py-2 text-sm">
-        <p role="alert" className="whitespace-pre-wrap">{pdf.errors.join("\n")}</p>
-        <button type="button" className={control} onClick={pdf.retry} disabled={pdf.preparing || pdf.searching}>Reintentar PDF</button>
+        <p role="alert" className="whitespace-pre-wrap">{datalabError ? "Agregá tu API de Datalab para leer los PDF con OCR." : pdf.errors.join("\n")}</p>
+        <button type="button" className={control} onClick={() => { if (datalabError) setDatalabCardOpen(true); else pdf.retry() }} disabled={pdf.preparing || pdf.searching}>{datalabError ? "Agregar API de Datalab" : "Reintentar PDF"}</button>
       </div>}
     </>}
     {!manualTopics && busy && <p role="status" className="absolute bottom-24 left-5 z-40 rounded bg-white/95 px-3 py-2">Procesando imágenes…</p>}

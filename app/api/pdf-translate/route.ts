@@ -1,7 +1,7 @@
 import { requireAuthSession } from "@/lib/authz"
-import { requireGroqClient } from "@/lib/groq-models"
+import Groq from "groq-sdk"
 import { buildPdfTranslationPrompt, PDF_TRANSLATION_MODEL } from "@/lib/pdf-translation"
-import { withInscreenUserConfig } from "@/lib/inscreen-user-config"
+import { openInscreenUserConfig } from "@/lib/inscreen-user-config"
 
 export const runtime = "nodejs"
 
@@ -15,7 +15,12 @@ async function translate(request: Request) {
       typeof body?.text === "string" ? body.text : "",
       typeof body?.promptTemplate === "string" ? body.promptTemplate : ""
     )
-    const groq = requireGroqClient()
+    let apiKey = ""
+    try {
+      apiKey = openInscreenUserConfig(request.headers.get("x-pdf-translation-token") || "").GROQ_API_KEY
+    } catch {}
+    if (!apiKey) return Response.json({ error: "Agregá tu API de Groq para traducir.", translationConfigurationRequired: true }, { status: 428 })
+    const groq = new Groq({ apiKey })
     const completion = await groq.chat.completions.create({
       model: PDF_TRANSLATION_MODEL,
       messages: [{ role: "user", content: prompt }],
@@ -39,11 +44,12 @@ async function translate(request: Request) {
     if (message === "Missing GROQ_API_KEY") {
       return Response.json({ error: "GROQ_API_KEY no esta configurada." }, { status: 503 })
     }
+    if (error instanceof Groq.AuthenticationError) return Response.json({ error: "La clave de Groq no es válida. Cargala de nuevo.", translationConfigurationRequired: true }, { status: 428 })
     console.error("POST /api/pdf-translate error:", error)
     return Response.json({ error: message || "No se pudo traducir el texto." }, { status: 502 })
   }
 }
 
 export async function POST(request: Request) {
-  return withInscreenUserConfig(request, () => translate(request))
+  return translate(request)
 }
