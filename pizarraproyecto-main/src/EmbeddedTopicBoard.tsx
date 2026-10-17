@@ -1,0 +1,55 @@
+import { useEffect, useState } from 'react'
+import App from './App'
+import { flushNavigationSaves } from './homeNavigation'
+import { initializeTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace } from './topicWorkspace'
+
+export default function EmbeddedTopicBoard() {
+  const [ready, setReady] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let initialized = false, closing = false, alive = true
+    const boardId = new URLSearchParams(location.search).get('topicBoard')
+    const close = async () => {
+      if (closing || !initialized) return
+      closing = true
+      try {
+        await flushNavigationSaves()
+        await saveTopicWorkspace()
+        notifyTopicWorkspace('closed')
+      } catch (reason) {
+        const message = String(reason)
+        if (alive) setError(message)
+        notifyTopicWorkspace('error', message)
+      } finally { closing = false }
+    }
+    const receive = (event: MessageEvent) => {
+      if (event.origin !== location.origin || event.source !== parent || event.data?.boardId !== boardId) return
+      if (event.data.type === 'topic-board:init' && !initialized) {
+        initialized = true
+        void initializeTopicWorkspace({ boardId: boardId!, name: String(event.data.name || 'Tema'), rootHandle: event.data.rootHandle }).then(() => {
+          if (alive) setReady(true)
+        }).catch(reason => {
+          const message = String(reason)
+          if (alive) setError(message)
+          parent.postMessage({ type: 'topic-board:error', boardId, error: message }, location.origin)
+        })
+      }
+      if (event.data.type === 'topic-board:close') void close()
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.repeat) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      void close()
+    }
+    window.addEventListener('message', receive)
+    window.addEventListener('keydown', escape, true)
+    parent.postMessage({ type: 'topic-board:request-init', boardId }, location.origin)
+    return () => {
+      alive = false
+      window.removeEventListener('message', receive)
+      window.removeEventListener('keydown', escape, true)
+    }
+  }, [])
+  return <>{error && <div role="alert" style={{ position: 'fixed', bottom: 16, left: 16, zIndex: 9999, background: '#fee2e2', padding: 12 }}>{error}</div>}{ready && <App />}</>
+}

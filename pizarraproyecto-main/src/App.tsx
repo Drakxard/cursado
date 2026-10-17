@@ -1,5 +1,6 @@
 import { PIZARRA_API_ROOT } from './backend'
 import { beforeHome } from './homeNavigation'
+import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace } from './topicWorkspace'
 import { mergeBoard } from './storage/merge'
 import { applyScenePatch } from './storage/livePatch'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
@@ -1238,6 +1239,7 @@ function App() {
     setBoardName(data.boards.find(b => b.id === getActiveBoardId())?.name || 'Mi pizarra')
   }
   async function openLibrary() {
+    if (isTopicWorkspace()) return
     finishPendingPen();setTreePanel(null)
     setContextMenu(null)
     setBoardSearchOpen(false)
@@ -2087,6 +2089,7 @@ function App() {
     }
     try {
       const result = await saveBoard(data)
+      await saveTopicWorkspace()
       pendingReplicaRef.current = result.pending
       if (result.merged) {
         const merged = mergeBoard(data, {
@@ -2210,6 +2213,7 @@ function App() {
         }
         pendingReplicaRef.current = await hasPendingShared()
         loadedRef.current = true
+        notifyTopicWorkspace('ready')
         setLiveBoardId(getActiveBoardId())
         void refreshLibrary().catch(console.error)
         setSaveStatus(await hasPendingShared() ? 'local' : usingOfflineCopy() ? 'copy' : 'saved')
@@ -4815,7 +4819,7 @@ function App() {
           height: Math.abs(screenMarquee.endY - screenMarquee.startY),
         }} />
       )}
-      <button className="library-open-button" onClick={() => void openLibrary()} title="Mis pizarras">☰ {boardTitle(boardName)}</button>
+      {!isTopicWorkspace() && <button className="library-open-button" onClick={() => void openLibrary()} title="Mis pizarras">☰ {boardTitle(boardName)}</button>}
       {libraryOpen && <div className="library-overlay">
         <style>{`.library-draggable { touch-action: none; } .library-draggable .library-board-name { cursor: grab; } .library-dragging { opacity: .45; } .library-drop-target { outline: 2px solid #6366f1 !important; background: #e0e7ff !important; border-radius: 10px; } .library-drag-preview { position: fixed; z-index: 99999; pointer-events: none; padding: 10px 16px; border: 1px solid #a5b4fc; border-radius: 10px; background: white; box-shadow: 0 8px 24px #0002; font-weight: 600; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`}</style>
         <div className="library-panel" onClick={e => {

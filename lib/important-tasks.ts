@@ -5,6 +5,7 @@ export type ImportantTask = {
   dueDate: string
   url: string
   topics: string[]
+  topicBoardIds?: string[]
 }
 
 export function importantTaskProgress(task: ImportantTask, today = new Date()) {
@@ -32,7 +33,8 @@ export async function readImportantTasks(root: FileSystemDirectoryHandle): Promi
   if (data.version !== 1 || !Array.isArray(data.tasks) || !data.tasks.every((task: ImportantTask) =>
     task && typeof task.id === "string" && typeof task.text === "string" &&
     /^\d{4}-\d{2}-\d{2}$/.test(task.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate) &&
-    typeof task.url === "string" && Array.isArray(task.topics) && task.topics.every(topic => typeof topic === "string")
+    typeof task.url === "string" && Array.isArray(task.topics) && task.topics.every(topic => typeof topic === "string") &&
+    (task.topicBoardIds === undefined || (Array.isArray(task.topicBoardIds) && task.topicBoardIds.length === task.topics.length && task.topicBoardIds.every(id => /^[a-zA-Z0-9-]{1,100}$/.test(id))))
   )) throw new Error("El archivo de importantes no tiene un formato válido.")
   return data.tasks
 }

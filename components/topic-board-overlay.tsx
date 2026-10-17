@@ -1,0 +1,58 @@
+"use client"
+
+import { useEffect, useRef, useState } from "react"
+
+export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
+  boardId: string
+  name: string
+  rootHandle: FileSystemDirectoryHandle
+  onClose: () => void
+}) {
+  const frame = useRef<HTMLIFrameElement>(null)
+  const [ready, setReady] = useState(false)
+  const [error, setError] = useState("")
+  const [closing, setClosing] = useState(false)
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    const receive = (event: MessageEvent) => {
+      if (event.origin !== location.origin || event.source !== frame.current?.contentWindow || event.data?.boardId !== boardId) return
+      if (event.data.type === "topic-board:request-init") {
+        try {
+          frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle }, location.origin)
+        } catch (reason) { setError(String(reason)) }
+      }
+      if (event.data.type === "topic-board:ready") { setReady(true); frame.current?.focus() }
+      if (event.data.type === "topic-board:closed") onClose()
+      if (event.data.type === "topic-board:error") { setError(event.data.error || "No se pudo guardar la pizarra."); setClosing(false) }
+    }
+    window.addEventListener("message", receive)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener("message", receive)
+      previousFocus?.focus({ preventScroll: true })
+    }
+  }, [boardId, name, rootHandle, onClose])
+  const close = () => {
+    if (!ready) { onClose(); return }
+    setClosing(true)
+    setError("")
+    frame.current?.contentWindow?.postMessage({ type: "topic-board:close", boardId }, location.origin)
+  }
+  return <div role="dialog" aria-modal="true" aria-label={`Pizarra de ${name}`} className="fixed inset-0 z-[150] flex flex-col bg-white text-slate-900"
+    onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close() } }}>
+    <div className="flex items-center justify-between gap-3 border-b bg-white px-4 py-2 text-sm">
+      <span className="truncate">{name}</span>
+      <button type="button" disabled={closing} onClick={close} className="shrink-0 rounded border px-3 py-1 text-slate-600">{closing ? "Guardando…" : "Volver · Esc"}</button>
+    </div>
+    {error && <p role="alert" className="bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>}
+    {!ready && !error && <p role="status" className="px-4 py-2 text-sm text-slate-500">Abriendo pizarra…</p>}
+    <iframe ref={frame} title={`Pizarra de ${name}`} src={`/pizarra/?topicBoard=${encodeURIComponent(boardId)}`} className="min-h-0 w-full flex-1 border-0"
+      onLoad={() => {
+        try {
+          frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle }, location.origin)
+        } catch (reason) { setError(String(reason)) }
+      }} />
+  </div>
+}

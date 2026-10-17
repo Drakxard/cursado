@@ -22,6 +22,15 @@ test("corrupt important task files surface an error instead of becoming an empty
   await assert.rejects(readImportantTasks(root), /formato válido/)
 })
 
+test("topic board associations survive storage and older tasks remain readable", async () => {
+  const { root } = folderFixture()
+  await writeImportantTasks(root, [task])
+  assert.equal((await readImportantTasks(root))[0].topicBoardIds, undefined)
+  const linked = { ...task, topicBoardIds: ["board-one"] }
+  await writeImportantTasks(root, [linked])
+  assert.deepEqual(await readImportantTasks(root), [linked])
+})
+
 test("deadline progress uses calendar days and caps elapsed progress", () => {
   assert.deepEqual(importantTaskProgress(task, new Date(2026, 9, 17, 23)), { total: 10, remaining: 3, elapsed: 7, percentage: 70 })
   assert.equal(importantTaskProgress(task, new Date(2026, 9, 22)).percentage, 100)

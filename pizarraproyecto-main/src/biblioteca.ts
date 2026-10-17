@@ -64,7 +64,7 @@ async function request<T>(path: string, init?: RequestInit, timeout=12000): Prom
 
 const json = (method: string, body: unknown): RequestInit => ({method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
 export function getActiveBoardId() { return activeId }
-export function selectBoard(id: string) { activeId = id; activeVersion = 0; committed=null;localStorage.setItem('pizarra_activa', id) }
+export function selectBoard(id: string, remember = true) { activeId = id; activeVersion = 0; committed=null;if(remember)localStorage.setItem('pizarra_activa', id) }
 function rememberCommitted(id:string,version:number,content:BoardContentWithExtras) {
   if(id!==activeId)return
   activeVersion=version

@@ -3,7 +3,36 @@
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from "react"
 import { Button } from "@/components/progress-original/button"
 import { Input } from "@/components/progress-original/input"
-import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X, Plus } from "lucide-react"
+import { TopicBoardOverlay } from "@/components/topic-board-overlay"
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
+
+function HoldableTaskRow({ children, label, onHold, onHover }: { children: ReactNode; label: string; onHold: () => void; onHover: (hovered: boolean) => void }) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const origin = useRef({ x: 0, y: 0 })
+  const cancel = () => { if (timer.current !== null) clearTimeout(timer.current); timer.current = null }
+  useEffect(() => cancel, [])
+  return <div className="relative overflow-hidden bg-card border rounded-lg shadow-sm" role="group" aria-label={`Fila ${label}`} tabIndex={0}
+    onMouseEnter={() => onHover(true)} onMouseLeave={() => { onHover(false); cancel() }}
+    onPointerDown={event => {
+      if (!event.isPrimary || event.button !== 0 || (event.target as Element).closest('button, input, textarea, select, a, [data-row-activation-stop="true"]')) return
+      cancel()
+      origin.current = { x: event.clientX, y: event.clientY }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      timer.current = setTimeout(() => { timer.current = null; onHold() }, 650)
+    }}
+    onPointerMove={event => { if (Math.hypot(event.clientX - origin.current.x, event.clientY - origin.current.y) > 12) cancel() }}
+    onPointerUp={cancel} onPointerCancel={cancel} onLostPointerCapture={cancel}
+    onContextMenu={event => { if (!(event.target as Element).closest('button, input, textarea, select, a, [data-row-activation-stop="true"]')) event.preventDefault() }}
+    onKeyDown={event => {
+      if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return
+      event.preventDefault()
+      if (!event.repeat) { cancel(); timer.current = setTimeout(() => { timer.current = null; onHold() }, 650) }
+    }}
+    onKeyUp={event => { if (event.target === event.currentTarget) cancel() }}
+    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) cancel() }}
+  >{children}</div>
+}
 
 function CalendarGestures({ children, onMonthChange }: { children: ReactNode; onMonthChange: (direction: number) => void }) {
   const surface = useRef<HTMLDivElement>(null)
@@ -55,7 +84,8 @@ function CalendarGestures({ children, onMonthChange }: { children: ReactNode; on
   >{children}</div>
 }
 
-function TopicChip({ topic, onRemove }: { topic: string; onRemove: () => void }) {
+function TopicChip({ topic, onRemove, onOpen }: { topic: string; onRemove: () => void; onOpen: () => void }) {
+  const held = useRef(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const origin = useRef({ x: 0, y: 0 })
   const cancel = () => {
@@ -65,16 +95,17 @@ function TopicChip({ topic, onRemove }: { topic: string; onRemove: () => void })
   useEffect(() => cancel, [])
   return <button
     type="button"
-    title="Mantené presionado para borrar"
-    aria-label={`Tema ${topic}. Mantener presionado para borrar`}
-    className="bg-green-500 text-white text-xs px-2 py-1 rounded cursor-pointer select-none touch-pan-y"
+    title="Abrir pizarra · Mantené presionado para borrar"
+    aria-label={`Tema ${topic}. Abrir pizarra. Mantener presionado para borrar`}
+    className="flex min-h-[4.5rem] min-w-0 items-center justify-center break-words rounded-[1.25rem] bg-green-500 px-4 py-3 text-center text-[1.75rem] leading-tight text-white cursor-pointer select-none touch-pan-y transition-colors hover:bg-green-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     data-row-activation-stop="true"
     onPointerDown={event => {
       if (!event.isPrimary || event.button !== 0) return
       cancel()
+      held.current = false
       origin.current = { x: event.clientX, y: event.clientY }
       event.currentTarget.setPointerCapture(event.pointerId)
-      timer.current = setTimeout(() => { timer.current = null; onRemove() }, 650)
+      timer.current = setTimeout(() => { timer.current = null; held.current = true; onRemove() }, 650)
     }}
     onPointerMove={event => {
       if (Math.hypot(event.clientX - origin.current.x, event.clientY - origin.current.y) > 12) cancel()
@@ -82,15 +113,24 @@ function TopicChip({ topic, onRemove }: { topic: string; onRemove: () => void })
     onPointerUp={cancel}
     onPointerCancel={cancel}
     onLostPointerCapture={cancel}
+    onClick={() => { if (!held.current) onOpen() }}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if ((event.key === " " || event.key === "Enter") && !event.repeat) {
         event.preventDefault()
         cancel()
-        timer.current = setTimeout(() => { timer.current = null; onRemove() }, 650)
+        held.current = false
+        timer.current = setTimeout(() => { timer.current = null; held.current = true; onRemove() }, 650)
       }
     }}
-    onKeyUp={cancel}
+    onKeyUp={event => {
+      if (event.key === " " || event.key === "Enter") {
+        event.preventDefault()
+        const wasPending = timer.current !== null
+        cancel()
+        if (wasPending && !held.current) onOpen()
+      }
+    }}
     onBlur={cancel}
   >{topic}</button>
 }
@@ -188,7 +228,13 @@ interface TaskItem {
   denominator: number
   days?: number
   topics?: string[]
+  topicBoardIds?: string[]
   url?: string
+}
+
+function compareTaskDaysRemaining(a: TaskItem, b: TaskItem) {
+  return (a.days ?? Math.max(a.denominator - a.numerator, 0)) -
+    (b.days ?? Math.max(b.denominator - b.numerator, 0))
 }
 
 interface Table {
@@ -209,6 +255,13 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [topicInputs, setTopicInputs] = useState<Record<string, string>>({})
+  const [addingTopicId, setAddingTopicId] = useState<string | null>(null)
+  const [selectedTopicBoard, setSelectedTopicBoard] = useState<{ boardId: string; name: string } | null>(null)
+  const closeTopicBoard = useCallback(() => setSelectedTopicBoard(null), [])
+  const [deleteTarget, setDeleteTarget] = useState<
+    { kind: "task"; taskId: string; label: string } |
+    { kind: "topic"; taskId: string; boardId: string; label: string } | null
+  >(null)
  
   const [isEventMode, setIsEventMode] = useState(false)
   const [eventTasks, setEventTasks] = useState<
@@ -243,13 +296,21 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
       if (!active) return
       setTables([{ title: "Importantes", tasks: tasks.map(task => {
         const progress = importantTaskProgress(task)
-        return { id: task.id, text: task.text, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics }
-      }) }])
+        return { id: task.id, text: task.text, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
+      }).sort(compareTaskDaysRemaining) }])
       loaded.current = true
       setIsLoading(false)
     }).catch(error => { if (active) { setStorageError(String(error)); setIsLoading(false) } })
     return () => { active = false }
   }, [rootHandle, isReady])
+  useEffect(() => {
+    if (!active || !loaded.current) return
+    setTables(previous => {
+      const tasks = [...previous[0].tasks].sort(compareTaskDaysRemaining)
+      if (tasks.every((task, index) => task === previous[0].tasks[index])) return previous
+      return [{ ...previous[0], tasks }]
+    })
+  }, [active])
   useEffect(() => {
     if (!loaded.current || !rootHandle) return
     const today = normalizeDate(new Date())
@@ -258,7 +319,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
       due.setDate(due.getDate() + (task.days ?? task.denominator - task.numerator))
       const start = new Date(due)
       start.setDate(start.getDate() - task.denominator)
-      return { id: task.id, text: task.text, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [] }
+      return { id: task.id, text: task.text, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [], topicBoardIds: task.topicBoardIds ?? [] }
     })
     queue.current = queue.current.catch(() => {}).then(() => writeImportantTasks(rootHandle, tasks)).then(() => setStorageError("")).catch(error => setStorageError(String(error)))
   }, [tables, rootHandle])
@@ -267,9 +328,9 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   const addImportantTask = () => setTables(prev => [{ ...prev[0], tasks: [...prev[0].tasks, { id: crypto.randomUUID(), text: "", days: 7, numerator: 0, denominator: 7, topics: [] }] }])
   const removeImportantTask = (id: string) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.filter(task => task.id !== id) }])
   const addTopic = (id: string, topic: string) => {
-    if (topic.trim()) setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, topics: [...(task.topics ?? []), topic.trim()] } : task) }])
+    if (topic.trim()) setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, topics: [...(task.topics ?? []), topic.trim()], topicBoardIds: [...(task.topicBoardIds ?? []), crypto.randomUUID()] } : task) }])
   }
-  const removeTopic = (id: string, index: number) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, topics: (task.topics ?? []).filter((_, i) => i !== index) } : task) }])
+  const removeTopic = (id: string, index: number) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, topics: (task.topics ?? []).filter((_, i) => i !== index), topicBoardIds: (task.topicBoardIds ?? []).filter((_, i) => i !== index) } : task) }])
   const handleCalendarDateSelection = async (date: Date) => {
     if (!calendarSelection) return
     const task = tables[0].tasks.find(task => task.id === calendarSelection.taskId)
@@ -340,7 +401,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!active) return
+      if (!active || selectedTopicBoard || deleteTarget) return
       if (event.altKey || event.metaKey) return
       if ((event.target as HTMLElement)?.closest("input, textarea, select, [contenteditable=true]")) return
       if (event.key.toLowerCase() === "c" && !editingId) {
@@ -430,7 +491,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, onBack, active])
+  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, onBack, active, selectedTopicBoard, deleteTarget])
 
   const currentTable = tables[currentTableIndex]
   const getProgressPercentage = (numerator: number, denominator: number) => {
@@ -694,6 +755,28 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
 
   return (
     <div className="min-h-screen bg-background p-6 relative">
+      {selectedTopicBoard && rootHandle && <TopicBoardOverlay {...selectedTopicBoard} rootHandle={rootHandle} onClose={closeTopicBoard} />}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={open => { if (!open) setDeleteTarget(null) }}>
+        <AlertDialogContent className="progress-original">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{deleteTarget?.kind === "task" ? "¿Borrar esta fila?" : "¿Borrar este tema?"}</AlertDialogTitle>
+            <AlertDialogDescription>{deleteTarget?.label || "Sin nombre"}{deleteTarget?.kind === "task" ? ". Se quitarán la fila y sus temas." : ". Se quitará el tema de esta fila."}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (!deleteTarget) return
+              if (deleteTarget.kind === "task") removeImportantTask(deleteTarget.taskId)
+              else {
+                const task = tables[0].tasks.find(task => task.id === deleteTarget.taskId)
+                const index = task?.topicBoardIds?.indexOf(deleteTarget.boardId) ?? -1
+                if (index >= 0) removeTopic(deleteTarget.taskId, index)
+              }
+              setDeleteTarget(null)
+            }}>Confirmar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {storageError && <p role="alert" className="text-red-600">{storageError}</p>}
       <div className="fixed top-6 right-6 z-30">
         <Button
@@ -718,10 +801,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
         <div
           className={`space-y-3 transition-all duration-300 ${isTransitioning ? "opacity-0 transform translate-x-4" : "opacity-100 transform translate-x-0"}`}
         >
-          {[...currentTable.tasks].sort((a, b) =>
-            (a.days ?? Math.max(a.denominator - a.numerator, 0)) -
-            (b.days ?? Math.max(b.denominator - b.numerator, 0))
-          ).map((task) => {
+          {currentTable.tasks.map((task) => {
             const daysRemaining =
               typeof task.days === "number"
                 ? task.days
@@ -733,12 +813,12 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
             const isHovered = hoveredTaskId === task.id
             const missingPdfs = calculatePdfsNeeded(task)
             return (
-              <div
+              <HoldableTaskRow
                 key={task.id}
-                className="relative overflow-hidden bg-card border rounded-lg shadow-sm"
-                onMouseEnter={() => setHoveredTaskId(task.id)}
-                onMouseLeave={() => setHoveredTaskId(null)}
-                    >
+                label={task.text || "Sin nombre"}
+                onHold={() => setDeleteTarget({ kind: "task", taskId: task.id, label: task.text })}
+                onHover={hovered => setHoveredTaskId(hovered ? task.id : null)}
+              >
                 <div
                   className={`absolute top-0 right-0 z-20 flex items-center gap-1 bg-gradient-to-r ${bgColor} text-white px-2 py-1 rounded-bl-lg text-xs font-bold shadow-lg cursor-pointer`}
                   data-row-activation-stop="true"
@@ -820,7 +900,8 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                   </div>
                 )}
 
-                <div className="relative z-10 flex items-center gap-4 p-3">
+                <div className="relative z-10 grid min-h-[6.5rem] grid-cols-1 gap-3 p-3 pr-6 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2fr)] sm:items-center sm:gap-5 sm:pr-16">
+                  <div className="flex min-w-0 flex-col items-start gap-2">
                   <div className="flex-1">
                     {editingId === task.id ? (
                       <Input
@@ -853,30 +934,8 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                     )}
                   </div>
 
-                  <div className="text-sm text-muted-foreground font-medium shrink-0 w-12 text-right">
-                    {Math.round(getProgressPercentage(task.numerator, task.denominator))}%
-                  </div>
-                  {currentTable.title === "Importantes" && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="ml-2 bg-transparent"
-                      data-row-activation-stop="true"
-                      onClick={() => removeImportantTask(task.id)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-
-                <div
-                  className="relative z-10 flex flex-wrap gap-2 px-3 pb-3"
-                  data-row-activation-stop="true"
-                >
-                  {(task.topics || []).map((topic, index) => (
-                    <TopicChip key={index} topic={topic} onRemove={() => removeTopic(task.id, index)} />
-                  ))}
-                  <Input
+                  {addingTopicId === task.id ? <Input
+                    autoFocus
                     value={topicInputs[task.id] || ""}
                     onChange={(e) =>
                       setTopicInputs((prev) => ({ ...prev, [task.id]: e.target.value }))
@@ -885,14 +944,33 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                       if (e.key === "Enter") {
                         addTopic(task.id, topicInputs[task.id] || "")
                         setTopicInputs((prev) => ({ ...prev, [task.id]: "" }))
+                        setAddingTopicId(null)
                       }
+                      if (e.key === "Escape") setAddingTopicId(null)
                     }}
+                    onBlur={() => setAddingTopicId(null)}
                     placeholder="Agregar tema..."
                     className="w-32 h-7 bg-white/80 backdrop-blur-sm text-xs"
                     data-row-activation-stop="true"
-                  />
+                  /> : <button
+                    type="button"
+                    aria-label="Agregar tema"
+                    title="Agregar tema"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    data-row-activation-stop="true"
+                    onClick={() => setAddingTopicId(task.id)}
+                  ><Plus className="h-4 w-4" /></button>}
+                  </div>
+                  <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
+                  {(task.topics || []).map((topic, index) => (
+                    <TopicChip key={task.topicBoardIds?.[index] ?? index} topic={topic} onRemove={() => setDeleteTarget({ kind: "topic", taskId: task.id, boardId: task.topicBoardIds?.[index] ?? "", label: topic })} onOpen={() => {
+                      const boardId = task.topicBoardIds?.[index]
+                      if (boardId) setSelectedTopicBoard({ boardId, name: `${task.text} · ${topic}` })
+                    }} />
+                  ))}
+                  </div>
                 </div>
-              </div>
+              </HoldableTaskRow>
             )
           })}
         </div>
