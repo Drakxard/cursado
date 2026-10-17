@@ -4,7 +4,7 @@ import { createRequire } from "node:module"
 import { build } from "esbuild"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
-import { chromium } from "@playwright/test"
+import { chromium, expect } from "@playwright/test"
 import postcss from "postcss"
 import tailwind from "@tailwindcss/postcss"
 
@@ -326,7 +326,7 @@ test("imágenes a todo el ancho y alto con micrófono y acceso al original en es
     const bounds=await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').boundingBox()
     assert.ok(Math.abs(bounds.x)<1 && Math.abs(bounds.y)<1,JSON.stringify(bounds))
     assert.ok(Math.abs(bounds.width-viewport.width)<1 && Math.abs(bounds.height-viewport.height)<1,JSON.stringify(bounds))
-    assert.ok((await page.getByRole('heading',{name:'Álgebra'}).boundingBox()).width<=1)
+    await expect(page.getByRole('heading',{name:'Álgebra'})).toHaveCSS('width','1px')
     assert.equal(await page.getByRole('link',{name:'Abrir PDF original'}).isVisible(),true)
     const mic=page.getByRole('button',{name:/micrófono/})
     await mic.waitFor()
