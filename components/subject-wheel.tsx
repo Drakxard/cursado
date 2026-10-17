@@ -8370,8 +8370,8 @@ export function SubjectWheel({
                     </Button>
                   ) : null}
                   {currentSubject ? (
-                    <div className="ml-auto flex shrink-0 items-center gap-1">
-                      {subjectShortcuts.buttons.map((shortcut) => {
+                    <div className={isNativeReadOnly() ? "ml-auto flex min-w-0 max-w-[55%] flex-wrap items-center justify-end gap-1" : "ml-auto flex shrink-0 items-center gap-1"}>
+                      {subjectShortcuts.buttons.filter((shortcut) => !isNativeReadOnly() || Boolean(getSubjectShortcutUrl(shortcut, shortcutSectionKey))).map((shortcut) => {
                         const url = getSubjectShortcutUrl(shortcut, shortcutSectionKey)
                         const commonProps = {
                           onPointerDown: () => handleShortcutPointerDown(shortcut),
@@ -10084,7 +10084,7 @@ export function SubjectWheel({
               </div>
               <div className="flex items-center gap-2">
                 {activePracticeShortcutSubject
-                  ? subjectShortcuts.buttons.filter((button) => button.label === "E-Fich" || button.label === "Figma").map((shortcut) => {
+                  ? subjectShortcuts.buttons.filter((button) => isNativeReadOnly() ? Boolean(getSubjectShortcutUrl(button, shortcutSectionKey)) : button.label === "E-Fich" || button.label === "Figma").map((shortcut) => {
                       const url = getSubjectShortcutUrl(shortcut, shortcutSectionKey)
                       const title = isSubjectShortcutsLoading
                         ? `Cargando ${shortcut.label}`

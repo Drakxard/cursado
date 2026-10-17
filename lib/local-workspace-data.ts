@@ -3126,8 +3126,10 @@ export async function getLocalSubjectShortcuts(subjectId: string) {
   const shortcuts = await readShortcutsManifest()
   const storageKey = await resolveLocalSubjectStorageKey(subjectId)
   const migrated = normalizeShortcutRecord(storageKey, shortcuts[storageKey])
-  shortcuts[storageKey] = migrated
-  await writeShortcutsManifest(shortcuts)
+  if (!isNativeReadOnly()) {
+    shortcuts[storageKey] = migrated
+    await writeShortcutsManifest(shortcuts)
+  }
   return { ...migrated, subjectId }
 }
 
