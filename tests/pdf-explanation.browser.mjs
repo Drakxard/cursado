@@ -14,12 +14,13 @@ let bytes = await pdf.save()
 test("PDF.js star generates from cached Datalab text; note drags, persists and reopens with Escape", async () => {
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
-  let generations = 0, transcriptions = 0
+  let generations = 0, transcriptions = 0, modelsConfigured = false
   const errors = []
   page.on("pageerror", error => errors.push(error.message))
   await page.route("https://explanation.test/**", async route => {
     const url = new URL(route.request().url())
     if (url.pathname === "/api/pdf-explanation") {
+      if (route.request().method() === "GET" && !modelsConfigured) return route.fulfill({status:428,json:{error:"No se pudo desbloquear User.Services con la semilla de este despliegue."}})
       if (route.request().method() === "GET") return route.fulfill({ json: { provider: "azure", models: [{ id: "gpt-5-mini", name: "GPT-5 mini · Azure" }] } })
       const body = route.request().postDataJSON()
       assert.equal(body.model, "gpt-5-mini")
@@ -74,8 +75,15 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.goto(url)
     await initialize()
     await page.locator("#pdfExplanationButton").click()
+    await page.getByText("No se pudo desbloquear User.Services con la semilla de este despliegue.", {exact:true}).waitFor()
+    await page.locator("#pdf-explanation-question").fill("Borrador conservado")
+    modelsConfigured = true
+    await page.evaluate(() => window.dispatchEvent(new Event("cursado-services-changed")))
+
     await page.waitForFunction(() => document.querySelector("#pdf-explanation-model")?.value === "gpt-5-mini")
     assert.equal(await page.locator(".pdf-explanation-model-row").isVisible(), false)
+    assert.equal(await page.locator("#pdf-explanation-question").inputValue(), "Borrador conservado")
+    assert.equal(await page.getByText("No se pudo desbloquear User.Services con la semilla de este despliegue.", {exact:true}).count(), 0)
     await page.getByText("Página lista · Enter para explicar", { exact: true }).waitFor()
     await page.locator("#pdf-explanation-question").fill("¿Qué representa la derivada?")
     await page.locator("#pdf-explanation-question").press("Shift+Enter")

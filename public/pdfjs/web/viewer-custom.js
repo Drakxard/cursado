@@ -421,7 +421,10 @@
     return response;
   }
   window.addEventListener("message", event => {
-    if (event.source === window.parent && event.origin === window.location.origin && event.data?.type === "cursado-services-changed") state.inscreenConfigToken = "";
+    if (event.source === window.parent && event.origin === window.location.origin && event.data?.type === "cursado-services-changed") {
+      state.inscreenConfigToken = "";
+      window.dispatchEvent(new Event("cursado-services-changed"));
+    }
   });
 
   function isInscreenConfigurationUnavailable(error) {

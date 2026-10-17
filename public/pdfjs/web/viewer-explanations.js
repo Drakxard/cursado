@@ -490,13 +490,16 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         selected.width * source.width, selected.height * source.height, 0, 0, crop.width, crop.height);
       return crop.toDataURL("image/jpeg", 0.9);
     }
+    let modelsRevision = 0;
     async function loadModels() {
+      const revision = ++modelsRevision;
       modelSelect.disabled = true; refresh.disabled = true;
       modelStatus.hidden = false;
       modelStatus.textContent = "Consultando el modelo de explicación…";
       try {
         const response = await servicesFetch("/api/pdf-explanation", { cache: "no-store" });
         const payload = await response.json();
+        if (revision !== modelsRevision || modal !== view) return;
         if (!response.ok) throw new Error(payload.error || "No se pudo cargar la lista de modelos.");
         if (!Array.isArray(payload.models) || !payload.models.length) throw new Error("No hay modelos disponibles.");
         const fixedAzure = payload.provider === "azure";
@@ -514,14 +517,29 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         modelStatus.textContent = "";
         modelStatus.hidden = true;
       } catch (error) {
+        if (revision !== modelsRevision || modal !== view) return;
         modelSelect.replaceChildren(new Option("No se pudo cargar la lista", ""));
         modelStatus.textContent = error.message;
         throw error;
-      } finally { modelSelect.disabled = generating || !modelSelect.value; refresh.disabled = generating; }
+      } finally { if (revision === modelsRevision) { modelSelect.disabled = generating || !modelSelect.value; refresh.disabled = generating; } }
     }
     let modelsReady = loadModels();
     modelsReady.catch(() => {});
     refresh.addEventListener("click", () => { modelsReady = loadModels(); modelsReady.catch(() => {}); });
+    const servicesChanged = () => {
+      if (modal !== view) return;
+      modelsReady = loadModels();
+      modelsReady.catch(() => {});
+      preparePage(pdf, page).then(() => {
+        if (modal === view && !generating) status.textContent = "Página lista · Enter para explicar";
+      }, error => { if (modal === view && !generating) status.textContent = error.message; });
+    };
+    window.addEventListener("cursado-services-changed", servicesChanged);
+    const cleanupView = view.cleanup;
+    view.cleanup = () => {
+      window.removeEventListener("cursado-services-changed", servicesChanged);
+      cleanupView?.();
+    };
     modelSelect.addEventListener("change", () => { try { localStorage.setItem("pdf-explanation-model", modelSelect.value); } catch {} });
     status.textContent = "Preparando la transcripción de la página…";
     preparePage(pdf, page).then(() => {
