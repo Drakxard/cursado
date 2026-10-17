@@ -39,9 +39,9 @@ export function StudyImportantTasks({ children }: { children: ReactNode }) {
       const dx = event.changedTouches[0].clientX - start.x
       const dy = event.changedTouches[0].clientY - start.y
       if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-        if (!open && dx > 0) { setTabsOpen(false); setOpen(true) }
-        if (open && dx < 0) setOpen(false)
-        else if (!open && dx < 0 && isNativeReadOnly()) setTabsOpen(true)
+        if (!open && dx < 0) { setTabsOpen(false); setOpen(true) }
+        if (open && dx > 0) setOpen(false)
+        else if (!open && dx > 0 && isNativeReadOnly()) setTabsOpen(true)
       }
     }}>
     <div hidden={open} inert={open}>{children}</div>

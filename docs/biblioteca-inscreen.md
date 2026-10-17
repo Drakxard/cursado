@@ -64,8 +64,8 @@ indica cuántos archivos están guardados y verifica tamaño y SHA-256 antes de
 conservarlos. Se mantiene la revisión completa anterior hasta terminar la nueva.
 La falta de conexión o espacio deja disponibles los archivos ya descargados.
 
-En Estudio, deslizar hacia la derecha abre **Importantes**; deslizar hacia la
-izquierda desde la rueda muestra las pestañas, y desde Importantes vuelve a la
+En Estudio, deslizar hacia la izquierda abre **Importantes**; deslizar hacia la
+derecha desde la rueda muestra las pestañas, y desde Importantes vuelve a la
 rueda. Se publica `progreso/importantes.json`, junto con las pizarras de sus
 temas. Los cambios guardados avisan al sincronizador de la web. Si una publicación
 anterior no incluye ese archivo, InScreen indica que hay que sincronizar desde
