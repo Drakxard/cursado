@@ -2740,6 +2740,7 @@ export function SubjectWheel({
   // Global 'g' key listener — registered once, stable via ref
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.querySelector(".progress-original:not([hidden])")) return
       const target = e.target as HTMLElement | null
       const tag = target?.tagName
       const isEditable = Boolean(target?.isContentEditable)

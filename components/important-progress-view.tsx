@@ -1,0 +1,1121 @@
+"use client"
+
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
+import type { MouseEvent, KeyboardEvent } from "react"
+import { Button } from "@/components/progress-original/button"
+import { Input } from "@/components/progress-original/input"
+import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X } from "lucide-react"
+
+const parseDateInput = (input?: string): Date | null => {
+  if (!input) return null
+  if (/^\d+d$/.test(input)) {
+    const days = parseInt(input.slice(0, -1), 10)
+    const date = new Date()
+    date.setDate(date.getDate() + days)
+    return date
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    const [year, month, day] = input.split("-").map(Number)
+    return new Date(year, month - 1, day)
+  }
+  const date = new Date(input)
+  if (isNaN(date.getTime())) {
+    return null
+  }
+  if (/[zZ]$/.test(input) || /[+-]\d{2}:\d{2}$/.test(input)) {
+    return new Date(date.getTime() + date.getTimezoneOffset() * 60000)
+  }
+  return date
+}
+
+const normalizeDate = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
+const computeDaysUntil = (targetDate: Date) => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const normalizedSelected = normalizeDate(targetDate)
+  const diffMs = normalizedSelected.getTime() - today.getTime()
+  return Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)))
+}
+
+const normalizeUrlForOpen = (url?: string) => {
+  if (!url) return ""
+  const trimmed = url.trim()
+  if (!trimmed) return ""
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+}
+
+const formatDateForStorage = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+const ABSOLUTE_DATE_REGEX = /^\d{4}-\d{2}-\d{2}(?:$|T)/
+
+const rollDateForwardWeekly = (date: Date, today: Date) => {
+  let nextDate = normalizeDate(date)
+  while (nextDate <= today) {
+    nextDate = normalizeDate(
+      new Date(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate() + 7),
+    )
+  }
+  return nextDate
+}
+
+const SUBJECT_RESOURCE_LINKS: Record<string, { theory?: string; practice?: string }> = {
+  Álgebra: {
+    theory: "https://v0-pdf-navigation-app.vercel.app/teoria/algebra",
+    practice: "https://v0-pdf-navigation-app.vercel.app/practica/algebra",
+  },
+  Cálculo: {
+    theory: "https://v0-pdf-navigation-app.vercel.app/teoria/calculo",
+    practice: "https://v0-pdf-navigation-app.vercel.app/practica/calculo",
+  },
+  Poo: {
+    theory: "https://v0-pdf-navigation-app.vercel.app/teoria/poo",
+    practice: "https://v0-pdf-navigation-app.vercel.app/práctica/poo",
+  },
+}
+
+interface CalendarEvent {
+  date: Date
+  label: string
+  color: string
+  url?: string
+  source?: {
+    kind: "important" | "theory" | "practice"
+    taskId?: string
+    tableIndex?: number
+  }
+}
+
+interface TaskItem {
+  id: string
+  text: string
+  numerator: number
+  denominator: number
+  days?: number
+  topics?: string[]
+  url?: string
+}
+
+type LinkModalState =
+  | { isOpen: false }
+  | {
+      isOpen: true
+      taskId: string
+      tableIndex: number
+      url: string
+      label: string
+    }
+
+interface Table {
+  title: string
+  tasks: TaskItem[]
+}
+
+import { importantTaskProgress, readImportantTasks, writeImportantTasks, type ImportantTask } from "@/lib/important-tasks"
+import { useLocalWorkspace } from "@/components/local-workspace-provider"
+
+// UI copied from progreso/components/progress-tracker.tsx; only local persistence and study navigation are adapted.
+export default function ImportantProgressView({ active, onBack }: { active: boolean; onBack: () => void }) {
+  const currentTableIndex = 0
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editText, setEditText] = useState("")
+  const isTransitioning = false
+  const [showAverageLine, setShowAverageLine] = useState(false)
+  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
+  const [linkModalState, setLinkModalState] = useState<LinkModalState>({
+    isOpen: false,
+  })
+  const [isLoading, setIsLoading] = useState(true)
+  const [topicInputs, setTopicInputs] = useState<Record<string, string>>({})
+  const [taskLinkOverrides, setTaskLinkOverrides] = useState<Record<string, string>>({})
+ 
+  const [isEventMode, setIsEventMode] = useState(false)
+  const [eventTasks, setEventTasks] = useState<
+    { task: TaskItem; tableTitle: string; tableIndex: number; daysRemaining: number }[]
+  >([])
+  const [eventIndex, setEventIndex] = useState(0)
+  const [eventZoom, setEventZoom] = useState(2)
+  const [isCalendarMode, setIsCalendarMode] = useState(false)
+  const [calendarDate, setCalendarDate] = useState(new Date())
+  const [calendarSelection, setCalendarSelection] = useState<
+    { taskId: string; tableIndex: number } | null
+  >(null)
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(
+    null,
+  )
+  const [isClient, setIsClient] = useState(false)
+
+
+  const { rootHandle, isReady } = useLocalWorkspace()
+  const [tables, setTables] = useState<Table[]>([{ title: "Importantes", tasks: [] }])
+  const [storageError, setStorageError] = useState("")
+  const subjectSchedules: { name: string; theoryDate?: string; practiceDate?: string }[] = []
+  const queue = useRef(Promise.resolve())
+  const loaded = useRef(false)
+  useEffect(() => {
+    let active = true
+    loaded.current = false
+    setIsLoading(true)
+    if (rootHandle && isReady) readImportantTasks(rootHandle).then(tasks => {
+      if (!active) return
+      setTables([{ title: "Importantes", tasks: tasks.map(task => {
+        const progress = importantTaskProgress(task)
+        return { id: task.id, text: task.text, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics }
+      }) }])
+      loaded.current = true
+      setIsLoading(false)
+    }).catch(error => { if (active) { setStorageError(String(error)); setIsLoading(false) } })
+    return () => { active = false }
+  }, [rootHandle, isReady])
+  useEffect(() => { setIsClient(true) }, [])
+  useEffect(() => {
+    if (!loaded.current || !rootHandle) return
+    const today = normalizeDate(new Date())
+    const tasks = tables[0].tasks.map(task => {
+      const due = new Date(today)
+      due.setDate(due.getDate() + (task.days ?? task.denominator - task.numerator))
+      const start = new Date(due)
+      start.setDate(start.getDate() - task.denominator)
+      return { id: task.id, text: task.text, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [] }
+    })
+    queue.current = queue.current.catch(() => {}).then(() => writeImportantTasks(rootHandle, tasks)).then(() => setStorageError("")).catch(error => setStorageError(String(error)))
+  }, [tables, rootHandle])
+  const changeTask = (id: string, patch: Partial<TaskItem>) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, ...patch } : task) }])
+  const saveTask = async (id: string) => { changeTask(id, { text: editText }); setEditingId(null); setEditText("") }
+  const handleLinkModalSave = async () => {
+    if (!linkModalState.isOpen) return
+    changeTask(linkModalState.taskId, { url: linkModalState.url.trim() || undefined })
+    setLinkModalState({ isOpen: false })
+  }
+  const addImportantTask = () => setTables(prev => [{ ...prev[0], tasks: [...prev[0].tasks, { id: crypto.randomUUID(), text: "", days: 7, numerator: 0, denominator: 7, topics: [] }] }])
+  const removeImportantTask = (id: string) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.filter(task => task.id !== id) }])
+  const addTopic = (id: string, topic: string) => {
+    if (topic.trim()) setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, topics: [...(task.topics ?? []), topic.trim()] } : task) }])
+  }
+  const removeTopic = (id: string, index: number) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, topics: (task.topics ?? []).filter((_, i) => i !== index) } : task) }])
+  const handleCalendarDateSelection = async (date: Date) => {
+    if (!calendarSelection) return
+    const task = tables[0].tasks.find(task => task.id === calendarSelection.taskId)
+    if (!task) return
+    const days = computeDaysUntil(date)
+    const denominator = Math.max(task.denominator, days, 1)
+    changeTask(task.id, { days, denominator, numerator: denominator - days })
+    setCalendarSelection(null)
+    setIsCalendarMode(false)
+  }
+  const getSubjectResourceLink = useCallback((task: TaskItem, tableTitle: string) => {
+    const resources = SUBJECT_RESOURCE_LINKS[task.text]
+    if (!resources) return undefined
+    if (tableTitle === "Teoría") return resources.theory
+    if (tableTitle === "Práctica") return resources.practice
+    return undefined
+  }, [])
+
+  const getRawTaskUrl = useCallback(
+    (task: TaskItem, tableTitle: string) => {
+      const override = taskLinkOverrides[task.id]?.trim()
+      if (override) {
+        return override
+      }
+
+      if (typeof task.url === "string" && task.url.trim() !== "") {
+        return task.url.trim()
+      }
+
+      const fallback = getSubjectResourceLink(task, tableTitle)
+      return fallback ?? ""
+    },
+    [getSubjectResourceLink, taskLinkOverrides],
+  )
+
+  const getNormalizedTaskUrl = useCallback(
+    (task: TaskItem, tableTitle: string) => normalizeUrlForOpen(getRawTaskUrl(task, tableTitle)),
+    [getRawTaskUrl],
+  )
+
+  const openLinkModalForTask = useCallback(
+    (tableIndex: number, task: TaskItem) => {
+      setLinkModalState({
+        isOpen: true,
+        tableIndex,
+        taskId: task.id,
+        url:
+          taskLinkOverrides[task.id] ??
+          (typeof task.url === "string" && task.url.trim() !== ""
+            ? task.url.trim()
+            : ""),
+        label: task.text,
+      })
+    },
+    [taskLinkOverrides],
+  )
+
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type })
+    window.setTimeout(() => setToast(null), 2000)
+  }
+
+  const handleCalendarEventContextMenu = (
+    event: MouseEvent<HTMLDivElement>,
+    calendarEvent: CalendarEvent,
+  ) => {
+    if (calendarEvent.source?.kind !== "important") {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    const { tableIndex, taskId } = calendarEvent.source
+    if (tableIndex === undefined || taskId === undefined) {
+      return
+    }
+    const table = tables[tableIndex]
+    const task = table?.tasks.find((item) => item.id === taskId)
+    if (!task) {
+      return
+    }
+
+    openLinkModalForTask(tableIndex, task)
+  }
+
+  const handleLinkModalClose = () => {
+    setLinkModalState({ isOpen: false })
+  }
+
+  const calendarEvents = useMemo(() => {
+    const events: CalendarEvent[] = []
+
+    const teoriaTasks = tables.find((t) => t.title === "Teoría")?.tasks || []
+    const practicaTasks = tables.find((t) => t.title === "Práctica")?.tasks || []
+    const importantTableIndex = tables.findIndex((t) => t.title === "Importantes")
+    const importantTasks =
+      importantTableIndex === -1 ? [] : tables[importantTableIndex].tasks
+
+    subjectSchedules.forEach((subject) => {
+      const theoryDate = parseDateInput(subject.theoryDate)
+      if (theoryDate) {
+        const tTask = teoriaTasks.find((t) => t.text === subject.name)
+        const remaining =
+          tTask && typeof tTask.days === "number"
+            ? tTask.days
+            : tTask
+              ? Math.max(tTask.denominator - tTask.numerator, 0)
+              : undefined
+        const theoryUrl = tTask
+          ? getNormalizedTaskUrl(tTask, "Teoría")
+          : normalizeUrlForOpen(SUBJECT_RESOURCE_LINKS[subject.name]?.theory)
+        events.push({
+          date: theoryDate,
+          label: `${subject.name} teoría${
+            remaining !== undefined ? ` (${remaining})` : ""
+          }`,
+          color: "bg-blue-500",
+          url: theoryUrl || undefined,
+          source: { kind: "theory" },
+        })
+      }
+      const practiceDate = parseDateInput(subject.practiceDate)
+      if (practiceDate) {
+        const pTask = practicaTasks.find((t) => t.text === subject.name)
+        const remaining =
+          pTask && typeof pTask.days === "number"
+            ? pTask.days
+            : pTask
+              ? Math.max(pTask.denominator - pTask.numerator, 0)
+              : undefined
+        const practiceUrl = pTask
+          ? getNormalizedTaskUrl(pTask, "Práctica")
+          : normalizeUrlForOpen(SUBJECT_RESOURCE_LINKS[subject.name]?.practice)
+        events.push({
+          date: practiceDate,
+          label: `${subject.name} práctica${
+            remaining !== undefined ? ` (${remaining})` : ""
+          }`,
+          color: "bg-green-500",
+          url: practiceUrl || undefined,
+          source: { kind: "practice" },
+        })
+      }
+    })
+
+    const today = new Date()
+    importantTasks.forEach((task) => {
+      if (task.days !== undefined && task.days >= 0) {
+        const due = new Date(today)
+        due.setDate(due.getDate() + (task.days || 0))
+        const trimmedUrl = getNormalizedTaskUrl(task, "Importantes")
+        events.push({
+          date: due,
+          label: `${task.text} (${task.days}d)`,
+          color: "bg-orange-500",
+          url: trimmedUrl || undefined,
+          source: {
+            kind: "important",
+            taskId: task.id,
+            tableIndex: importantTableIndex,
+          },
+        })
+      }
+    })
+
+    return events
+  }, [tables, subjectSchedules, getNormalizedTaskUrl])
+
+  const selectedCalendarTask = useMemo(() => {
+    if (!calendarSelection) return null
+    const table = tables[calendarSelection.tableIndex]
+    if (!table) return null
+    const task = table.tasks.find((t) => t.id === calendarSelection.taskId)
+    if (!task) return null
+
+    let dueDate: Date | null = null
+    if (table.title === "Importantes" && typeof task.days === "number") {
+      const base = new Date()
+      base.setHours(0, 0, 0, 0)
+      base.setDate(base.getDate() + task.days)
+      dueDate = base
+    } else if (table.title === "Teoría" || table.title === "Práctica") {
+      const subject = subjectSchedules.find((item) => item.name === task.text)
+      if (subject) {
+        const rawDate =
+          table.title === "Teoría" ? subject.theoryDate : subject.practiceDate
+        const parsedDate = parseDateInput(rawDate)
+        if (parsedDate) {
+          dueDate = parsedDate
+        }
+      }
+    }
+
+    return {
+      task,
+      tableTitle: table.title,
+      dueDate,
+    }
+  }, [calendarSelection, tables, subjectSchedules])
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!active) return
+      if (linkModalState.isOpen || event.altKey || event.metaKey) return
+      if ((event.target as HTMLElement)?.closest("input, textarea, select, [contenteditable=true]")) return
+      if (event.key.toLowerCase() === "c" && !editingId) {
+        event.preventDefault()
+        setCalendarSelection(null)
+        setIsCalendarMode((prev) => !prev)
+        return
+      }
+      if (isCalendarMode) {
+        if (event.key === "Escape") {
+          event.preventDefault()
+          setCalendarSelection(null)
+          setIsCalendarMode(false)
+          return
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault()
+          setCalendarDate(
+            (prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1),
+          )
+        } else if (event.key === "ArrowLeft") {
+          event.preventDefault()
+          setCalendarDate(
+            (prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1),
+          )
+        }
+        return
+      }
+      if (event.key.toLowerCase() === "i" && !editingId) {
+        event.preventDefault()
+        if (isEventMode) {
+          setIsEventMode(false)
+        } else {
+          const tasks = tables
+            .flatMap((table, tableIndex) =>
+              table.tasks.map((task) => ({
+                task,
+                tableTitle: table.title,
+                tableIndex,
+                daysRemaining:
+                  typeof task.days === "number"
+                    ? task.days
+                    : Math.max(task.denominator - task.numerator, 0),
+              })),
+            )
+            .sort((a, b) => a.daysRemaining - b.daysRemaining)
+          setEventTasks(tasks)
+          setEventIndex(0)
+          setIsEventMode(true)
+        }
+        return
+      }
+      if (isEventMode) {
+        if (event.ctrlKey && (event.key === "+" || event.key === "=")) {
+          event.preventDefault()
+          setEventZoom((prev) => Math.min(prev + 0.1, 3))
+        } else if (event.ctrlKey && (event.key === "-" || event.key === "_")) {
+          event.preventDefault()
+          setEventZoom((prev) => Math.max(prev - 0.1, 0.5))
+        } else if (event.ctrlKey && event.key === "0") {
+          event.preventDefault()
+          setEventZoom(2)
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault()
+          setEventIndex((prev) =>
+            eventTasks.length ? (prev + 1) % eventTasks.length : 0,
+          )
+        } else if (event.key === "ArrowLeft") {
+          event.preventDefault()
+          setEventIndex((prev) =>
+            eventTasks.length
+              ? (prev - 1 + eventTasks.length) % eventTasks.length
+              : 0,
+          )
+        }
+        return
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault()
+        onBack()
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault()
+        return
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, onBack, linkModalState.isOpen, active])
+
+  const currentTable = tables[currentTableIndex]
+  const getProgressPercentage = (numerator: number, denominator: number) => {
+    if (denominator === 0) return 0
+    return Math.min((numerator / denominator) * 100, 100)
+  }
+
+  const calculateAveragePercentage = () => {
+    const currentTasks = currentTable.tasks
+    const totalPercentage = currentTasks.reduce((sum, task) => {
+      return sum + getProgressPercentage(task.numerator, task.denominator)
+    }, 0)
+    return currentTasks.length ? Math.round(totalPercentage / currentTasks.length) : 0
+  }
+
+  const calculatePdfsNeeded = (task: TaskItem) => {
+    const currentTasks = currentTable.tasks
+    const currentPercentage = getProgressPercentage(task.numerator, task.denominator)
+
+    // Calcular la media actual
+    const currentAverage = calculateAveragePercentage()
+
+    if (currentPercentage >= currentAverage) return 0
+
+    let pdfsNeeded = 0
+    let testNumerator = task.numerator
+
+    while (pdfsNeeded < task.denominator) {
+      testNumerator = task.numerator + pdfsNeeded
+
+      const newTotalPercentage = currentTasks.reduce((sum, t) => {
+        if (t.id === task.id) {
+          return sum + getProgressPercentage(testNumerator, t.denominator)
+        }
+        return sum + getProgressPercentage(t.numerator, t.denominator)
+      }, 0)
+
+      const newAverage = newTotalPercentage / currentTasks.length
+      const newTaskPercentage = getProgressPercentage(testNumerator, task.denominator)
+
+      if (newTaskPercentage >= newAverage) {
+        break
+      }
+
+      pdfsNeeded++
+    }
+
+    return pdfsNeeded
+  }
+
+  const getIconAndColor = (daysRemaining: number) => {
+    if (daysRemaining === 1) {
+      return {
+        icon: Flame,
+        bgColor: "from-orange-500 to-red-500",
+        iconColor: "text-yellow-200",
+      }
+    } else if (daysRemaining >= 3) {
+      return {
+        icon: TreePine,
+        bgColor: "from-green-500 to-emerald-600",
+        iconColor: "text-green-100",
+      }
+    } else {
+      return {
+        icon: Sun,
+        bgColor: "from-yellow-400 to-orange-400",
+        iconColor: "text-yellow-100",
+      }
+    }
+  }
+
+  const renderCalendarCells = () => {
+    const year = calendarDate.getFullYear()
+    const month = calendarDate.getMonth()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const startDay = new Date(year, month, 1).getDay()
+    const cells = []
+    const today = new Date()
+    const selectedDate = selectedCalendarTask?.dueDate || null
+    const isSelectingDate = Boolean(calendarSelection)
+
+    for (let i = 0; i < startDay; i++) {
+      cells.push(<div key={`empty-${i}`} />)
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayEvents = calendarEvents.filter(
+        (e) =>
+          e.date.getFullYear() === year &&
+          e.date.getMonth() === month &&
+          e.date.getDate() === day,
+      )
+      const isToday =
+        year === today.getFullYear() &&
+        month === today.getMonth() &&
+        day === today.getDate()
+      const isSelected =
+        selectedDate !== null &&
+        selectedDate.getFullYear() === year &&
+        selectedDate.getMonth() === month &&
+        selectedDate.getDate() === day
+
+      cells.push(
+        <button
+          type="button"
+          key={day}
+          onClick={() => {
+            if (isSelectingDate) {
+              void handleCalendarDateSelection(new Date(year, month, day))
+            }
+          }}
+          className={`border h-24 p-1 overflow-hidden text-left transition-colors ${
+            isToday ? "bg-blue-200 dark:bg-blue-900" : ""
+          } ${isSelected ? "ring-2 ring-blue-500" : ""} ${
+            isSelectingDate ? "cursor-pointer hover:border-blue-500" : "cursor-default"
+          }`}
+        >
+          <div className="text-[10px] font-bold">{day}</div>
+          <div className="space-y-1 mt-1">
+            {dayEvents.map((ev, idx) => (
+              <div
+                key={idx}
+                className={`text-[9px] text-white px-1 rounded ${ev.color} ${
+                  ev.url
+                    ? "cursor-pointer underline decoration-transparent hover:decoration-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:ring-white/60"
+                    : ""
+                }`}
+                onContextMenu={(event) =>
+                  handleCalendarEventContextMenu(event, ev)
+                }
+                onClick={
+                  ev.url
+                    ? (event) => {
+                        event.stopPropagation()
+                        window.open(ev.url, "_blank", "noopener,noreferrer")
+                      }
+                    : undefined
+                }
+                onKeyDown={
+                  ev.url
+                    ? (event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          window.open(ev.url, "_blank", "noopener,noreferrer")
+                        }
+                      }
+                    : undefined
+                }
+                role={ev.url ? "link" : undefined}
+                tabIndex={ev.url ? 0 : undefined}
+              >
+                {ev.label}
+              </div>
+            ))}
+          </div>
+        </button>,
+      )
+    }
+    return cells
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Cargando progreso...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (isCalendarMode) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="bg-card p-4 rounded-lg shadow-lg w-full max-w-3xl">
+          <div className="flex items-center justify-between mb-4 gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() =>
+                setCalendarDate(
+                  (prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1),
+                )
+              }
+              aria-label="Mes anterior"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="flex-1 text-center">
+              <h2 className="text-xl font-bold capitalize">
+                {calendarDate.toLocaleString("es-ES", { month: "long" })}{" "}
+                {calendarDate.getFullYear()}
+              </h2>
+              {calendarSelection && selectedCalendarTask && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Selecciona la fecha del evento para {" "}
+                  <span className="font-semibold">
+                    {selectedCalendarTask.task.text}
+                  </span>
+                  {selectedCalendarTask.tableTitle
+                    ? ` (${selectedCalendarTask.tableTitle})`
+                    : ""}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() =>
+                  setCalendarDate(
+                    (prev) =>
+                      new Date(prev.getFullYear(), prev.getMonth() + 1, 1),
+                  )
+                }
+                aria-label="Mes siguiente"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setCalendarSelection(null)
+                  setIsCalendarMode(false)
+                }}
+                aria-label="Cerrar calendario"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="grid grid-cols-7 gap-2 text-xs text-center mb-2">
+            {["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"].map((d) => (
+              <div key={d} className="font-semibold">
+                {d}
+              </div>
+            ))}
+            {renderCalendarCells()}
+          </div>
+          {calendarSelection && (
+            <p className="text-xs text-muted-foreground text-center">
+              Haz clic en una fecha para asignar los días restantes de este evento.
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (isEventMode && eventTasks.length > 0) {
+    const current = eventTasks[eventIndex]
+    const { task, tableTitle, tableIndex, daysRemaining } = current
+    const { icon: IconComponent, bgColor, iconColor } = getIconAndColor(daysRemaining)
+    const normalizedUrl = getNormalizedTaskUrl(task, tableTitle)
+    const hasUrl = Boolean(normalizedUrl)
+
+    const activateEventLink = () => {
+      if (!hasUrl) {
+        openLinkModalForTask(tableIndex, task)
+        return
+      }
+      window.open(normalizedUrl, "_blank", "noopener,noreferrer")
+    }
+
+    const handleCardClick = (event: MouseEvent<HTMLDivElement>) => {
+      const target = event.target as Element
+      if (target.closest('[data-row-activation-stop="true"]')) {
+        return
+      }
+      event.preventDefault()
+      activateEventLink()
+    }
+
+    const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault()
+        activateEventLink()
+      }
+    }
+
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div
+          className={`relative overflow-hidden bg-card border rounded-lg shadow-sm w-full max-w-md cursor-pointer`}
+          style={{ transform: `scale(${eventZoom})`, transformOrigin: "center" }}
+          onClick={handleCardClick}
+          onKeyDown={handleCardKeyDown}
+          role={hasUrl ? "link" : "button"}
+          tabIndex={0}
+        >
+          <div
+            className={`absolute top-0 right-0 z-20 flex items-center gap-1 bg-gradient-to-r ${bgColor} text-white px-2 py-1 rounded-bl-lg text-xs font-bold shadow-lg`}
+          >
+            <IconComponent className={`h-3 w-3 ${iconColor}`} />
+            <span>{daysRemaining}d</span>
+          </div>
+
+          <div
+            className="absolute inset-0 bg-gradient-to-r from-green-200 to-green-400 transition-all duration-300 ease-out"
+            style={{ width: `${getProgressPercentage(task.numerator, task.denominator)}%` }}
+          />
+
+          <div className="relative z-10 flex items-center gap-4 p-6">
+            <div className="flex-1 p-3 text-foreground">{task.text}</div>
+            <div className="text-sm text-muted-foreground font-medium shrink-0">
+              {Math.max(task.denominator - daysRemaining, 0)}/{task.denominator}
+            </div>
+            <div className="text-sm text-muted-foreground font-medium shrink-0 w-12 text-right">
+              {Math.round(getProgressPercentage(task.numerator, task.denominator))}%
+            </div>
+          </div>
+          <div className="absolute bottom-2 left-3 text-xs text-muted-foreground">
+            {tableTitle}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-background p-6 relative">
+      {storageError && <p role="alert" className="text-red-600">{storageError}</p>}
+      <div className="fixed top-6 right-6 z-30">
+        <Button
+          onClick={() => setShowAverageLine(!showAverageLine)}
+          className="w-16 h-16 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+          size="lg"
+        >
+          <div className="flex flex-col items-center">
+            <span className="text-xs text-white font-bold">Plus +</span>
+            <span className="text-xs text-white font-bold">{calculateAveragePercentage()}%</span>
+          </div>
+        </Button>
+      </div>
+
+      <div className="max-w-4xl mx-auto">
+        <h1
+          className={`text-3xl font-bold mb-8 text-center transition-all duration-300 ${isTransitioning ? "opacity-0 transform scale-95" : "opacity-100 transform scale-100"}`}
+        >
+          {currentTable.title}
+        </h1>
+
+        <div
+          className={`space-y-3 transition-all duration-300 ${isTransitioning ? "opacity-0 transform translate-x-4" : "opacity-100 transform translate-x-0"}`}
+        >
+          {currentTable.tasks.map((task) => {
+            const daysRemaining =
+              typeof task.days === "number"
+                ? task.days
+                : Math.max(task.denominator - task.numerator, 0)
+            const { icon: IconComponent, bgColor, iconColor } = getIconAndColor(daysRemaining)
+            const currentPercentage = getProgressPercentage(task.numerator, task.denominator)
+            const averagePercentage = calculateAveragePercentage()
+            const isBelowAverage = currentPercentage < averagePercentage
+            const isHovered = hoveredTaskId === task.id
+            const missingPdfs = calculatePdfsNeeded(task)
+            const normalizedUrl = getNormalizedTaskUrl(task, currentTable.title)
+            const hasUrl = Boolean(normalizedUrl)
+
+            const activateRow = () => {
+              if (!hasUrl) {
+                openLinkModalForTask(currentTableIndex, task)
+                return
+              }
+              window.open(normalizedUrl, "_blank", "noopener,noreferrer")
+            }
+
+            const handleRowActivation = (event: MouseEvent<HTMLDivElement>) => {
+              if (editingId === task.id) {
+                return
+              }
+              const target = event.target as Element
+              if (target.closest('[data-row-activation-stop="true"]')) {
+                return
+              }
+              event.preventDefault()
+              activateRow()
+            }
+
+            const handleRowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+              if (editingId === task.id) {
+                return
+              }
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                activateRow()
+              }
+            }
+
+            return (
+              <div
+                key={task.id}
+                className="relative overflow-hidden bg-card border rounded-lg shadow-sm cursor-pointer"
+                onMouseEnter={() => setHoveredTaskId(task.id)}
+                onMouseLeave={() => setHoveredTaskId(null)}
+                onClick={handleRowActivation}
+                onKeyDown={handleRowKeyDown}
+                role={hasUrl ? "link" : "button"}
+                tabIndex={editingId === task.id ? -1 : 0}
+              >
+                <div
+                  className={`absolute top-0 right-0 z-20 flex items-center gap-1 bg-gradient-to-r ${bgColor} text-white px-2 py-1 rounded-bl-lg text-xs font-bold shadow-lg cursor-pointer`}
+                  data-row-activation-stop="true"
+                  onClick={() => {
+                    const today = new Date()
+                    today.setHours(0, 0, 0, 0)
+                    let initialDate = new Date(
+                      today.getFullYear(),
+                      today.getMonth(),
+                      1,
+                    )
+
+                    if (currentTable.title === "Importantes") {
+                      if (typeof task.days === "number") {
+                        const dueDate = new Date(today)
+                        dueDate.setDate(dueDate.getDate() + task.days)
+                        initialDate = new Date(
+                          dueDate.getFullYear(),
+                          dueDate.getMonth(),
+                          1,
+                        )
+                      }
+                    } else {
+                      const subject = subjectSchedules.find(
+                        (item) => item.name === task.text,
+                      )
+                      const rawDate =
+                        currentTable.title === "Teoría"
+                          ? subject?.theoryDate
+                          : subject?.practiceDate
+                      const parsedDate = parseDateInput(rawDate)
+                      if (parsedDate) {
+                        initialDate = new Date(
+                          parsedDate.getFullYear(),
+                          parsedDate.getMonth(),
+                          1,
+                        )
+                      }
+                    }
+
+                    setCalendarDate(initialDate)
+                    setCalendarSelection({
+                      taskId: task.id,
+                      tableIndex: currentTableIndex,
+                    })
+                    setIsCalendarMode(true)
+                  }}
+                >
+                  <IconComponent className={`h-3 w-3 ${iconColor}`} />
+                  <span>{daysRemaining}d</span>
+                </div>
+
+                <div
+                  className="absolute inset-0 bg-gradient-to-r from-green-200 to-green-400 transition-all duration-300 ease-out"
+                  style={{
+                    width: `${getProgressPercentage(task.numerator, task.denominator)}%`,
+                  }}
+                />
+
+                {showAverageLine && (
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 z-15 shadow-sm transition-all duration-300"
+                    style={{
+                      left: `${calculateAveragePercentage()}%`,
+                      background:
+                        showAverageLine && isHovered && isBelowAverage
+                          ? "linear-gradient(to bottom, #374151 0%, #374151 100%)"
+                          : "repeating-linear-gradient(to bottom, #ef4444 0px, #ef4444 4px, transparent 4px, transparent 8px)",
+                    }}
+                  >
+                    {showAverageLine && isHovered && isBelowAverage && (
+                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full bg-gradient-radial from-white via-gray-200 to-gray-800 flex items-center justify-center shadow-lg z-30">
+                        <div className="text-center">
+                          <div className="text-xs font-bold text-gray-800">Faltan</div>
+                          <div className="text-sm font-bold text-gray-900">{missingPdfs} pdfs</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="relative z-10 flex items-center gap-4 p-3">
+                  <div className="flex-1">
+                    {editingId === task.id ? (
+                      <Input
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            saveTask(task.id)
+                          }
+                        }}
+                        onBlur={() => saveTask(task.id)}
+                        placeholder="Escribe tu tarea..."
+                        className="bg-transparent border-none shadow-none focus-visible:ring-0 w-auto min-w-[8rem]"
+                        data-row-activation-stop="true"
+                        autoFocus
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="inline-flex min-h-[2.5rem] items-center rounded px-2 text-left text-foreground transition-colors hover:text-muted-foreground"
+                        data-row-activation-stop="true"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          setEditingId(task.id)
+                          setEditText(task.text)
+                        }}
+                      >
+                        <span className="whitespace-pre-wrap">{task.text || "Haz clic para escribir..."}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="text-sm text-muted-foreground font-medium shrink-0">
+                    {Math.max(task.denominator - daysRemaining, 0)}/{task.denominator}
+                  </div>
+
+                  <div className="text-sm text-muted-foreground font-medium shrink-0 w-12 text-right">
+                    {Math.round(getProgressPercentage(task.numerator, task.denominator))}%
+                  </div>
+                  {currentTable.title === "Importantes" && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="ml-2 bg-transparent"
+                      data-row-activation-stop="true"
+                      onClick={() => removeImportantTask(task.id)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+
+                <div
+                  className="relative z-10 flex flex-wrap gap-2 px-3 pb-3"
+                  data-row-activation-stop="true"
+                >
+                  {(task.topics || []).map((topic, index) => (
+                    <span
+                      key={index}
+                      className="bg-green-500 text-white text-xs px-2 py-1 rounded cursor-pointer"
+                      data-row-activation-stop="true"
+                      onClick={() => removeTopic(task.id, index)}
+                    >
+                      {topic}
+                    </span>
+                  ))}
+                  <Input
+                    value={topicInputs[task.id] || ""}
+                    onChange={(e) =>
+                      setTopicInputs((prev) => ({ ...prev, [task.id]: e.target.value }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        addTopic(task.id, topicInputs[task.id] || "")
+                        setTopicInputs((prev) => ({ ...prev, [task.id]: "" }))
+                      }
+                    }}
+                    placeholder="Agregar tema..."
+                    className="w-32 h-7 bg-white/80 backdrop-blur-sm text-xs"
+                    data-row-activation-stop="true"
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {currentTable.title === "Importantes" && (
+          <div className="flex justify-center mt-8">
+            <Button onClick={addImportantTask} className="bg-blue-500 hover:bg-blue-600">
+              Agregar
+            </Button>
+          </div>
+        )}
+
+        {toast && (
+          <div
+            className={`fixed top-4 right-4 px-4 py-2 rounded shadow text-white transition-opacity duration-300 ${toast.type === "success" ? "bg-green-600" : "bg-red-600"}`}
+            role="status"
+            aria-live="polite"
+          >
+            {toast.message}
+          </div>
+        )}
+        {isClient &&
+          linkModalState.isOpen &&
+          createPortal(
+            <div role="dialog" aria-modal="true" aria-label="Agregar link" className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4">
+              <div className="w-full max-w-md rounded-lg border bg-card p-6 shadow-lg">
+                <h2 className="text-lg font-semibold">Agregar link</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {linkModalState.label}
+                </p>
+                <Input
+                  value={linkModalState.url}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setLinkModalState((prev) =>
+                      prev.isOpen ? { ...prev, url: value } : prev,
+                    )
+                  }}
+                  placeholder="https://..."
+                  className="mt-4"
+                  autoFocus
+                />
+                <div className="mt-6 flex justify-end gap-2">
+                  <Button variant="outline" onClick={handleLinkModalClose}>
+                    Cancelar
+                  </Button>
+                  <Button onClick={() => void handleLinkModalSave()}>
+                    Guardar
+                  </Button>
+                </div>
+              </div>
+            </div>,
+            document.querySelector(".progress-original") ?? document.body,
+          )}
+      </div>
+    </div>
+  )
+}
