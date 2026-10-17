@@ -1,11 +1,49 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react"
-import { createPortal } from "react-dom"
-import type { MouseEvent, KeyboardEvent } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { Button } from "@/components/progress-original/button"
 import { Input } from "@/components/progress-original/input"
 import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X } from "lucide-react"
+
+function TopicChip({ topic, onRemove }: { topic: string; onRemove: () => void }) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const origin = useRef({ x: 0, y: 0 })
+  const cancel = () => {
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = null
+  }
+  useEffect(() => cancel, [])
+  return <button
+    type="button"
+    title="Mantené presionado para borrar"
+    aria-label={`Tema ${topic}. Mantener presionado para borrar`}
+    className="bg-green-500 text-white text-xs px-2 py-1 rounded cursor-pointer select-none touch-pan-y"
+    data-row-activation-stop="true"
+    onPointerDown={event => {
+      if (!event.isPrimary || event.button !== 0) return
+      cancel()
+      origin.current = { x: event.clientX, y: event.clientY }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      timer.current = setTimeout(() => { timer.current = null; onRemove() }, 650)
+    }}
+    onPointerMove={event => {
+      if (Math.hypot(event.clientX - origin.current.x, event.clientY - origin.current.y) > 12) cancel()
+    }}
+    onPointerUp={cancel}
+    onPointerCancel={cancel}
+    onLostPointerCapture={cancel}
+    onContextMenu={event => event.preventDefault()}
+    onKeyDown={event => {
+      if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+        event.preventDefault()
+        cancel()
+        timer.current = setTimeout(() => { timer.current = null; onRemove() }, 650)
+      }
+    }}
+    onKeyUp={cancel}
+    onBlur={cancel}
+  >{topic}</button>
+}
 
 const parseDateInput = (input?: string): Date | null => {
   if (!input) return null
@@ -103,16 +141,6 @@ interface TaskItem {
   url?: string
 }
 
-type LinkModalState =
-  | { isOpen: false }
-  | {
-      isOpen: true
-      taskId: string
-      tableIndex: number
-      url: string
-      label: string
-    }
-
 interface Table {
   title: string
   tasks: TaskItem[]
@@ -129,12 +157,8 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   const isTransitioning = false
   const [showAverageLine, setShowAverageLine] = useState(false)
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
-  const [linkModalState, setLinkModalState] = useState<LinkModalState>({
-    isOpen: false,
-  })
   const [isLoading, setIsLoading] = useState(true)
   const [topicInputs, setTopicInputs] = useState<Record<string, string>>({})
-  const [taskLinkOverrides, setTaskLinkOverrides] = useState<Record<string, string>>({})
  
   const [isEventMode, setIsEventMode] = useState(false)
   const [eventTasks, setEventTasks] = useState<
@@ -150,7 +174,6 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(
     null,
   )
-  const [isClient, setIsClient] = useState(false)
 
 
   const { rootHandle, isReady } = useLocalWorkspace()
@@ -174,7 +197,6 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
     }).catch(error => { if (active) { setStorageError(String(error)); setIsLoading(false) } })
     return () => { active = false }
   }, [rootHandle, isReady])
-  useEffect(() => { setIsClient(true) }, [])
   useEffect(() => {
     if (!loaded.current || !rootHandle) return
     const today = normalizeDate(new Date())
@@ -189,11 +211,6 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   }, [tables, rootHandle])
   const changeTask = (id: string, patch: Partial<TaskItem>) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, ...patch } : task) }])
   const saveTask = async (id: string) => { changeTask(id, { text: editText }); setEditingId(null); setEditText("") }
-  const handleLinkModalSave = async () => {
-    if (!linkModalState.isOpen) return
-    changeTask(linkModalState.taskId, { url: linkModalState.url.trim() || undefined })
-    setLinkModalState({ isOpen: false })
-  }
   const addImportantTask = () => setTables(prev => [{ ...prev[0], tasks: [...prev[0].tasks, { id: crypto.randomUUID(), text: "", days: 7, numerator: 0, denominator: 7, topics: [] }] }])
   const removeImportantTask = (id: string) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.filter(task => task.id !== id) }])
   const addTopic = (id: string, topic: string) => {
@@ -210,151 +227,20 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
     setCalendarSelection(null)
     setIsCalendarMode(false)
   }
-  const getSubjectResourceLink = useCallback((task: TaskItem, tableTitle: string) => {
-    const resources = SUBJECT_RESOURCE_LINKS[task.text]
-    if (!resources) return undefined
-    if (tableTitle === "Teoría") return resources.theory
-    if (tableTitle === "Práctica") return resources.practice
-    return undefined
-  }, [])
-
-  const getRawTaskUrl = useCallback(
-    (task: TaskItem, tableTitle: string) => {
-      const override = taskLinkOverrides[task.id]?.trim()
-      if (override) {
-        return override
-      }
-
-      if (typeof task.url === "string" && task.url.trim() !== "") {
-        return task.url.trim()
-      }
-
-      const fallback = getSubjectResourceLink(task, tableTitle)
-      return fallback ?? ""
-    },
-    [getSubjectResourceLink, taskLinkOverrides],
-  )
-
-  const getNormalizedTaskUrl = useCallback(
-    (task: TaskItem, tableTitle: string) => normalizeUrlForOpen(getRawTaskUrl(task, tableTitle)),
-    [getRawTaskUrl],
-  )
-
-  const openLinkModalForTask = useCallback(
-    (tableIndex: number, task: TaskItem) => {
-      setLinkModalState({
-        isOpen: true,
-        tableIndex,
-        taskId: task.id,
-        url:
-          taskLinkOverrides[task.id] ??
-          (typeof task.url === "string" && task.url.trim() !== ""
-            ? task.url.trim()
-            : ""),
-        label: task.text,
-      })
-    },
-    [taskLinkOverrides],
-  )
-
-  const showToast = (message: string, type: "success" | "error" = "success") => {
-    setToast({ message, type })
-    window.setTimeout(() => setToast(null), 2000)
-  }
-
-  const handleCalendarEventContextMenu = (
-    event: MouseEvent<HTMLDivElement>,
-    calendarEvent: CalendarEvent,
-  ) => {
-    if (calendarEvent.source?.kind !== "important") {
-      return
-    }
-    event.preventDefault()
-    event.stopPropagation()
-    const { tableIndex, taskId } = calendarEvent.source
-    if (tableIndex === undefined || taskId === undefined) {
-      return
-    }
-    const table = tables[tableIndex]
-    const task = table?.tasks.find((item) => item.id === taskId)
-    if (!task) {
-      return
-    }
-
-    openLinkModalForTask(tableIndex, task)
-  }
-
-  const handleLinkModalClose = () => {
-    setLinkModalState({ isOpen: false })
-  }
-
   const calendarEvents = useMemo(() => {
     const events: CalendarEvent[] = []
 
-    const teoriaTasks = tables.find((t) => t.title === "Teoría")?.tasks || []
-    const practicaTasks = tables.find((t) => t.title === "Práctica")?.tasks || []
-    const importantTableIndex = tables.findIndex((t) => t.title === "Importantes")
-    const importantTasks =
-      importantTableIndex === -1 ? [] : tables[importantTableIndex].tasks
-
-    subjectSchedules.forEach((subject) => {
-      const theoryDate = parseDateInput(subject.theoryDate)
-      if (theoryDate) {
-        const tTask = teoriaTasks.find((t) => t.text === subject.name)
-        const remaining =
-          tTask && typeof tTask.days === "number"
-            ? tTask.days
-            : tTask
-              ? Math.max(tTask.denominator - tTask.numerator, 0)
-              : undefined
-        const theoryUrl = tTask
-          ? getNormalizedTaskUrl(tTask, "Teoría")
-          : normalizeUrlForOpen(SUBJECT_RESOURCE_LINKS[subject.name]?.theory)
-        events.push({
-          date: theoryDate,
-          label: `${subject.name} teoría${
-            remaining !== undefined ? ` (${remaining})` : ""
-          }`,
-          color: "bg-blue-500",
-          url: theoryUrl || undefined,
-          source: { kind: "theory" },
-        })
-      }
-      const practiceDate = parseDateInput(subject.practiceDate)
-      if (practiceDate) {
-        const pTask = practicaTasks.find((t) => t.text === subject.name)
-        const remaining =
-          pTask && typeof pTask.days === "number"
-            ? pTask.days
-            : pTask
-              ? Math.max(pTask.denominator - pTask.numerator, 0)
-              : undefined
-        const practiceUrl = pTask
-          ? getNormalizedTaskUrl(pTask, "Práctica")
-          : normalizeUrlForOpen(SUBJECT_RESOURCE_LINKS[subject.name]?.practice)
-        events.push({
-          date: practiceDate,
-          label: `${subject.name} práctica${
-            remaining !== undefined ? ` (${remaining})` : ""
-          }`,
-          color: "bg-green-500",
-          url: practiceUrl || undefined,
-          source: { kind: "practice" },
-        })
-      }
-    })
-
+    const importantTableIndex = 0
+    const importantTasks = tables[0].tasks
     const today = new Date()
     importantTasks.forEach((task) => {
       if (task.days !== undefined && task.days >= 0) {
         const due = new Date(today)
         due.setDate(due.getDate() + (task.days || 0))
-        const trimmedUrl = getNormalizedTaskUrl(task, "Importantes")
         events.push({
           date: due,
           label: `${task.text} (${task.days}d)`,
           color: "bg-orange-500",
-          url: trimmedUrl || undefined,
           source: {
             kind: "important",
             taskId: task.id,
@@ -365,7 +251,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
     })
 
     return events
-  }, [tables, subjectSchedules, getNormalizedTaskUrl])
+  }, [tables])
 
   const selectedCalendarTask = useMemo(() => {
     if (!calendarSelection) return null
@@ -402,7 +288,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!active) return
-      if (linkModalState.isOpen || event.altKey || event.metaKey) return
+      if (event.altKey || event.metaKey) return
       if ((event.target as HTMLElement)?.closest("input, textarea, select, [contenteditable=true]")) return
       if (event.key.toLowerCase() === "c" && !editingId) {
         event.preventDefault()
@@ -491,7 +377,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, onBack, linkModalState.isOpen, active])
+  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, onBack, active])
 
   const currentTable = tables[currentTableIndex]
   const getProgressPercentage = (numerator: number, denominator: number) => {
@@ -615,35 +501,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
             {dayEvents.map((ev, idx) => (
               <div
                 key={idx}
-                className={`text-[9px] text-white px-1 rounded ${ev.color} ${
-                  ev.url
-                    ? "cursor-pointer underline decoration-transparent hover:decoration-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:ring-white/60"
-                    : ""
-                }`}
-                onContextMenu={(event) =>
-                  handleCalendarEventContextMenu(event, ev)
-                }
-                onClick={
-                  ev.url
-                    ? (event) => {
-                        event.stopPropagation()
-                        window.open(ev.url, "_blank", "noopener,noreferrer")
-                      }
-                    : undefined
-                }
-                onKeyDown={
-                  ev.url
-                    ? (event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          window.open(ev.url, "_blank", "noopener,noreferrer")
-                        }
-                      }
-                    : undefined
-                }
-                role={ev.url ? "link" : undefined}
-                tabIndex={ev.url ? 0 : undefined}
+                className={`text-[9px] text-white px-1 rounded ${ev.color}`}
               >
                 {ev.label}
               </div>
@@ -749,42 +607,11 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
     const current = eventTasks[eventIndex]
     const { task, tableTitle, tableIndex, daysRemaining } = current
     const { icon: IconComponent, bgColor, iconColor } = getIconAndColor(daysRemaining)
-    const normalizedUrl = getNormalizedTaskUrl(task, tableTitle)
-    const hasUrl = Boolean(normalizedUrl)
-
-    const activateEventLink = () => {
-      if (!hasUrl) {
-        openLinkModalForTask(tableIndex, task)
-        return
-      }
-      window.open(normalizedUrl, "_blank", "noopener,noreferrer")
-    }
-
-    const handleCardClick = (event: MouseEvent<HTMLDivElement>) => {
-      const target = event.target as Element
-      if (target.closest('[data-row-activation-stop="true"]')) {
-        return
-      }
-      event.preventDefault()
-      activateEventLink()
-    }
-
-    const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault()
-        activateEventLink()
-      }
-    }
-
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div
-          className={`relative overflow-hidden bg-card border rounded-lg shadow-sm w-full max-w-md cursor-pointer`}
+          className={`relative overflow-hidden bg-card border rounded-lg shadow-sm w-full max-w-md`}
           style={{ transform: `scale(${eventZoom})`, transformOrigin: "center" }}
-          onClick={handleCardClick}
-          onKeyDown={handleCardKeyDown}
-          role={hasUrl ? "link" : "button"}
-          tabIndex={0}
         >
           <div
             className={`absolute top-0 right-0 z-20 flex items-center gap-1 bg-gradient-to-r ${bgColor} text-white px-2 py-1 rounded-bl-lg text-xs font-bold shadow-lg`}
@@ -800,9 +627,6 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
 
           <div className="relative z-10 flex items-center gap-4 p-6">
             <div className="flex-1 p-3 text-foreground">{task.text}</div>
-            <div className="text-sm text-muted-foreground font-medium shrink-0">
-              {Math.max(task.denominator - daysRemaining, 0)}/{task.denominator}
-            </div>
             <div className="text-sm text-muted-foreground font-medium shrink-0 w-12 text-right">
               {Math.round(getProgressPercentage(task.numerator, task.denominator))}%
             </div>
@@ -841,7 +665,10 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
         <div
           className={`space-y-3 transition-all duration-300 ${isTransitioning ? "opacity-0 transform translate-x-4" : "opacity-100 transform translate-x-0"}`}
         >
-          {currentTable.tasks.map((task) => {
+          {[...currentTable.tasks].sort((a, b) =>
+            (a.days ?? Math.max(a.denominator - a.numerator, 0)) -
+            (b.days ?? Math.max(b.denominator - b.numerator, 0))
+          ).map((task) => {
             const daysRemaining =
               typeof task.days === "number"
                 ? task.days
@@ -852,50 +679,13 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
             const isBelowAverage = currentPercentage < averagePercentage
             const isHovered = hoveredTaskId === task.id
             const missingPdfs = calculatePdfsNeeded(task)
-            const normalizedUrl = getNormalizedTaskUrl(task, currentTable.title)
-            const hasUrl = Boolean(normalizedUrl)
-
-            const activateRow = () => {
-              if (!hasUrl) {
-                openLinkModalForTask(currentTableIndex, task)
-                return
-              }
-              window.open(normalizedUrl, "_blank", "noopener,noreferrer")
-            }
-
-            const handleRowActivation = (event: MouseEvent<HTMLDivElement>) => {
-              if (editingId === task.id) {
-                return
-              }
-              const target = event.target as Element
-              if (target.closest('[data-row-activation-stop="true"]')) {
-                return
-              }
-              event.preventDefault()
-              activateRow()
-            }
-
-            const handleRowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-              if (editingId === task.id) {
-                return
-              }
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                activateRow()
-              }
-            }
-
             return (
               <div
                 key={task.id}
-                className="relative overflow-hidden bg-card border rounded-lg shadow-sm cursor-pointer"
+                className="relative overflow-hidden bg-card border rounded-lg shadow-sm"
                 onMouseEnter={() => setHoveredTaskId(task.id)}
                 onMouseLeave={() => setHoveredTaskId(null)}
-                onClick={handleRowActivation}
-                onKeyDown={handleRowKeyDown}
-                role={hasUrl ? "link" : "button"}
-                tabIndex={editingId === task.id ? -1 : 0}
-              >
+                    >
                 <div
                   className={`absolute top-0 right-0 z-20 flex items-center gap-1 bg-gradient-to-r ${bgColor} text-white px-2 py-1 rounded-bl-lg text-xs font-bold shadow-lg cursor-pointer`}
                   data-row-activation-stop="true"
@@ -1010,10 +800,6 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                     )}
                   </div>
 
-                  <div className="text-sm text-muted-foreground font-medium shrink-0">
-                    {Math.max(task.denominator - daysRemaining, 0)}/{task.denominator}
-                  </div>
-
                   <div className="text-sm text-muted-foreground font-medium shrink-0 w-12 text-right">
                     {Math.round(getProgressPercentage(task.numerator, task.denominator))}%
                   </div>
@@ -1035,14 +821,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                   data-row-activation-stop="true"
                 >
                   {(task.topics || []).map((topic, index) => (
-                    <span
-                      key={index}
-                      className="bg-green-500 text-white text-xs px-2 py-1 rounded cursor-pointer"
-                      data-row-activation-stop="true"
-                      onClick={() => removeTopic(task.id, index)}
-                    >
-                      {topic}
-                    </span>
+                    <TopicChip key={index} topic={topic} onRemove={() => removeTopic(task.id, index)} />
                   ))}
                   <Input
                     value={topicInputs[task.id] || ""}
@@ -1082,39 +861,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
             {toast.message}
           </div>
         )}
-        {isClient &&
-          linkModalState.isOpen &&
-          createPortal(
-            <div role="dialog" aria-modal="true" aria-label="Agregar link" className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4">
-              <div className="w-full max-w-md rounded-lg border bg-card p-6 shadow-lg">
-                <h2 className="text-lg font-semibold">Agregar link</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {linkModalState.label}
-                </p>
-                <Input
-                  value={linkModalState.url}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setLinkModalState((prev) =>
-                      prev.isOpen ? { ...prev, url: value } : prev,
-                    )
-                  }}
-                  placeholder="https://..."
-                  className="mt-4"
-                  autoFocus
-                />
-                <div className="mt-6 flex justify-end gap-2">
-                  <Button variant="outline" onClick={handleLinkModalClose}>
-                    Cancelar
-                  </Button>
-                  <Button onClick={() => void handleLinkModalSave()}>
-                    Guardar
-                  </Button>
-                </div>
-              </div>
-            </div>,
-            document.querySelector(".progress-original") ?? document.body,
-          )}
+
       </div>
     </div>
   )

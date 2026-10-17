@@ -3,7 +3,7 @@ import test from "node:test"
 import { build } from "esbuild"
 import { chromium } from "@playwright/test"
 
-test("original Important UI edits tasks, topics, dates and links with local persistence", async t => {
+test("Important UI saves tasks and deletes topics only after a hold, without link prompts", async t => {
   const result = await build({
     stdin: { contents: `
       import React from "react";
@@ -46,18 +46,31 @@ test("original Important UI edits tasks, topics, dates and links with local pers
   await page.keyboard.press("Enter")
   await page.getByPlaceholder("Agregar tema...").fill("Unidad 1")
   await page.keyboard.press("Enter")
+  assert.equal(await page.getByRole("dialog", { name: "Agregar link" }).count(), 0)
+  await page.getByPlaceholder("Agregar tema...").fill("Unidad")
+  await page.keyboard.press("Space")
+  assert.equal(await page.getByPlaceholder("Agregar tema...").inputValue(), "Unidad ")
   await page.locator("h1").filter({ hasText: "Importantes" }).click()
   await page.getByText("7d", { exact: true }).click()
   await page.getByRole("button", { name: "Mes siguiente", exact: true }).waitFor()
   await page.getByRole("button", { name: "Cerrar calendario", exact: true }).click()
-  await page.locator('[role="button"]').filter({ hasText: "Parcial" }).first().dispatchEvent("click")
-  await page.getByRole("dialog", { name: "Agregar link" }).waitFor()
-  await page.getByPlaceholder("https://...").fill("https://example.com")
-  await page.getByRole("button", { name: "Guardar", exact: true }).click()
-  await page.waitForFunction(() => JSON.parse(window.saved || '{}').tasks?.[0]?.url === "https://example.com")
+  await page.locator(".relative.overflow-hidden.bg-card.border.rounded-lg").first().dispatchEvent("click")
+  assert.equal(await page.getByRole("dialog", { name: "Agregar link" }).count(), 0)
+  const chip = page.getByRole("button", { name: "Tema Unidad 1. Mantener presionado para borrar", exact: true })
+  await chip.click()
+  assert.equal(await chip.count(), 1)
+  await page.waitForFunction(() => JSON.parse(window.saved || '{}').tasks?.[0]?.topics?.length === 1)
   const saved = await page.evaluate(() => JSON.parse(window.saved).tasks[0])
   assert.equal(saved.text, "Parcial")
   assert.deepEqual(saved.topics, ["Unidad 1"])
+  await page.clock.install()
+  const bounds = await chip.boundingBox()
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+  await page.mouse.down()
+  await page.clock.runFor(700)
+  await page.mouse.up()
+  assert.equal(await chip.count(), 0)
+  await page.waitForFunction(() => JSON.parse(window.saved).tasks[0].topics.length === 0)
   await page.keyboard.press("ArrowLeft")
   await page.getByRole("heading", { name: "Estudio", exact: true }).waitFor()
   assert.deepEqual(errors, [])
