@@ -84,9 +84,10 @@ emitidas vencen en dos minutos y las copias locales pueden seguir leyéndose.
 ## Cursado original dentro de Android
 
 La primera pestaña ejecuta la entrada sin conexión de Cursado, con los componentes
-originales de Inicio, Estudio, Síntesis y Pizarra. El lector separado anterior se
-retiró. La entrada usa el adaptador de navegación de `native-web` en lugar del
-servidor de Next.js, conserva los estilos originales y usa el mismo PDF.js.
+originales de Inicio, Estudio, Síntesis y Pizarra. La entrada usa el adaptador de
+navegación de `native-web` en lugar del servidor de Next.js y conserva los estilos
+originales. El menú de tres puntos y el botón de Inicio forman una columna, con
+el menú arriba. Para retroceder se usa el botón o gesto de Android.
 
 `CursadoNative` versión 1 entrega el inventario y las acciones de vinculación y
 descarga. `lib/native-workspace.ts` presenta una carpeta virtual de solo lectura:
@@ -102,8 +103,14 @@ referencian sus imágenes por rutas publicadas. Los inventarios anteriores sigue
 siendo legibles; una nueva publicación desde la PC incorpora la estructura de
 carpetas. Las preferencias de navegación y apariencia permanecen en el celular.
 
-Los PDF usan `libraryReadOnly=1`, que desactiva edición y scripting. Los documentos
-HTML guardados se abren en otra WebView sin puente nativo ni acceso a la red.
+Los PDF de materiales y cronograma se abren en un visor nativo con PDFium mediante
+[`PdfRenderer` de Android](https://developer.android.com/reference/android/graphics/pdf/PdfRenderer).
+La app muestra páginas en una lista vertical, con zoom por pellizco y doble toque,
+recuerda la página y conserva el acceso a **Verlo**. El renderizado se realiza en
+un trabajador, con caché de 24 MiB y un máximo de cuatro millones de píxeles por
+página. No se incluye PDF.js en el paquete Android; la web de escritorio conserva
+su visor. Las APK anteriores indican que hay que actualizar para abrir un PDF.
+Los documentos HTML guardados se abren en otra WebView sin puente nativo ni red.
 
 Cada compilación web genera `public/native-web/current.json` y los recursos de su
 revisión en `public/native-web/releases/<revision>/`. El manifiesto público incluye
@@ -133,7 +140,8 @@ las revisiones anteriores se retienen para finalizar descargas en curso.
 
 InScreen fija el commit de este repositorio en `.github/cursado-reader-ref`.
 GitHub Actions prepara una interfaz inicial sin conexión, prueba los componentes en Chrome
-móvil, ejecuta pruebas/lint de Android y compila el APK. La etiqueta `vX.Y.Z` debe
+móvil, ejecuta pruebas/lint de Android y verifica PDF reales, recreación del visor
+y botón Atrás en un emulador API 29 antes de publicar el APK. La etiqueta `vX.Y.Z` debe
 coincidir con `versionName`; el workflow existente conserva la firma y publica
 `InScreenMic.apk` en GitHub Releases. No hace falta compilar Android en la PC.
 

@@ -10,6 +10,19 @@ export function StudyImportantTasks({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [tabsOpen, setTabsOpen] = useState(false)
   const touch = useRef<{ x: number; y: number } | null>(null)
+  const navigation = useRef({open,tabsOpen})
+  navigation.current = {open,tabsOpen}
+  useEffect(() => {
+    if (!isNativeReadOnly()) return
+    const back = (event: Event) => {
+      if (!navigation.current.open && !navigation.current.tabsOpen) return
+      event.preventDefault()
+      setOpen(false)
+      setTabsOpen(false)
+    }
+    window.addEventListener('cursado-native-back', back, true)
+    return () => window.removeEventListener('cursado-native-back', back, true)
+  }, [])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (editing(event.target) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||

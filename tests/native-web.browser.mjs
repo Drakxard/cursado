@@ -47,7 +47,10 @@ async function setup(browser, {legacy = false} = {}) {
   const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true})
   await context.addInitScript(({inventory})=>{
     window.nativeActions=[]
-    window.CursadoNative={home:()=>window.nativeActions.push('app-home'),snapshot:()=>JSON.stringify({bridgeVersion:1,linked:true,manifest:inventory,available:{}}),pair:()=>window.nativeActions.push('pair'),refresh:()=>window.nativeActions.push('refresh'),unlink:()=>window.nativeActions.push('unlink'),openHtml:()=>window.nativeActions.push('html'),openExternal:url=>window.nativeActions.push(url)}
+    window.CursadoNative={home:()=>window.nativeActions.push('app-home'),snapshot:()=>JSON.stringify({bridgeVersion:1,linked:true,manifest:inventory,available:{}}),pair:()=>window.nativeActions.push('pair'),refresh:()=>window.nativeActions.push('refresh'),unlink:()=>window.nativeActions.push('unlink'),openHtml:()=>window.nativeActions.push('html'),openExternal:url=>window.nativeActions.push(url),openPdf:(id,revision,requestId)=>{
+      window.nativeActions.push({pdf:id,revision})
+      queueMicrotask(()=>window.dispatchEvent(new CustomEvent('cursado-native-pdf-result',{detail:{requestId}})))
+    }}
   },{inventory})
   const errors=[],requests=[]
   context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)))
@@ -55,7 +58,7 @@ async function setup(browser, {legacy = false} = {}) {
     const url=new URL(route.request().url()); requests.push(url.href)
     if(url.origin!=='https://workspace.inscreen.local'){await route.abort();return}
     if(url.pathname.startsWith('/files/')) {const bytes=resources.get(url.pathname.split('/').at(-1));const file=files.find(f=>f.id===url.pathname.split('/').at(-1));await route.fulfill({status:bytes?200:503,contentType:file?.mime||'text/plain',body:bytes||'Archivo pendiente de descarga'});return}
-    const pathname=['/','/estudio','/sintesis','/practice/viewer'].includes(url.pathname)?'/index.html':url.pathname
+    const pathname=['/','/estudio','/sintesis','/practice/viewer','/native/pdf'].includes(url.pathname)?'/index.html':url.pathname
     const local=path.resolve(directory,'.'+pathname)
     if(!local.startsWith(directory+path.sep)){await route.abort();return}
     try {const body=await readFile(local);const ext=path.extname(local);await route.fulfill({body,contentType:({'.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.html':'text/html','.svg':'image/svg+xml','.woff2':'font/woff2','.wasm':'application/wasm','.json':'application/json','.png':'image/png'})[ext]||'application/octet-stream'})}catch{await route.fulfill({status:404,body:'No encontrado'})}
@@ -69,6 +72,11 @@ test('original home, study, board and PDF work with a native read-only revision 
     const page=await context.newPage()
     await context.setOffline(true)
     await page.goto('https://workspace.inscreen.local/')
+    assert.equal(await page.getByRole('button',{name:'Volver',exact:true}).count(),0)
+    const menuBounds=await page.getByLabel('Más opciones',{exact:true}).boundingBox()
+    const homeBounds=await page.getByRole('button',{name:'Inicio',exact:true}).boundingBox()
+    assert.ok(menuBounds.y+menuBounds.height<=homeBounds.y)
+    assert.equal(menuBounds.x,homeBounds.x)
     await swipe(page,70,260,350)
     assert.deepEqual(await page.evaluate(()=>window.nativeActions),['app-home'])
     await page.evaluate(()=>{window.nativeActions=[]})
@@ -88,6 +96,18 @@ test('original home, study, board and PDF work with a native read-only revision 
     assert.equal(await study.locator(':scope>div').first().isVisible(),false)
     await page.getByText('Parcial sincronizado desde la web',{exact:true}).waitFor()
     assert.deepEqual(await page.evaluate(()=>window.nativeActions),[])
+    assert.equal(await page.evaluate(()=>{
+      const event = new CustomEvent('cursado-native-back',{cancelable:true})
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),true)
+    await study.locator(':scope>div').first().waitFor({state:'visible',timeout:3000}).catch(async error=>{
+      error.message += '\n'+page.url()+'\n'+await page.locator('body').innerText()
+      throw error
+    })
+    assert.equal(await study.getAttribute('data-native-study-tabs'),'closed')
+    await swipe(page,300,100)
+    await page.getByText('Parcial sincronizado desde la web',{exact:true}).waitFor()
     await swipe(page,90,290)
     await page.getByRole('button',{name:/C\u00e1lculo 3/}).click()
     const campus = page.getByRole('link',{name:'Campus',exact:true})
@@ -103,15 +123,18 @@ test('original home, study, board and PDF work with a native read-only revision 
     await campus.click()
     assert.deepEqual(await page.evaluate(()=>window.nativeActions),['https://campus.example.edu/calculo3'])
     await mkdir('.cache',{recursive:true});await page.screenshot({path:'.cache/native-study-mobile.png'})
-    await page.goto('https://workspace.inscreen.local/practice/viewer?materialId=41')
-    const pdf=page.frameLocator('iframe[title="Material"]')
-    await pdf.locator('.page[data-page-number="1"] canvas').waitFor({timeout:20000})
-    assert.equal(await pdf.locator('#toolbarContainer').isVisible(),true)
-    assert.equal(await pdf.locator('#editorModeButtons').isVisible(),false)
-    await page.screenshot({path:'.cache/native-pdf-mobile.png'})
-    await page.getByLabel('Verlo',{exact:true}).click()
-    await page.getByRole('button',{name:'Explicación guardada'}).click()
-    assert.deepEqual(await page.evaluate(()=>window.nativeActions),['html'])
+    await page.evaluate(()=>{window.nativeActions=[];window.open('/practice/viewer?materialId=41')})
+    await page.waitForFunction(()=>window.nativeActions.some(action=>action.pdf),null,{timeout:10000}).catch(async error=>{
+      error.message += '\n'+await page.locator('body').innerText()+'\n'+JSON.stringify(errors)
+      throw error
+    })
+    assert.deepEqual(await page.evaluate(()=>window.nativeActions),[{pdf:hash('teoria/calculo3/material.pdf'),revision:'revision-native-browser'}])
+    assert.equal(await page.locator('iframe[title="Material"]').count(),0)
+    await page.waitForURL('**/estudio')
+    await page.evaluate(()=>{window.nativeActions=[];window.open('/native/pdf?workspaceFileId=workspace%3A%2F%2Fteoria%2Fcalculo3%2Fmaterial.pdf')})
+    await page.waitForFunction(()=>window.nativeActions.some(action=>action.pdf))
+    await page.waitForURL('**/estudio')
+    assert.equal(requests.some(url=>url.includes('/pdfjs/')),false)
     assert.equal(await page.getByText('Contenido aislado',{exact:true}).count(),0)
     await page.goto('https://workspace.inscreen.local/sintesis?subjectId=custom-calculo3&weekNumber=1')
     await page.getByRole('button',{name:'Abrir Tema sincronizado'}).click()
@@ -132,6 +155,19 @@ test('original home, study, board and PDF work with a native read-only revision 
     assert.deepEqual(errors,[])
     await context.close()
   } finally {await browser.close()}
+})
+
+test('older APKs explain that the native PDF reader requires an update',async()=>{
+  const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})
+  try {
+    const {context}=await setup(browser)
+    await context.addInitScript(()=>{delete window.CursadoNative.openPdf})
+    const page=await context.newPage()
+    await page.goto('https://workspace.inscreen.local/native/pdf?workspaceFileId=workspace%3A%2F%2Fteoria%2Fcalculo3%2Fmaterial.pdf')
+    await page.getByRole('alert').filter({hasText:'Actualizá InScreen'}).waitFor()
+    assert.equal(await page.locator('iframe').count(),0)
+    await context.close()
+  } finally { await browser.close() }
 })
 test('missing native files are reported and incompatible bridges never open the workspace',async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})

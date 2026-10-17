@@ -1,6 +1,6 @@
 "use client"
 
-import { isNativeReadOnly, nativePdfHref, nativeSnapshot } from '@/lib/native-workspace'
+import { isNativeReadOnly, openNativePdf, nativeSnapshot } from '@/lib/native-workspace'
 import { Eye } from 'lucide-react'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -236,10 +236,10 @@ function notifySubjectDayMaterialsRefresh(payload: { subjectId: string; sessionD
 }
 
 export function PracticeViewerClient(props: Parameters<typeof EditablePracticeViewerClient>[0]) {
-  return isNativeReadOnly() ? <NativeReadOnlyMaterialViewer materialId={props.materialId ?? props.material?.id} /> : <EditablePracticeViewerClient {...props} />
+  return isNativeReadOnly() ? <NativeReadOnlyMaterialViewer materialId={props.materialId ?? props.material?.id} onRequestClose={props.onRequestClose} /> : <EditablePracticeViewerClient {...props} />
 }
 
-function NativeReadOnlyMaterialViewer({materialId}: {materialId?: number}) {
+function NativeReadOnlyMaterialViewer({materialId,onRequestClose}: {materialId?: number;onRequestClose?:()=>void}) {
   const [href,setHref] = useState(''), [error,setError] = useState('')
   const [savedHtml,setSavedHtml] = useState<{id:string;title:string;revision:string}[]>([])
   useEffect(() => {
@@ -248,14 +248,32 @@ function NativeReadOnlyMaterialViewer({materialId}: {materialId?: number}) {
     getLocalMaterialById(materialId!).then(async material => {
       if (cancelled) return
       if (!material?.drive_file_id) throw new Error('El material no está en la biblioteca descargada.')
-      setHref(nativePdfHref(material.drive_file_id, material.file_name))
+      setHref(material.drive_file_id)
       const key = [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(material.drive_file_id)))].map(byte=>byte.toString(16).padStart(2,'0')).join('')
       const manifest = nativeSnapshot().manifest!
       if (!cancelled) setSavedHtml(manifest.items.filter(item=>item.kind==='html' && item.fileId && item.id.startsWith(`explanation:${key}:`)).map(item=>({id:item.fileId!,title:item.title,revision:manifest.revision})))
     }).catch(error => {if (!cancelled) setError(error.message)})
     return () => {cancelled = true}
   },[materialId])
-  return <main style={{height:'100dvh',display:'flex',flexDirection:'column'}}>{error ? <p role="alert">{error}</p> : href ? <iframe title="Material" src={href} style={{width:'100%',flex:1,border:0}} /> : <p>Cargando…</p>}{savedHtml.length>0 && <details style={{position:'fixed',bottom:12,right:12,zIndex:1000,background:'white',borderRadius:16,padding:10,maxWidth:'85vw'}}><summary aria-label="Verlo" title="Verlo" style={{listStyle:'none',cursor:'pointer'}}><Eye size={20}/></summary>{savedHtml.map(item=><button key={item.id} style={{display:'block',padding:10,textAlign:'left'}} onClick={()=>window.CursadoNative!.openHtml(item.id,item.revision)}>{item.title}</button>)}</details>}</main>
+  return <main style={{height:'100dvh',display:'flex',flexDirection:'column'}}>{error ? <p role="alert">{error}</p> : href ? <NativePdfLauncher workspaceFileId={href} onOpened={onRequestClose} /> : <p>Cargando…</p>}{savedHtml.length>0 && <details style={{position:'fixed',bottom:12,right:12,zIndex:1000,background:'white',borderRadius:16,padding:10,maxWidth:'85vw'}}><summary aria-label="Verlo" title="Verlo" style={{listStyle:'none',cursor:'pointer'}}><Eye size={20}/></summary>{savedHtml.map(item=><button key={item.id} style={{display:'block',padding:10,textAlign:'left'}} onClick={()=>window.CursadoNative!.openHtml(item.id,item.revision)}>{item.title}</button>)}</details>}</main>
+}
+
+export function NativePdfLauncher({workspaceFileId,onOpened}: {workspaceFileId:string;onOpened?:()=>void}) {
+  const [error,setError] = useState('')
+  const [attempt,setAttempt] = useState(0)
+  const opened = useRef(onOpened)
+  opened.current = onOpened
+  useEffect(() => {
+    let current = true
+    setError('')
+    void openNativePdf(workspaceFileId).then(() => {
+      if (!current) return
+      if (opened.current) opened.current()
+      else window.dispatchEvent(new Event('cursado-native-pdf-opened'))
+    }).catch(error => { if (current) setError(error.message) })
+    return () => { current = false }
+  },[workspaceFileId,attempt])
+  return <div role={error ? 'alert' : 'status'} style={{padding:24}}>{error || 'Abriendo PDF…'}{error && <button onClick={()=>setAttempt(value=>value+1)}>Reintentar</button>}</div>
 }
 
 function EditablePracticeViewerClient({

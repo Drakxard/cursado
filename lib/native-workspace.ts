@@ -8,6 +8,7 @@ export type NativeWorkspaceBridge = {
   pair(): void
   unlink(): void
   openHtml(id: string, revision: string): void
+  openPdf?(id: string, revision: string, requestId: string): void
   openExternal(url: string): void
 }
 declare global { interface Window { CursadoNative?: NativeWorkspaceBridge } }
@@ -28,7 +29,30 @@ export function nativeFileUrl(workspaceFileId: string) {
   return `/files/${manifest.revision}/${file.id}`
 }
 export function nativePdfHref(workspaceFileId: string, fileName = '') {
-  return `/pdfjs/web/viewer.html?${new URLSearchParams({file:nativeFileUrl(workspaceFileId),fileName,libraryReadOnly:'1'})}#locale=es-AR`
+  return `/native/pdf?${new URLSearchParams({workspaceFileId,fileName})}`
+}
+
+export function openNativePdf(workspaceFileId: string): Promise<void> {
+  const bridge = window.CursadoNative
+  if (!bridge?.openPdf) return Promise.reject(new Error('Actualizá InScreen para usar el visor PDF nativo.'))
+  const manifest = nativeSnapshot().manifest
+  const file = manifest?.files.find(file => file.path === workspaceFileId.replace(/^workspace:\/\//, '') && file.mime.split(';')[0] === 'application/pdf')
+  if (!file || !manifest) return Promise.reject(new Error('El PDF no está en la publicación sincronizada. Actualizá los archivos.'))
+  return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID()
+    const finish = (error?: string) => {
+      clearTimeout(timer)
+      window.removeEventListener('cursado-native-pdf-result', result)
+      error ? reject(new Error(error)) : resolve()
+    }
+    const result = (event: Event) => {
+      const detail = (event as CustomEvent<{requestId:string;error?:string}>).detail
+      if (detail.requestId === requestId) finish(detail.error)
+    }
+    const timer = setTimeout(() => finish('No se pudo abrir el PDF. Reintentá.'), 310000)
+    window.addEventListener('cursado-native-pdf-result', result)
+    try { bridge.openPdf!(file.id, manifest.revision, requestId) } catch (error) { finish(String(error)) }
+  })
 }
 
 // This adapter implements only the directory API used by Cursado. It is never
