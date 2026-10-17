@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { build } from 'esbuild'
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 import { openLibraryToken, sealLibraryToken } from '../lib/server/workspace-library-tokens.ts'
 import type { LibraryManifest } from '../lib/workspace-library.ts'
 
@@ -15,8 +16,15 @@ test('publication commits only complete inventories; QR claims, device isolation
   const execute = async (command: { kind: string; input: Record<string, unknown> }) => {
     const input = command.input, key = String(input.Key || ''), old = objects.get(key)
     switch (command.kind) {
-      case 'GetObjectCommand': if (!old) throw failure(404); return { Body: { transformToString: async () => old.body }, ETag: old.etag }
-      case 'HeadObjectCommand': if (!old) throw failure(404); return { ContentLength: old.size, Metadata: old.metadata }
+      case 'GetObjectCommand': if (!old) throw failure(404); return { Body: { transformToString: async () => old.body, transformToWebStream: () => new Blob([old.body]).stream() }, ContentLength: old.size, ETag: old.etag }
+      case 'HeadObjectCommand': if (!old) throw failure(404); return { ContentLength: old.size, ContentType: 'application/pdf', Metadata: old.metadata }
+      case 'CopyObjectCommand': {
+        const source = objects.get(decodeURIComponent(String(input.CopySource).slice('fixture/'.length)))
+        if (!source) throw failure(404)
+        assert.equal(input.CopySourceIfMatch, source.etag)
+        objects.set(key, { ...source, etag: String(++sequence), metadata: input.Metadata as Record<string, string> }); return {}
+      }
+      case 'DeleteObjectCommand': objects.delete(key); return {}
       case 'PutObjectCommand': {
         if (input.IfNoneMatch === '*' && old || input.IfMatch && old?.etag !== input.IfMatch) throw failure(412)
         const body = String(input.Body)
@@ -28,7 +36,7 @@ test('publication commits only complete inventories; QR claims, device isolation
       default: return {}
     }
   }
-  const commands = ['GetObjectCommand', 'HeadObjectCommand', 'PutObjectCommand', 'GetBucketCorsCommand', 'PutBucketCorsCommand', 'CreateMultipartUploadCommand', 'UploadPartCommand', 'CompleteMultipartUploadCommand', 'AbortMultipartUploadCommand', 'ListObjectsV2Command']
+  const commands = ['GetObjectCommand', 'HeadObjectCommand', 'PutObjectCommand', 'CopyObjectCommand', 'DeleteObjectCommand', 'GetBucketCorsCommand', 'PutBucketCorsCommand', 'CreateMultipartUploadCommand', 'UploadPartCommand', 'CompleteMultipartUploadCommand', 'AbortMultipartUploadCommand', 'ListObjectsV2Command']
   const fixtures: Record<string, string> = {
     '@/lib/authz': 'export async function requireAuthSession(){return {response:null}}',
     '@/lib/inscreen-user-config': 'export function readInscreenUserConfig(request){if(request.headers.get("x-inscreen-config-token")!=="owner")throw Error("Missing configuration");return {R2_BUCKET_NAME:"fixture",R2_ENDPOINT:"https://fixture.r2.cloudflarestorage.com",R2_ACCESS_KEY_ID:"key",R2_SECRET_ACCESS_KEY:"secret"}} export function getInscreenR2Config(config){return config} export function normalizeInscreenUserConfig(config){return config}',
@@ -64,6 +72,30 @@ test('publication commits only complete inventories; QR claims, device isolation
   corsForbidden = true
   assert.equal((await (await owner('cors')).json()).corsManaged, false)
   corsForbidden = false
+  const oldKey = 'r2/calculo-2/semana-1/lunes/123-guia.pdf', oldBody = 'Previously uploaded PDF'
+  objects.set(oldKey, { body: oldBody, etag: 'old-r2-etag', size: oldBody.length, metadata: {} })
+  objects.set('manifests/inscreen/provider/private.json', { body: '{"secret":"excluded"}', etag: 'private', size: 21, metadata: {} })
+  const legacy = await (await owner('legacy/catalog', {}, 'GET')).json()
+  assert.equal(legacy.files.length, 1)
+  assert.equal(legacy.documents[0].data.materials[0].material_type, 'practice')
+  assert.equal(legacy.documents.some((doc: { path: string }) => doc.path.includes('private')), false)
+  const oldHash = createHash('sha256').update(oldBody).digest('hex')
+  const reuse = await (await owner('upload', { hash: oldHash, size: oldBody.length, mime: 'application/pdf', previousKey: oldKey })).json()
+  assert.equal(reuse.reused, true)
+  assert.equal(objects.get(root + 'blobs/' + oldHash)?.body, oldBody)
+  assert.equal(objects.get(oldKey)?.etag, 'old-r2-etag')
+  assert.equal((await (await owner('upload', { hash: 'e'.repeat(64), size: oldBody.length, mime: 'application/pdf', previousKey: oldKey })).json()).reused, undefined)
+  const originalFetch = globalThis.fetch
+  try {
+    for (const problem of ['authorization', 'cors', 'network']) {
+      globalThis.fetch = async (_url, options) => options?.method === 'OPTIONS'
+        ? new Response(null, { status: problem === 'cors' ? 403 : 200, headers: { 'Access-Control-Allow-Origin': 'https://cursado.example' } })
+        : new Response(problem === 'authorization' ? '<Error><Code>SignatureDoesNotMatch</Code><Message>private internal diagnostic</Message></Error>' : '', { status: problem === 'authorization' ? 403 : 200 })
+      const diagnosis = await (await owner('upload/diagnose')).json()
+      assert.equal(diagnosis.problem, problem)
+      if (problem === 'authorization') { assert.match(diagnosis.message, /SignatureDoesNotMatch/); assert.doesNotMatch(diagnosis.message, /private internal diagnostic/) }
+    }
+  } finally { globalThis.fetch = originalFetch }
   assert.equal((await owner('pairing/create')).status, 409)
   assert.equal((await owner('publish', { manifest: inventory })).status, 400)
   assert.equal(objects.has(root + 'current.json'), false)

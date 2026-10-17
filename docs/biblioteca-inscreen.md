@@ -20,6 +20,23 @@ Si una subida queda bloqueada por CORS, **Revisar permisos CORS** abre directame
 ese paso. Una clave con permisos de objetos puede publicar, pero puede requerir
 agregar la regla desde el panel de Cloudflare. No hace falta cambiar las claves.
 
+La primera publicación con esta versión busca los manifiestos anteriores del
+bucket y los PDF de `r2/materia/semana/día/`. Recupera los archivos faltantes en
+la carpeta local, conserva las versiones locales y mantiene materia, semana,
+día, orden y marcas de importante. Los PDF antiguos sin manifiesto se reconocen
+por sus metadatos o por esa estructura de carpetas. No modifica ni elimina los
+objetos originales. Las descargas interrumpidas se retoman al reintentar; la
+recuperación se marca terminada para no resucitar después archivos eliminados.
+
+Al publicar un archivo recuperado, el servidor verifica su SHA-256 y reutiliza
+los bytes dentro de R2 mediante una copia a la revisión de lectura, sin volver
+a subirlos desde la PC. Los inventarios versionados conservan sus propias
+copias para que editar o eliminar un original no rompa una revisión anterior.
+Las URLs de subida no incluyen el CRC32 de un cuerpo vacío y firman los
+encabezados de metadatos que envía el navegador. Ante un fallo de transferencia,
+una prueba temporal diferencia CORS de un rechazo de firma o permisos, sin
+mostrar credenciales ni URLs firmadas.
+
 La primera publicación habilita el QR, válido cinco minutos. En la primera pestaña
 de InScreen, **Vincular con nuevo dispositivo** abre el escáner. Se admiten varios
 celulares por espacio y una biblioteca activa por celular. Reemplazarla requiere

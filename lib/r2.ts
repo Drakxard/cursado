@@ -1,5 +1,5 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3"
+import { createR2S3Client, createR2UploadUrl } from './r2-client'
 
 import { RemoteFileNotFoundError } from "@/lib/remote-file-errors"
 import { WEEKDAY_NAMES } from "@/lib/subject-utils"
@@ -16,7 +16,7 @@ function requireEnv(name: string) {
 }
 
 function createR2Client() {
-  return new S3Client({
+  return createR2S3Client({
     region: "auto",
     endpoint: requireEnv("R2_ENDPOINT"),
     credentials: {
@@ -165,13 +165,12 @@ export async function createR2UploadSession(params: {
 }) {
   const client = createR2Client()
   const metadata = normalizeUploadMetadata(params.metadata)
-  const command = new PutObjectCommand({
+  const uploadUrl = await createR2UploadUrl(client, {
     Bucket: getBucketName(),
     Key: params.objectKey,
     ContentType: params.mimeType,
     Metadata: metadata,
   })
-  const uploadUrl = await getSignedUrl(client, command, { expiresIn: 900 })
 
   return {
     uploadMode: "direct" as const,

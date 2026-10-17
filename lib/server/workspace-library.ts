@@ -1,11 +1,14 @@
-import { randomUUID } from 'node:crypto'
-import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand, GetBucketCorsCommand, PutBucketCorsCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, type CORSRule } from '@aws-sdk/client-s3'
+import { createHash, randomUUID } from 'node:crypto'
+import { S3Client, CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, GetBucketCorsCommand, PutBucketCorsCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command, type CORSRule } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { createR2S3Client, createR2UploadUrl } from '@/lib/r2-client'
 import { requireAuthSession } from '@/lib/authz'
 import { type InscreenR2Config } from '@/lib/inscreen-user-config'
 import { workspaceLibraryConfig } from './workspace-library-config'
 import { libraryHash, libraryId, validateLibraryManifest, type LibraryManifest } from '@/lib/workspace-library'
 import { openLibraryToken, sealLibraryToken } from './workspace-library-tokens'
+import { discoverLegacyLibrary } from './workspace-library-legacy'
+import { isLegacyLibraryKey } from '@/lib/workspace-library-legacy'
 
 type Access = { workspaceId: string; r2: InscreenR2Config; deviceId?: string; pairingId?: string; expiresAt?: number; origin?: string }
 type Device = { deviceId: string; installationId: string; name: string; enabled: boolean; createdAt: string; revokedAt?: string }
@@ -15,7 +18,7 @@ const prefix = (id: string) => `manifests/workspace-library/${libraryId(id)}/`
 const blobKey = (id: string, hash: string) => `${prefix(id)}blobs/${libraryHash(hash)}`
 function storage(r2: InscreenR2Config) {
   if (!r2.R2_BUCKET_NAME || !r2.R2_ENDPOINT || !r2.R2_ACCESS_KEY_ID || !r2.R2_SECRET_ACCESS_KEY) throw new LibraryError(428, 'Configurá Cloudflare R2.')
-  return { client: new S3Client({ region: 'auto', endpoint: r2.R2_ENDPOINT, credentials: { accessKeyId: r2.R2_ACCESS_KEY_ID, secretAccessKey: r2.R2_SECRET_ACCESS_KEY } }), bucket: r2.R2_BUCKET_NAME }
+  return { client: createR2S3Client({ region: 'auto', endpoint: r2.R2_ENDPOINT, credentials: { accessKeyId: r2.R2_ACCESS_KEY_ID, secretAccessKey: r2.R2_SECRET_ACCESS_KEY } }), bucket: r2.R2_BUCKET_NAME }
 }
 function missing(error: unknown) { return (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode === 404 }
 async function read<T>(s: ReturnType<typeof storage>, key: string) {
@@ -111,6 +114,13 @@ export async function handleLibraryRequest(request: Request, action: string) {
       return Response.json({ ok: true, url: downloadUrl }, { headers })
     }
     const a = await ownerAccess(request, String(body.workspaceId || url.searchParams.get('workspaceId') || '')), s = storage(a.r2)
+    if (action === 'legacy/catalog' && method === 'GET') return Response.json({ ok: true, ...await discoverLegacyLibrary(s) }, { headers })
+    if (action === 'legacy/object' && method === 'GET') {
+      const key = String(url.searchParams.get('key') || '')
+      if (!isLegacyLibraryKey(key)) throw new LibraryError(403, 'Archivo anterior no permitido.')
+      const object = await s.client.send(new GetObjectCommand({ Bucket: s.bucket, Key: key }))
+      return new Response(object.Body!.transformToWebStream(), { headers: { ...headers, 'Content-Type': 'application/octet-stream' } })
+    }
     if (action === 'status' && method === 'GET') return Response.json({ ok: true, manifest: (await manifest(s, a.workspaceId))?.value || null }, { headers })
     if (action === 'cors' && method === 'POST') {
       try { await setupCors(s, origin); return Response.json({ ok: true, corsManaged: true }, { headers }) }
@@ -150,14 +160,42 @@ export async function handleLibraryRequest(request: Request, action: string) {
         const head = await s.client.send(new HeadObjectCommand({ Bucket: s.bucket, Key: key }))
         if (head.ContentLength === size && head.Metadata?.sha256 === hash) return Response.json({ ok: true, exists: true }, { headers })
       } catch (error) { if (!missing(error)) throw error }
+      if (typeof body.previousKey === 'string' && isLegacyLibraryKey(body.previousKey) && size <= 5 * 1024 ** 3) {
+        try {
+          const source = await s.client.send(new GetObjectCommand({ Bucket: s.bucket, Key: body.previousKey }))
+          if (source.ContentLength === size) {
+            const digest = createHash('sha256'), reader = source.Body!.transformToWebStream().getReader()
+            try { while (true) { const chunk = await reader.read(); if (chunk.done) break; digest.update(chunk.value) } } finally { reader.releaseLock() }
+            if (digest.digest('hex') === hash) {
+              await s.client.send(new CopyObjectCommand({ Bucket: s.bucket, Key: key, CopySource: `${s.bucket}/${body.previousKey.split('/').map(encodeURIComponent).join('/')}`, CopySourceIfMatch: source.ETag, MetadataDirective: 'REPLACE', ContentType: mime, Metadata: { sha256: hash } }))
+              return Response.json({ ok: true, exists: true, reused: true }, { headers })
+            }
+          } else await source.Body?.transformToWebStream().cancel()
+        } catch (error) { if (!missing(error)) throw error }
+      }
       if (size <= 16 * 1024 ** 2) {
-        const uploadUrl = await getSignedUrl(s.client, new PutObjectCommand({ Bucket: s.bucket, Key: key, ContentType: mime, ContentLength: size, Metadata: { sha256: hash } }), { expiresIn: 900 })
+        const uploadUrl = await createR2UploadUrl(s.client, { Bucket: s.bucket, Key: key, ContentType: mime, Metadata: { sha256: hash } })
         return Response.json({ ok: true, uploadUrl, headers: { 'Content-Type': mime, 'x-amz-meta-sha256': hash } }, { headers })
       }
       const multipart = await s.client.send(new CreateMultipartUploadCommand({ Bucket: s.bucket, Key: key, ContentType: mime, Metadata: { sha256: hash } }))
       const partSize = Math.max(8 * 1024 ** 2, Math.ceil(size / 9000)), partCount = Math.ceil(size / partSize)
       const session = sealLibraryToken('upload', { workspaceId: a.workspaceId, hash, size, uploadId: multipart.UploadId, partCount, expiresAt: Date.now() + 24 * 3600000 })
       return Response.json({ ok: true, session, partSize, partCount }, { headers })
+    }
+    if (action === 'upload/diagnose' && method === 'POST') {
+      const key = `${prefix(a.workspaceId)}diagnostics/${randomUUID()}.txt`, payload = 'Cursado R2 connection test'
+      const hash = createHash('sha256').update(payload).digest('hex')
+      const signed = await createR2UploadUrl(s.client, { Bucket: s.bucket, Key: key, ContentType: 'text/plain', Metadata: { sha256: hash } }, 120)
+      try {
+        const preflight = await fetch(signed, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'content-type,x-amz-meta-sha256' }, signal: AbortSignal.timeout(10000) })
+        const put = await fetch(signed, { method: 'PUT', headers: { Origin: origin, 'Content-Type': 'text/plain', 'x-amz-meta-sha256': hash }, body: payload, signal: AbortSignal.timeout(10000) })
+        if (!put.ok) {
+          const code = /<Code>([A-Za-z0-9]+)<\/Code>/.exec(await put.text())?.[1] || `HTTP ${put.status}`
+          return Response.json({ ok: true, problem: 'authorization', message: `R2 rechazó la subida (${code}). Revisá que la clave permita Object Read & Write en este bucket. Si indica SignatureDoesNotMatch, recargá Cursado y reintentá con una firma nueva.` }, { headers })
+        }
+        if (!preflight.ok || ![origin, '*'].includes(preflight.headers.get('access-control-allow-origin') || '')) return Response.json({ ok: true, problem: 'cors', message: `La clave permite subir, pero R2 no autoriza al navegador desde ${origin}. Revisá la regla CORS en este mismo bucket.` }, { headers })
+        return Response.json({ ok: true, problem: 'network', message: 'La prueba de firma, permisos de escritura y CORS respondió correctamente. Reintentá la publicación; puede haber sido una interrupción o una URL anterior.' }, { headers })
+      } finally { await s.client.send(new DeleteObjectCommand({ Bucket: s.bucket, Key: key })).catch(() => {}) }
     }
     if (action.startsWith('upload/') && method === 'POST') {
       const u = openLibraryToken<{ workspaceId: string; hash: string; size: number; uploadId: string; partCount: number; expiresAt: number }>('upload', String(body.session || ''))

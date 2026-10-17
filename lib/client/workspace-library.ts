@@ -4,6 +4,7 @@ import { isLibraryPath, LIBRARY_ROOTS, LIBRARY_STATE_PATH, type LibraryManifest,
 import { SUBJECTS } from '@/lib/subjects'
 import { Sha256 } from '@aws-crypto/sha256-js'
 import { HOME_SUBJECT_WEEKDAY } from '@/lib/home-schedule'
+import { recoverLegacyLibrary } from './workspace-library-legacy'
 
 type State = { version: 1; workspaceId: string; enabled: boolean; name: string; hashes: Record<string, { modified: number; size: number; hash: string }>; publishedAt?: string }
 type Candidate = { path: string; blob: Blob; modified: number }
@@ -11,13 +12,14 @@ let running: Promise<LibraryManifest> | null = null
 let rerun = false
 export type PublicationProgress = { message: string; done: number; total: number; error?: string; help?: 'cors' }
 const report = (progress: PublicationProgress) => window.dispatchEvent(new CustomEvent('cursado-library-progress', { detail: progress }))
-class LibraryUploadError extends Error { readonly help = 'cors' as const }
-async function uploadToR2(url: string, options: RequestInit, corsManaged: boolean) {
-  try { return await fetch(url, options) }
-  catch {
-    if (navigator.onLine === false) throw new Error('Se perdió la conexión. Volvé a conectarte y reintentá la publicación.')
-    throw new LibraryUploadError(`No se pudo transferir el archivo a R2. ${corsManaged ? 'Revisá la conexión y los permisos CORS del bucket.' : 'Tu clave no permite configurar CORS automáticamente. Permití esta web en Settings → CORS policy de tu bucket.'} Abrí «Revisar permisos CORS» para ver los pasos. La publicación anterior se conserva.`)
-  }
+class LibraryUploadError extends Error { constructor(message: string, public readonly help?: 'cors') { super(message) } }
+async function uploadToR2(url: string, options: RequestInit, workspaceId: string) {
+  let response: Response | undefined
+  try { response = await fetch(url, options) } catch { /* Browsers hide R2 error bodies when CORS is absent. */ }
+  if (response && ![401, 403].includes(response.status)) return response
+  if (navigator.onLine === false) throw new Error('Se perdió la conexión. Volvé a conectarte y reintentá la publicación.')
+  const diagnosis = await libraryOwnerApi('upload/diagnose', { workspaceId }).catch(() => null)
+  throw new LibraryUploadError(`${diagnosis?.message || 'R2 no aceptó la transferencia o el navegador no pudo leer su respuesta. Revisá la conexión, la firma y los permisos del bucket. Un 403 también puede ser un rechazo de la firma o de la clave, aunque la consola mencione CORS.'} La publicación anterior se conserva.`, diagnosis?.problem === 'cors' ? 'cors' : undefined)
 }
 export async function libraryRoot() {
   const root = getReadyWorkspaceHandle() || await loadWorkspaceHandle()
@@ -132,15 +134,17 @@ async function catalog(candidates: Candidate[], files: LibraryFile[]) {
   for (const s of Object.values(subjectCatalog?.subjects || {})) if (!subjects.has(s.id)) subjects.set(s.id, { id: s.id, name: s.name, color: '#f59e0b' })
   const resolveFile = (value: string) => byPath.get(String(value || '').replace(/^workspace:\/\//, '').replace(/^workspace:/, ''))
   const explanationContexts = new Map<string, { subjectId: string; week: number }>()
+  const ordered = (rows: Record<string, unknown>[]) => [...rows].sort((a, b) => String(a.session_date || '').localeCompare(String(b.session_date || '')) || (Number(a.order_index) || 0) - (Number(b.order_index) || 0))
   for (const [path, data] of textByPath) {
     const payload = data as Record<string, unknown>
-    if (path.startsWith('manifests/materials/')) for (const m of (payload.materials || []) as Record<string, unknown>[]) {
+    if (path.startsWith('manifests/materials/')) for (const m of ordered((payload.materials || []) as Record<string, unknown>[])) {
+      if (!subjects.has(String(m.subject_id))) subjects.set(String(m.subject_id), { id: String(m.subject_id), name: String(m.subject_name || m.subject_id), color: '#f59e0b' })
       const file = resolveFile(String(m.drive_file_id || ''))
       if (file) referenced.add(file.id)
       if (m.drive_file_id) explanationContexts.set(await hash(new Blob([String(m.drive_file_id)])), { subjectId: String(m.subject_id), week: Number(m.week_number) })
       items.push({ id: `material:${m.id}`, title: String(m.file_name || 'Material'), kind: file?.mime === 'application/pdf' ? 'pdf' : 'file', subjectId: String(m.subject_id), week: Number(m.week_number), section: m.material_type === 'practice' ? 'Práctica' : 'Teoría', ...(file ? { fileId: file.id } : { text: 'El archivo original no está guardado en esta carpeta.' }) })
     }
-    if (path.startsWith('manifests/entries/')) for (const e of (payload.entries || []) as Record<string, unknown>[]) {
+    if (path.startsWith('manifests/entries/')) for (const e of ordered((payload.entries || []) as Record<string, unknown>[])) {
       const file = resolveFile(String(e.drive_file_id || '')); if (file) referenced.add(file.id)
       items.push({ id: `entry:${e.id}`, title: String(e.custom_title || e.drive_file_name || 'Apunte'), kind: file?.mime.startsWith('audio/') ? 'audio' : 'text', subjectId: String(e.subject_id), week: Number(e.week_number), section: 'Apuntes', text: [e.transcript_text, e.answer_text].filter(Boolean).join('\n\n'), important: e.is_featured === true, ...(file ? { fileId: file.id } : {}) })
     }
@@ -179,6 +183,7 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
     state.enabled = options.enable ?? state.enabled; state.name = options.name || state.name
     await writeState(root, state)
     const workspaceId = state.workspaceId
+    const previousSources = await recoverLegacyLibrary(root, { workspaceId, api: libraryOwnerApi, headers: () => ({ 'x-inscreen-config-token': getReadyInscreenConfigToken() }), report: message => report({ message, done: 0, total: 0 }) })
     report({ message: 'Buscando cambios guardados…', done: 0, total: 0 })
     const current = (await libraryOwnerApi('status', { workspaceId }, 'GET')).manifest as LibraryManifest | null
     const candidates = await scanLibraryFiles(root), files: LibraryFile[] = [], newHashes: State['hashes'] = {}
@@ -193,25 +198,25 @@ export function publishLibrary(root: FileSystemDirectoryHandle, options: { enabl
       await writeState(root, { ...state, hashes: newHashes, publishedAt: current.publishedAt })
       report({ message: 'Biblioteca actualizada', done: files.length, total: files.length }); return current
     }
-    const { corsManaged } = await libraryOwnerApi('cors', { workspaceId })
+    await libraryOwnerApi('cors', { workspaceId })
     let done = 0
     for (let i = 0; i < files.length; i++) {
       const f = files[i], candidate = candidates[i]
       report({ message: `Subiendo ${f.path}`, done, total: files.length })
       if (!current?.files.some(old => old.hash === f.hash && old.size === f.size)) {
-        const session = await libraryOwnerApi('upload', { workspaceId, hash: f.hash, size: f.size, mime: f.mime })
+        const session = await libraryOwnerApi('upload', { workspaceId, hash: f.hash, size: f.size, mime: f.mime, ...(previousSources[f.path] ? { previousKey: previousSources[f.path] } : {}) })
         if (session.uploadUrl) {
-          const uploaded = await uploadToR2(session.uploadUrl, { method: 'PUT', headers: session.headers, body: candidate.blob }, corsManaged)
+          const uploaded = await uploadToR2(session.uploadUrl, { method: 'PUT', headers: session.headers, body: candidate.blob }, workspaceId)
           if (!uploaded.ok) throw new Error(`Falló la subida de ${f.path} (${uploaded.status}).`)
         } else if (session.session) {
           const parts = []
           try {
             for (let part = 1; part <= session.partCount; part++) {
               const signed = await libraryOwnerApi('upload/part', { workspaceId, session: session.session, part })
-              const result = await uploadToR2(signed.url, { method: 'PUT', body: candidate.blob.slice((part - 1) * session.partSize, part * session.partSize) }, corsManaged)
+              const result = await uploadToR2(signed.url, { method: 'PUT', body: candidate.blob.slice((part - 1) * session.partSize, part * session.partSize) }, workspaceId)
               const etag = result.headers.get('ETag')
               if (!result.ok) throw new Error(`Falló una parte de ${f.path} (${result.status}). Reintentá la publicación.`)
-              if (!etag) throw new LibraryUploadError('R2 recibió una parte, pero CORS no permite leer ETag. Abrí «Revisar permisos CORS» y agregá ETag en ExposeHeaders. La publicación anterior se conserva.')
+              if (!etag) throw new LibraryUploadError('R2 recibió una parte, pero CORS no permite leer ETag. Abrí «Revisar permisos CORS» y agregá ETag en ExposeHeaders. La publicación anterior se conserva.', 'cors')
               parts.push({ ETag: etag, PartNumber: part })
             }
             await libraryOwnerApi('upload/complete', { workspaceId, session: session.session, parts })
