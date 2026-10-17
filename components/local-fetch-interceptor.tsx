@@ -1,6 +1,7 @@
 "use client"
 
 import { useLayoutEffect } from "react"
+import { isNativeReadOnly } from '@/lib/native-workspace'
 
 import {
   buildLocalContinuePayload,
@@ -101,7 +102,7 @@ function matchesPath(pathSegments: string[], expected: string[]) {
   return expected.length === pathSegments.length && expected.every((segment, index) => pathSegments[index] === segment)
 }
 
-async function handleLocalApiRequest(request: Request) {
+export async function handleLocalApiRequest(request: Request) {
   const url = new URL(request.url)
   const pathSegments = parsePathname(url.pathname)
   const method = request.method.toUpperCase()
@@ -109,7 +110,7 @@ async function handleLocalApiRequest(request: Request) {
   if (matchesPath(pathSegments, ["api", "auth", "session"]) && method === "GET") {
     return jsonResponse({
       email: "local@app.local",
-      isAdmin: true,
+      isAdmin: !isNativeReadOnly(),
       allowedSubjectIds: SUBJECT_IDS,
     })
   }

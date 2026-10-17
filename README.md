@@ -1,8 +1,9 @@
 # cursado
 
 La biblioteca personal para InScreen permite publicar materiales y pizarras
-privadas en R2 y leerlos sin conexión desde Android. Usa el mismo visor PDF.js y
-recursos visuales de Cursado. [Configuración, uso y APK](docs/biblioteca-inscreen.md).
+privadas en R2 y leerlos sin conexión desde Android. Ejecuta los componentes
+originales de Inicio, Estudio y Pizarra, con actualización de interfaz desde la
+web. [Configuración, uso y APK](docs/biblioteca-inscreen.md).
 
 Comunidad de estudiantes, intentando estudiar
 

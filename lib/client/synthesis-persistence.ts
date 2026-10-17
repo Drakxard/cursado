@@ -1,4 +1,5 @@
 import { getReadyWorkspaceHandle } from "../local-workspace-client.ts"
+import { isNativeReadOnly } from '../native-workspace.ts'
 import { createSynthesisFolderStore, type SynthesisFolderStore } from "./synthesis-folder-store.ts"
 
 const stores = new WeakMap<FileSystemDirectoryHandle, SynthesisFolderStore>()
@@ -9,6 +10,7 @@ export async function getSynthesisFolderStore(): Promise<SynthesisFolderStore> {
   if (!root) throw new Error("Síntesis necesita acceso a la carpeta local del dispositivo.")
   let store = stores.get(root)
   if (!store) { store = createSynthesisFolderStore(root); stores.set(root, store) }
+  if (isNativeReadOnly()) return store
   let migration = migrations.get(root)
   if (!migration) {
     const target = store

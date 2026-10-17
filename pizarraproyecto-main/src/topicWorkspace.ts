@@ -1,11 +1,12 @@
 import { getActiveBoardId, selectBoard, setStorageSession } from './biblioteca'
 import type { BoardContentWithExtras } from './biblioteca'
 import { deviceDB, emptyContent, readDeviceBoard, writeDeviceBoard } from './storage/device'
+import { nativeBoardMode } from './nativeWorkspace'
 
 type TopicWorkspace = { boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
 type TopicSnapshot = { version: 1; boardId: string; name: string; content: BoardContentWithExtras; assets: Record<string, string> }
 let workspace: TopicWorkspace | null = null
-export const isTopicWorkspace = () => workspace !== null
+export const isTopicWorkspace = () => workspace !== null || (nativeBoardMode() && new URLSearchParams(location.search).has('topicBoard'))
 export function notifyTopicWorkspace(type: 'ready' | 'closed' | 'error', error?: string) {
   if (workspace) parent.postMessage({ type: `topic-board:${type}`, boardId: workspace.boardId, error }, location.origin)
 }

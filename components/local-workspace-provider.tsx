@@ -993,3 +993,9 @@ export function useLocalWorkspace() {
   }
   return context
 }
+
+// Native readers already own a validated revision. They must never execute the
+// browser boot sequence (folder setup, credential unlock, repair or upload).
+export function NativeWorkspaceProvider({ rootHandle, children }: { rootHandle: FileSystemDirectoryHandle; children: React.ReactNode }) {
+  return <LocalWorkspaceContext.Provider value={{ isReady: true, rootHandle, permissionState: "granted", reselectWorkspace: async () => {} }}>{children}</LocalWorkspaceContext.Provider>
+}

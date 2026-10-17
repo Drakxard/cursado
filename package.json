@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "build:native-web": "node scripts/build-native-web.mjs",
     "build:pdf-explanation-ui": "node scripts/build-pdf-explanation-ui.mjs",
     "predev": "npm run build:pizarra && npm run build:pdf-explanation-ui",
-    "prebuild": "npm run build:pizarra && npm run build:pdf-explanation-ui",
+    "prebuild": "npm run build:pizarra && npm run build:pdf-explanation-ui && npm run build:native-web",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

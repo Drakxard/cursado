@@ -41,6 +41,7 @@ import type { Ref, CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 're
 import type { PointerEvent as ReactPointerEvent, DragEvent as ReactDragEvent, ChangeEvent, MouseEvent as ReactMouseEvent } from 'react'
 import * as pdfjs from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { nativeBoardMode } from './nativeWorkspace'
 import {
   loadBoard, saveBoard, saveAsset, loadAsset, getLibrary, fetchBoardForLiveSync, acceptBoardLiveVersion, getActiveBoardVersion, getCommittedBoardContent, addFolder, addBoard, renameBoard, removeBoard, removeFolder, selectBoard, getActiveBoardId,
   privateBoard, storageNotice, hasPendingShared, duplicateAsPrivate, publishPrivateCopy, exportBoardBackup, importBoardBackup, canUseServer,
@@ -377,7 +378,7 @@ function SyncedYouTubePlayer({item,signal,connected,onBroadcast,onRange,onPointe
         onPointerCancel={onSelectPointerUp} />}
       {pointMode&&interactionTool==='pan'&&<div className="board-video-point-overlay" aria-label="Señalar sobre el video"
         onPointerMove={e=>{e.stopPropagation();onPointer(e.clientX,e.clientY)}}
-        onPointerEnter={e=>onPointer(e.clientX,e.clientY)} onPointerDown={e=>e.stopPropagation()}/>} 
+        onPointerEnter={e=>onPointer(e.clientX,e.clientY)} onPointerDown={e=>e.stopPropagation()}/>}
       {needsGesture&&<button type="button" className="board-video-join" onClick={()=>issue('play')}>Unirse al video</button>}
       {failed&&<div className="board-video-failed">No se pudo cargar YouTube. Revisá tu conexión.</div>}
     </div>
@@ -953,7 +954,7 @@ function App() {
     document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light'
     return () => { document.documentElement.style.colorScheme = '' }
   }, [theme])
-  const [tool, setTool] = useState<Tool>('pen')
+  const [tool, setTool] = useState<Tool>(nativeBoardMode() ? 'pan' : 'pen')
   const [color, setColor] = useState('#202020')
   const [customColor, setCustomColor] = useState('#8b5cf6')
   const [brushMode, setBrushMode] = useState<'pen' | 'highlighter'>('pen')
@@ -1000,7 +1001,7 @@ function App() {
   const printRequestRef=useRef(0)
   const visualEditorRef=useRef<string|null>(null)
   visualEditorRef.current=visualEditor
-  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(nativeBoardMode() && !isTopicWorkspace())
   const [historyTarget, setHistoryTarget] = useState<{ id:string; name:string } | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1) })
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null)
@@ -1135,6 +1136,7 @@ function App() {
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null)
 
   function boardDragStart(e: ReactPointerEvent<HTMLDivElement>, id: string) {
+    if (nativeBoardMode()) return
     if ((e.pointerType === 'mouse' && e.button !== 0) || (e.target as HTMLElement).closest('.library-inline-editor, .library-board-action')) return
     boardDragRef.current = { id, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, started: false, target: null }
   }
@@ -1967,6 +1969,7 @@ function App() {
   }
 
   async function persistBoard() {
+    if (nativeBoardMode()) return
     finishPendingPen()
     if (!loadedRef.current || savingRef.current || !dirtyRef.current) return
     savingRef.current = true
@@ -2695,6 +2698,7 @@ function App() {
   }
 
   function captureScenePointerDown(e:ReactPointerEvent<HTMLDivElement>) {
+    if (nativeBoardMode()) return
     const target=e.target as HTMLElement
     const scene=target.closest('.board-scene')
     if(!scene&&!target.closest('.sheet-inline-anchor'))return
@@ -2795,6 +2799,7 @@ function App() {
     return hold
   }
   function tabletPointerDown(e:ReactPointerEvent<HTMLCanvasElement>){
+    if (nativeBoardMode()) { pointerDown(e); return }
     if(e.pointerType==='touch'&&penHoldRef.current){e.preventDefault();return}
     if(e.pointerType!=='pen'){clearPenHold();pointerDown(e);return}
     if(e.button!==0||!loadedRef.current||pointerRef.current!==null||touchPointersRef.current.size)return
@@ -2847,7 +2852,7 @@ function App() {
 
   function pointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
     if(contextMenu) setContextMenu(null)
-    if(beginCartesianResize(e))return
+    if(!nativeBoardMode() && beginCartesianResize(e))return
     if (e.pointerType === 'touch' && !selectionPicking) {
       e.preventDefault()
       // Rechazar la palma mientras se escribe con el lápiz activo.
@@ -3277,6 +3282,7 @@ function App() {
   }, [])
 
   function selectTool(next: Tool) {
+    if (nativeBoardMode() && next !== 'pan') return
     setSelectionPicking(false)
     finishPendingPen()
     if (editingRef.current && (next !== 'text' || tool !== 'text')) commitText()
@@ -4042,6 +4048,7 @@ function App() {
   }
 
   function onFileDrop(e: ReactDragEvent<HTMLDivElement>) {
+    if (nativeBoardMode()) { e.preventDefault(); return }
     const graphData = e.dataTransfer.getData('application/x-pizarra-graph')
     if (graphData) {
       e.preventDefault();e.stopPropagation()
@@ -4080,6 +4087,7 @@ function App() {
   // interno de trazos y objetos de la propia pizarra.
   useEffect(() => {
     function onClipboardPaste(e: ClipboardEvent) {
+      if (nativeBoardMode()) return
       const target = e.target
       if (target instanceof Element && target.closest('input,textarea,select,[contenteditable],[role="textbox"]')) return
       if (!loadedRef.current || libraryOpen || imageCrop || selectionError || handwrittenEvent || handwrittenError || importBusyRef.current) return
@@ -4456,6 +4464,7 @@ function App() {
     redraw();scheduleSave();setContextMenu(null)
   }
   function onBoardContextMenu(event:ReactMouseEvent<HTMLElement>) {
+    if (nativeBoardMode()) { event.preventDefault(); return }
     const target=event.target as HTMLElement
     if(target.closest('input,textarea,select,[contenteditable],button,.toolbar,.sheet-inline-editor'))return
     event.preventDefault()
@@ -4494,6 +4503,7 @@ function App() {
   // Atajos de pizarra: no interceptar la edición de texto ni ventanas emergentes.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (nativeBoardMode() && !((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f")) return
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&!libraryOpen){e.preventDefault();setBoardSearchOpen(true);return}
@@ -4594,20 +4604,20 @@ function App() {
         <div className="board-context-menu" role="menu" aria-label="Acciones sobre elementos" style={{left:contextMenu.x,top:contextMenu.y,maxHeight:Math.max(80,window.innerHeight-contextMenu.y-8),overflowY:'auto'}}>
           {groupRef.current.length===1&&groupRef.current[0].kind==='media'&&<TouchButton role="menuitem" onPress={()=>void openImageCrop()}>Recortar imagen</TouchButton>}
           <button role="menuitem" disabled={!groupRef.current.length} onClick={()=>{copySelected();setContextMenu(null)}}>Copiar <small>Ctrl+C</small></button>
-          <button role="menuitem" onClick={()=>{void pasteFromBoardMenu()}}>Pegar <small>Ctrl+V</small></button>
+          <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" onClick={()=>{void pasteFromBoardMenu()}}>Pegar <small>Ctrl+V</small></button>
           <hr/>
-          <button role="menuitem" disabled={!groupRef.current.length} onClick={()=>reorderSelected(true)}>Traer al frente</button>
-          <button role="menuitem" disabled={!groupRef.current.length} onClick={()=>reorderSelected(false)}>Llevar al fondo</button>
-          <button role="menuitem" disabled={recognizing||!groupRef.current.some(sel=>sel.kind==='text')} onClick={()=>{setContextMenu(null);setHandwrittenError('');void addSelectionToCalendar()}}>Agregar al calendario</button>
+          <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" disabled={!groupRef.current.length} onClick={()=>reorderSelected(true)}>Traer al frente</button>
+          <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" disabled={!groupRef.current.length} onClick={()=>reorderSelected(false)}>Llevar al fondo</button>
+          <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" disabled={recognizing||!groupRef.current.some(sel=>sel.kind==='text')} onClick={()=>{setContextMenu(null);setHandwrittenError('');void addSelectionToCalendar()}}>Agregar al calendario</button>
           <hr/>
-          <button role="menuitem" disabled={groupRef.current.length<2} onClick={groupSelected}>Agrupar selección</button>
-          <button role="menuitem" disabled={!groupRef.current.some(sel=>groupIdFor(sel))} onClick={ungroupSelected}>Desagrupar</button>
+          <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" disabled={groupRef.current.length<2} onClick={groupSelected}>Agrupar selección</button>
+          <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" disabled={!groupRef.current.some(sel=>groupIdFor(sel))} onClick={ungroupSelected}>Desagrupar</button>
           {groupRef.current.some(sel=>sel.kind==='video')&&<button role="menuitem" onClick={()=>{
             const video=videosRef.current.find(v=>groupRef.current.some(sel=>sel.kind==='video'&&sel.id===v.id))
             if(video)toggleYouTubeFit(video);setContextMenu(null)
           }}>Ampliar / restaurar video</button>}
           <hr/>
-          <button role="menuitem" disabled={!groupRef.current.length} onClick={()=>{deleteSelected();setContextMenu(null)}}>Eliminar selección <small>Supr</small></button>
+          <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" disabled={!groupRef.current.length} onClick={()=>{deleteSelected();setContextMenu(null)}}>Eliminar selección <small>Supr</small></button>
         </div></>}
       <div className="board-scene" ref={sceneRef} style={{transform:`translate(${cameraRef.current.x}px, ${cameraRef.current.y}px) scale(${cameraRef.current.zoom})`}}>
       <div className="sheet-static-layer" ref={staticTableLayerRef} data-version={tableRevision} onContextMenu={onBoardContextMenu}
@@ -4646,7 +4656,7 @@ function App() {
               onClick={e=>{e.stopPropagation();toggleYouTubeFit(item)}}>
               {videoPreviousSizeRef.current.has(item.id)?'↙':'⛶'}
             </button>
-            <button type="button" title="Eliminar video" aria-label="Eliminar video" style={{marginLeft:0}}
+            <button data-workspace-write={nativeBoardMode() || undefined} type="button" title="Eliminar video" aria-label="Eliminar video" style={{marginLeft:0}}
               onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();deleteYouTube(item.id)}}>×</button>
           </div>
           <SyncedYouTubePlayer item={item} signal={videoSignals[item.id]} connected={liveConnected}
@@ -4677,11 +4687,11 @@ function App() {
             top: bounds.y * camera.zoom + camera.y,
             width: bounds.width * camera.zoom, height: bounds.height * camera.zoom }}
           onPointerEnter={() => setHoveredTableId(table.id)}>
-          <button type="button" className="sheet-hover-add-col" title="Agregar columna a la derecha"
+          <button data-workspace-write={nativeBoardMode() || undefined} type="button" className="sheet-hover-add-col" title="Agregar columna a la derecha"
             aria-label="Agregar columna" disabled={(table.cells[0]?.length ?? 0) >= MAX_EXCEL_COLS}
             onPointerDown={e => { e.preventDefault(); e.stopPropagation() }}
             onClick={e => { e.stopPropagation(); addTableColumn(table.id) }}>+</button>
-          <button type="button" className="sheet-hover-add-row" title="Agregar fila debajo"
+          <button data-workspace-write={nativeBoardMode() || undefined} type="button" className="sheet-hover-add-row" title="Agregar fila debajo"
             aria-label="Agregar fila" disabled={table.cells.length >= MAX_EXCEL_ROWS}
             onPointerDown={e => { e.preventDefault(); e.stopPropagation() }}
             onClick={e => { e.stopPropagation(); addTableRow(table.id) }}>+</button>
@@ -4741,8 +4751,8 @@ function App() {
               const file=e.target.files?.[0];e.target.value=''
               if(file)void libraryAction(async()=>{const id=await importBoardBackup(file);await switchBoard(id)})
             }}/>
-            {privateBoard()&&canUseServer()&&<button onClick={()=>void libraryAction(async()=>{await flushBoardForHistory();const id=await publishPrivateCopy();await switchBoard(id)})}>Publicar copia compartida</button>}
-            {!privateBoard()&&<button onClick={()=>void libraryAction(async()=>{
+            {privateBoard()&&canUseServer()&&<button data-workspace-write={nativeBoardMode() || undefined} onClick={()=>void libraryAction(async()=>{await flushBoardForHistory();const id=await publishPrivateCopy();await switchBoard(id)})}>Publicar copia compartida</button>}
+            {!privateBoard()&&<button data-workspace-write={nativeBoardMode() || undefined} onClick={()=>void libraryAction(async()=>{
               if(dirtyRef.current)await persistBoard()
               const id=await duplicateAsPrivate();dirtyRef.current=false;syncConflictRef.current=false
               selectBoard(id);window.location.reload()
@@ -4756,7 +4766,7 @@ function App() {
                   <button className={`library-folder-title ${folderFilter === f.id ? 'chosen' : ''}`} data-library-drop-folder={f.id} onClick={() => { setFolderFilter(f.id); setExpandedFolders(old => old.includes(f.id) ? old.filter(id => id !== f.id) : [...old, f.id]) }}>
                     <span>{expandedFolders.includes(f.id) ? '▾' : '▸'}</span><span>📁</span><span className="library-folder-label">{f.name}</span>
                   </button>
-                  <button className="library-folder-trash" aria-label={`Eliminar carpeta ${f.name}`} title={`Eliminar carpeta ${f.name}`} onClick={() => setDeleteTarget({ kind: 'folder', id: f.id, name: f.name })}>
+                  <button data-workspace-write={nativeBoardMode() || undefined} className="library-folder-trash" aria-label={`Eliminar carpeta ${f.name}`} title={`Eliminar carpeta ${f.name}`} onClick={() => setDeleteTarget({ kind: 'folder', id: f.id, name: f.name })}>
                     <span aria-hidden="true">×</span>
                   </button>
                 </div>
@@ -4770,9 +4780,9 @@ function App() {
               {creatingFolder ? (
                 <div className="library-create-inline">
                   <input autoFocus aria-label="Nombre de la carpeta" placeholder="Nombre de la carpeta" value={newFolderName} onChange={e => setNewFolderName(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setCreatingFolder(false); if (e.key === 'Enter' && newFolderName.trim()) void libraryAction(async () => { await addFolder(newFolderName.trim()); setNewFolderName(''); setCreatingFolder(false) }) }} />
-                  <div><button onClick={() => { if (newFolderName.trim()) void libraryAction(async () => { await addFolder(newFolderName.trim()); setNewFolderName(''); setCreatingFolder(false) }) }}>Crear</button><button onClick={() => setCreatingFolder(false)}>Cancelar</button></div>
+                  <div><button data-workspace-write={nativeBoardMode() || undefined} onClick={() => { if (newFolderName.trim()) void libraryAction(async () => { await addFolder(newFolderName.trim()); setNewFolderName(''); setCreatingFolder(false) }) }}>Crear</button><button data-workspace-write={nativeBoardMode() || undefined} onClick={() => setCreatingFolder(false)}>Cancelar</button></div>
                 </div>
-              ) : <button onClick={() => { setNewFolderName(''); setCreatingFolder(true) }}>＋ Nueva carpeta</button>}
+              ) : <button data-workspace-write={nativeBoardMode() || undefined} onClick={() => { setNewFolderName(''); setCreatingFolder(true) }}>＋ Nueva carpeta</button>}
             </aside>
             <section>
               <div className="library-board-controls">
@@ -4787,9 +4797,9 @@ function App() {
                   </label>
                   <div className="library-color-picker">{BOARD_COLORS.map(c => <button key={c} type="button" className={newBoardColor === c ? 'selected' : ''} onClick={() => setNewBoardColor(c)} aria-label={`Color ${c}`} aria-pressed={newBoardColor === c}><span style={{ backgroundColor: c }} /></button>)}</div>
                   <input autoFocus aria-label="Nombre de la nueva pizarra" placeholder="Nombre de la pizarra" value={newBoardName} onChange={e => setNewBoardName(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setCreatingBoard(false); if (e.key === 'Enter' && newBoardName.trim()) void libraryAction(async () => { const board = await addBoard(boardWithColor(newBoardName, newBoardColor), folderFilter,newBoardStorage); setNewBoardName(''); setCreatingBoard(false); await switchBoard(board.id) }) }} />
-                  <div><button onClick={() => { if (newBoardName.trim()) void libraryAction(async () => { const board = await addBoard(boardWithColor(newBoardName, newBoardColor), folderFilter,newBoardStorage); setNewBoardName(''); setCreatingBoard(false); await switchBoard(board.id) }) }}>Crear</button><button onClick={() => setCreatingBoard(false)}>Cancelar</button></div>
+                  <div><button data-workspace-write={nativeBoardMode() || undefined} onClick={() => { if (newBoardName.trim()) void libraryAction(async () => { const board = await addBoard(boardWithColor(newBoardName, newBoardColor), folderFilter,newBoardStorage); setNewBoardName(''); setCreatingBoard(false); await switchBoard(board.id) }) }}>Crear</button><button data-workspace-write={nativeBoardMode() || undefined} onClick={() => setCreatingBoard(false)}>Cancelar</button></div>
                 </div>
-              ) : <button className="library-create" onClick={() => { setNewBoardName(''); setNewBoardColor('#64748b'); setCreatingBoard(true) }}>＋ Nueva pizarra</button>}
+              ) : <button data-workspace-write={nativeBoardMode() || undefined} className="library-create" onClick={() => { setNewBoardName(''); setNewBoardColor('#64748b'); setCreatingBoard(true) }}>＋ Nueva pizarra</button>}
               <div className="library-global-search" role="search">
                 <input type="search" aria-label="Buscar pizarras en todas las carpetas" placeholder="Buscar pizarra…"
                   value={librarySearchQuery} onChange={e=>setLibrarySearchQuery(e.target.value)} />
@@ -4825,14 +4835,14 @@ function App() {
                       <option value="">Sin carpeta</option>
                       {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                     </select>
-                    <button title="Guardar cambios" onClick={() => { if (!editingBoardName.trim()) { setLibraryError('El nombre no puede estar vacío.'); return }; void libraryAction(async () => { await renameBoard(b.id, boardWithColor(editingBoardName, editingBoardColor), editingBoardFolder || null); setEditingBoardId(null) }) }}><span>✓</span> Guardar</button>
-                    <button title="Cancelar" onClick={() => setEditingBoardId(null)}>Cancelar</button>
+                    <button data-workspace-write={nativeBoardMode() || undefined} title="Guardar cambios" onClick={() => { if (!editingBoardName.trim()) { setLibraryError('El nombre no puede estar vacío.'); return }; void libraryAction(async () => { await renameBoard(b.id, boardWithColor(editingBoardName, editingBoardColor), editingBoardFolder || null); setEditingBoardId(null) }) }}><span>✓</span> Guardar</button>
+                    <button data-workspace-write={nativeBoardMode() || undefined} title="Cancelar" onClick={() => setEditingBoardId(null)}>Cancelar</button>
                   </div>
-                ) : <button className="library-board-action" title="Renombrar o mover" onClick={() => { setEditingBoardId(b.id); setEditingBoardName(boardTitle(b.name)); setEditingBoardColor(boardColor(b.name)); setEditingBoardFolder(b.folder_id || '') }}>✎</button>}
+                ) : <button data-workspace-write={nativeBoardMode() || undefined} className="library-board-action" title="Renombrar o mover" onClick={() => { setEditingBoardId(b.id); setEditingBoardName(boardTitle(b.name)); setEditingBoardColor(boardColor(b.name)); setEditingBoardFolder(b.folder_id || '') }}>✎</button>}
                 <button type="button" className="library-board-action history-button" title={`Historial de versiones de ${boardTitle(b.name)}`} aria-label={`Historial de ${boardTitle(b.name)}`}
                   onPointerDown={e => e.stopPropagation()}
                   onClick={e => { e.stopPropagation(); setHistoryTarget({id:b.id,name:boardTitle(b.name)}) }}>Historial</button>
-                <button className="library-board-delete" title="Eliminar pizarra" aria-label={`Eliminar ${boardTitle(b.name)}`} onClick={() => setDeleteTarget({ kind: 'board', id: b.id, name: boardTitle(b.name) })}>×</button>
+                <button data-workspace-write={nativeBoardMode() || undefined} className="library-board-delete" title="Eliminar pizarra" aria-label={`Eliminar ${boardTitle(b.name)}`} onClick={() => setDeleteTarget({ kind: 'board', id: b.id, name: boardTitle(b.name) })}>×</button>
                     </div>
                   ))}
                   {group.id !== null && !boards.some(board => board.folder_id === group.id) && (
@@ -4846,11 +4856,11 @@ function App() {
           <aside className="library-calendar" aria-label="Calendario y eventos" onClick={e => { if (e.target === e.currentTarget) { setSelectedCalendarDate(null); setCalendarEventEditing(null) } }}>
             <div className="library-calendar-heading"><span>Calendario</span>
               <div className="calendar-tabs" aria-label="Mis calendarios">{calendars.map(c => <div key={c.id} className={`calendar-tab ${activeCalendarId === c.id ? 'active' : ''}`}>
-                {renamingCalendarId === c.id ? <input autoFocus maxLength={40} aria-label="Renombrar calendario" value={renamingCalendarName} onChange={e => setRenamingCalendarName(e.target.value)} onBlur={() => void renameCalendar(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } if (e.key === 'Escape') { setRenamingCalendarId(null) } }} /> : <button type="button" title="Doble clic para renombrar" onClick={() => { setActiveCalendarId(c.id); setSelectedCalendarDate(null); setCalendarEventEditing(null) }} onDoubleClick={() => { setRenamingCalendarId(c.id); setRenamingCalendarName(c.name) }}>{c.name}</button>}
-                {calendars.length > 1 && <button type="button" className="calendar-tab-remove" aria-label={`Eliminar calendario ${c.name}`} title="Eliminar calendario" onClick={() => void deleteCalendar(c.id)}>×</button>}
-              </div>)}{calendars.length < 4 && <button className="calendar-tab-add" title="Nuevo calendario" onClick={() => setCreatingCalendar(true)}>+</button>}</div>
+                {renamingCalendarId === c.id ? <input autoFocus maxLength={40} aria-label="Renombrar calendario" value={renamingCalendarName} onChange={e => setRenamingCalendarName(e.target.value)} onBlur={() => void renameCalendar(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } if (e.key === 'Escape') { setRenamingCalendarId(null) } }} /> : <button data-workspace-write={nativeBoardMode() || undefined} type="button" title="Doble clic para renombrar" onClick={() => { setActiveCalendarId(c.id); setSelectedCalendarDate(null); setCalendarEventEditing(null) }} onDoubleClick={() => { setRenamingCalendarId(c.id); setRenamingCalendarName(c.name) }}>{c.name}</button>}
+                {calendars.length > 1 && <button data-workspace-write={nativeBoardMode() || undefined} type="button" className="calendar-tab-remove" aria-label={`Eliminar calendario ${c.name}`} title="Eliminar calendario" onClick={() => void deleteCalendar(c.id)}>×</button>}
+              </div>)}{calendars.length < 4 && <button data-workspace-write={nativeBoardMode() || undefined} className="calendar-tab-add" title="Nuevo calendario" onClick={() => setCreatingCalendar(true)}>+</button>}</div>
             </div>
-            {creatingCalendar && <form className="calendar-new-inline" onSubmit={e => { e.preventDefault(); void createCalendar() }}><input autoFocus maxLength={40} placeholder="Nombre del calendario" value={newCalendarName} onChange={e => setNewCalendarName(e.target.value)} /><button type="submit">Crear</button><button type="button" onClick={() => setCreatingCalendar(false)}>Cancelar</button></form>}
+            {creatingCalendar && <form className="calendar-new-inline" onSubmit={e => { e.preventDefault(); void createCalendar() }}><input autoFocus maxLength={40} placeholder="Nombre del calendario" value={newCalendarName} onChange={e => setNewCalendarName(e.target.value)} /><button type="submit">Crear</button><button data-workspace-write={nativeBoardMode() || undefined} type="button" onClick={() => setCreatingCalendar(false)}>Cancelar</button></form>}
             <div className="library-calendar-view-switch"><button className={calendarView === 'month' ? 'active' : ''} onClick={() => setCalendarView('month')}>Mes</button><button className={calendarView === 'year' ? 'active' : ''} onClick={() => setCalendarView('year')}>Todos los meses</button></div>
             <div className="library-calendar-nav">
               <button aria-label={calendarView === 'year' ? 'Año anterior' : 'Mes anterior'} onClick={() => setCalendarMonth(new Date(calendarYear,calendarMonthIndex-(calendarView === 'year' ? 12 : 1),1))}>‹</button>
@@ -4859,12 +4869,12 @@ function App() {
             </div>
             {calendarView === 'year' ? <div className="library-calendar-year">{calendarMonths.map(month => <button key={month.index} className={month.index === calendarMonthIndex ? 'active' : ''} onClick={() => { setCalendarMonth(new Date(calendarYear,month.index,1)); setCalendarView('month') }}><strong>{month.label}</strong><small>{Array.from({length:new Date(calendarYear,month.index+1,0).getDate()},(_,i)=>dateKey(new Date(calendarYear,month.index,i+1))).reduce((n,date)=>n+visibleEvents.filter(event=>occursOn(event,date)).length,0)} eventos</small></button>)}</div> : <div className="library-calendar-grid" role="grid" aria-label="Días del mes" onClick={e => { if (e.target === e.currentTarget || (e.target instanceof HTMLElement && e.target.classList.contains('library-calendar-weekday'))) { setSelectedCalendarDate(null); setCalendarEventEditing(null) } }}>
               {['L','M','M','J','V','S','D'].map((label,i) => <span key={`weekday-${i}`} className="library-calendar-weekday">{label}</span>)}
-              {calendarCells.map((day,i) => day === null ? <span key={`empty-${i}`} onClick={() => { setSelectedCalendarDate(null); setCalendarEventEditing(null) }} /> : <button key={`day-${i}`} className={`${calendarDateKey(day) === calendarTodayKey ? 'is-today' : ''} ${calendarDateKey(day) === selectedCalendarDate ? 'is-selected' : ''}`} title={(() => { const dayEvents = calendarMonthEvents.filter(event => event.occurrenceDate === calendarDateKey(day)).sort((a,b) => a.time.localeCompare(b.time)); return dayEvents.length ? dayEvents.map(event => `${event.time ? event.time + ' · ' : ''}${event.title}`).join('\n') : 'Sin eventos' })()} aria-label={calendarDateKey(day)} aria-pressed={calendarDateKey(day) === selectedCalendarDate} onClick={() => { setSelectedCalendarDate(previous => previous === calendarDateKey(day) ? null : calendarDateKey(day)); setCalendarEventEditing(null) }}>{day}{calendarMonthEvents.filter(event => event.occurrenceDate === calendarDateKey(day)).slice(0, 4).length > 0 && <span className="calendar-event-dots">{calendarMonthEvents.filter(event => event.occurrenceDate === calendarDateKey(day)).slice(0, 4).map(event => <i key={`${event.id}-${day}`} className="calendar-event-dot" style={{ backgroundColor: event.color || '#f97316' }} />)}</span>}</button>)}
+              {calendarCells.map((day,i) => day === null ? <span key={`empty-${i}`} onClick={() => { setSelectedCalendarDate(null); setCalendarEventEditing(null) }} /> : <button data-workspace-write={nativeBoardMode() || undefined} key={`day-${i}`} className={`${calendarDateKey(day) === calendarTodayKey ? 'is-today' : ''} ${calendarDateKey(day) === selectedCalendarDate ? 'is-selected' : ''}`} title={(() => { const dayEvents = calendarMonthEvents.filter(event => event.occurrenceDate === calendarDateKey(day)).sort((a,b) => a.time.localeCompare(b.time)); return dayEvents.length ? dayEvents.map(event => `${event.time ? event.time + ' · ' : ''}${event.title}`).join('\n') : 'Sin eventos' })()} aria-label={calendarDateKey(day)} aria-pressed={calendarDateKey(day) === selectedCalendarDate} onClick={() => { setSelectedCalendarDate(previous => previous === calendarDateKey(day) ? null : calendarDateKey(day)); setCalendarEventEditing(null) }}>{day}{calendarMonthEvents.filter(event => event.occurrenceDate === calendarDateKey(day)).slice(0, 4).length > 0 && <span className="calendar-event-dots">{calendarMonthEvents.filter(event => event.occurrenceDate === calendarDateKey(day)).slice(0, 4).map(event => <i key={`${event.id}-${day}`} className="calendar-event-dot" style={{ backgroundColor: event.color || '#f97316' }} />)}</span>}</button>)}
             </div>}
-            <div className="library-calendar-event-heading"><strong>{selectedCalendarDate ? `Eventos del día ${selectedDayLabel}` : `Próximos eventos de ${new Intl.DateTimeFormat('es-AR', {month: 'long', year: 'numeric'}).format(calendarMonth)}`}</strong><button onClick={() => { setCalendarEventEditing('new'); setEventTitle(''); setEventTime(''); setEventNotes(''); setEventColor('#22c55e'); setEventRecurrence('none') }}>+ Agregar evento</button></div>
+            <div className="library-calendar-event-heading"><strong>{selectedCalendarDate ? `Eventos del día ${selectedDayLabel}` : `Próximos eventos de ${new Intl.DateTimeFormat('es-AR', {month: 'long', year: 'numeric'}).format(calendarMonth)}`}</strong><button data-workspace-write={nativeBoardMode() || undefined} onClick={() => { setCalendarEventEditing('new'); setEventTitle(''); setEventTime(''); setEventNotes(''); setEventColor('#22c55e'); setEventRecurrence('none') }}>+ Agregar evento</button></div>
             {calendarError && <p className="calendar-error">{calendarError}</p>}
             {sortedMonthEvents.length === 0 && <p className="calendar-empty">No hay eventos pendientes para esta selección.</p>}
-            {sortedMonthEvents.map(event => <div className="calendar-event-row" key={`${event.id}-${event.occurrenceDate}`}><div className="calendar-event-date"><strong>{Number(event.occurrenceDate.slice(8,10))}</strong><span>{new Intl.DateTimeFormat('es-AR', {month:'short'}).format(new Date(Number(event.occurrenceDate.slice(0,4)), Number(event.occurrenceDate.slice(5,7))-1, 1)).replace('.','').toUpperCase()}</span></div><button onClick={() => { setCalendarEventEditing(event.id); setEventTitle(event.title); setEventTime(event.time); setEventNotes(event.notes); setEventColor(event.color || '#f97316'); setEventRecurrence(event.recurrence || 'none'); setSelectedCalendarDate(event.date) }}><strong><span className="calendar-event-list-dot" style={{ backgroundColor: event.color || '#f97316' }} />{event.time ? `${event.time} · ` : ''}{event.title}</strong>{event.notes && <small>{event.notes}</small>}</button><button className="calendar-event-remove" title="Eliminar evento" onClick={() => setEventDeleteTarget({ id: event.id, title: event.title, occurrenceDate: event.occurrenceDate, recurring: event.recurrence !== 'none' })}>×</button></div>)}
+            {sortedMonthEvents.map(event => <div className="calendar-event-row" key={`${event.id}-${event.occurrenceDate}`}><div className="calendar-event-date"><strong>{Number(event.occurrenceDate.slice(8,10))}</strong><span>{new Intl.DateTimeFormat('es-AR', {month:'short'}).format(new Date(Number(event.occurrenceDate.slice(0,4)), Number(event.occurrenceDate.slice(5,7))-1, 1)).replace('.','').toUpperCase()}</span></div><button data-workspace-write={nativeBoardMode() || undefined} onClick={() => { setCalendarEventEditing(event.id); setEventTitle(event.title); setEventTime(event.time); setEventNotes(event.notes); setEventColor(event.color || '#f97316'); setEventRecurrence(event.recurrence || 'none'); setSelectedCalendarDate(event.date) }}><strong><span className="calendar-event-list-dot" style={{ backgroundColor: event.color || '#f97316' }} />{event.time ? `${event.time} · ` : ''}{event.title}</strong>{event.notes && <small>{event.notes}</small>}</button><button data-workspace-write={nativeBoardMode() || undefined} className="calendar-event-remove" title="Eliminar evento" onClick={() => setEventDeleteTarget({ id: event.id, title: event.title, occurrenceDate: event.occurrenceDate, recurring: event.recurrence !== 'none' })}>×</button></div>)}
             {calendarEventEditing !== null && <form className="calendar-event-editor" onSubmit={e => { e.preventDefault(); void saveCalendarEvent() }}>
               <label>Nombre del evento<input autoFocus required maxLength={150} placeholder="Ej.: Parcial de Álgebra" value={eventTitle} onChange={e => setEventTitle(e.target.value)} /></label>
               <label>Fecha<input type="date" required value={selectedCalendarDate || dateKey(new Date())} onChange={e => { setSelectedCalendarDate(e.target.value); const [y,m] = e.target.value.split('-').map(Number); if (y && m) setCalendarMonth(new Date(y,m-1,1)) }} /></label>
@@ -4872,7 +4882,7 @@ function App() {
               <label>Frecuencia<select value={eventRecurrence} onChange={e => setEventRecurrence(e.target.value as CalendarEvent['recurrence'])}><option value="none">No repetir</option><option value="daily">Diariamente</option><option value="weekly">Semanalmente</option><option value="monthly">Mensualmente</option></select></label>
               <div className="calendar-event-color-field"><span>Color del evento</span><div className="calendar-event-palette">{EVENT_COLORS.map(c => <button key={c} type="button" className={eventColor === c ? "active" : ""} aria-label={`Color ${c}`} aria-pressed={eventColor === c} onClick={() => setEventColor(c)}><span style={{backgroundColor:c}} /></button>)}</div></div>
               <label>Notas (opcional)<textarea rows={2} value={eventNotes} onChange={e => setEventNotes(e.target.value)} /></label>
-              <div><button type="button" onClick={() => setCalendarEventEditing(null)}>Cancelar</button><button type="submit" disabled={calendarBusy || !eventTitle.trim()}>Guardar</button></div>
+              <div><button data-workspace-write={nativeBoardMode() || undefined} type="button" onClick={() => setCalendarEventEditing(null)}>Cancelar</button><button type="submit" disabled={calendarBusy || !eventTitle.trim()}>Guardar</button></div>
             </form>}
           </aside>
           {draggingBoardId && dragPosition && <div className="library-drag-preview" style={{ left: dragPosition.x + 14, top: dragPosition.y + 14 }}>{boards.find(b => b.id === draggingBoardId)?.name}</div>}
@@ -4882,9 +4892,9 @@ function App() {
               <h3 id="event-delete-title">¿Eliminar «{eventDeleteTarget.title}»?</h3>
               <p>{eventDeleteTarget.recurring ? `Esta actividad se repite. Elegí si querés quitar solo la fecha ${eventDeleteTarget.occurrenceDate.split('-').reverse().join('/')} o todas las repeticiones.` : 'Este evento se eliminará definitivamente.'}</p>
               <div className="calendar-delete-actions">
-                <button type="button" disabled={calendarBusy} onClick={() => setEventDeleteTarget(null)}>Cancelar</button>
-                {eventDeleteTarget.recurring && <button type="button" disabled={calendarBusy} onClick={() => void deleteCalendarEvent('one')}>Solo este evento</button>}
-                <button type="button" className="calendar-delete-danger" disabled={calendarBusy} onClick={() => void deleteCalendarEvent('all')}>{calendarBusy ? 'Eliminando...' : eventDeleteTarget.recurring ? 'Toda la serie' : 'Eliminar evento'}</button>
+                <button data-workspace-write={nativeBoardMode() || undefined} type="button" disabled={calendarBusy} onClick={() => setEventDeleteTarget(null)}>Cancelar</button>
+                {eventDeleteTarget.recurring && <button data-workspace-write={nativeBoardMode() || undefined} type="button" disabled={calendarBusy} onClick={() => void deleteCalendarEvent('one')}>Solo este evento</button>}
+                <button data-workspace-write={nativeBoardMode() || undefined} type="button" className="calendar-delete-danger" disabled={calendarBusy} onClick={() => void deleteCalendarEvent('all')}>{calendarBusy ? 'Eliminando...' : eventDeleteTarget.recurring ? 'Toda la serie' : 'Eliminar evento'}</button>
               </div>
             </div>
           </div>}
@@ -4898,7 +4908,7 @@ function App() {
                   : <>Se eliminará la carpeta <strong>«{deleteTarget.name}»</strong>. Las pizarras que contiene se conservarán sin carpeta.</>}
               </p>
               <div className="library-confirm-actions">
-                <button type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>Cancelar</button>
+                <button data-workspace-write={nativeBoardMode() || undefined} type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>Cancelar</button>
                 <button type="button" className="library-confirm-danger" disabled={deleting} onClick={() => void confirmDelete()}>{deleting ? 'Eliminando…' : deleteTarget.kind==='board'&&!privateBoard(deleteTarget.id)?'Sí, quitar':'Sí, eliminar'}</button>
               </div>
             </div>
@@ -4998,7 +5008,7 @@ function App() {
             <div className="shapes-choice-grid">{SHAPE_OPTIONS.map(option=><button type="button" role="menuitem" key={option.kind} title={option.title}
               className={shapeKind===option.kind?'chosen':''} onClick={()=>selectShape(option.kind)}>{option.symbol}</button>)}</div>
             <small>Elegí una forma y arrastrá sobre la pizarra.</small>
-            <button type="button" role="menuitem" onClick={insertCartesian}>Ejes cartesianos X e Y cuadriculados</button>
+            <button data-workspace-write={nativeBoardMode() || undefined} type="button" role="menuitem" onClick={insertCartesian}>Ejes cartesianos X e Y cuadriculados</button>
           </div>}
         </div>
         <div className="toolbar-popover-anchor">
@@ -5006,10 +5016,10 @@ function App() {
           {openMenu==='calendar'&&<div className="toolbar-popover calendar-popover" role="menu" aria-label="Opciones de calendario">
             <button role="menuitem" onClick={()=>void openCalendar()}>Ver calendario</button>
             <button role="menuitem" onClick={()=>void openCalendar(true)}>Agregar evento</button>
-            <button role="menuitem" disabled={recognizing} onClick={()=>{setOpenMenu(null);setHandwrittenError('');void addSelectionToCalendar()}}>Agregar selección al calendario</button>
+            <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" disabled={recognizing} onClick={()=>{setOpenMenu(null);setHandwrittenError('');void addSelectionToCalendar()}}>Agregar selección al calendario</button>
           </div>}
         </div>
-        <button type="button" title="Agregar nota adhesiva (N)" aria-label="Agregar nota adhesiva" onClick={insertNote}><LuStickyNote/></button>
+        <button data-workspace-write={nativeBoardMode() || undefined} type="button" title="Agregar nota adhesiva (N)" aria-label="Agregar nota adhesiva" onClick={insertNote}><LuStickyNote/></button>
         <button type="button" title="Conectar objetos: arrastrá de uno a otro (C)" aria-label="Conectar objetos" aria-pressed={tool==='connector'}
           className={tool==='connector'?'active':''} onClick={()=>{selectTool('connector');setVisualEditor(null);setOpenMenu(null)}}><LuWorkflow/></button>
         <div className="toolbar-popover-anchor">
@@ -5031,8 +5041,8 @@ function App() {
         <input ref={excelInputRef} type="file" accept=".xlsx,.xlsm,.csv" multiple hidden onChange={onExcelFiles} />
         <span className="separator" />
         <div className="toolbar-history">
-          <button onClick={undo} title="Deshacer (Ctrl + Z)" aria-label="Deshacer">↶</button>
-          <button onClick={redo} title="Rehacer (Ctrl + Y / Ctrl + Shift + Z)" aria-label="Rehacer">↷</button>
+          <button data-workspace-write={nativeBoardMode() || undefined} onClick={undo} title="Deshacer (Ctrl + Z)" aria-label="Deshacer">↶</button>
+          <button data-workspace-write={nativeBoardMode() || undefined} onClick={redo} title="Rehacer (Ctrl + Y / Ctrl + Shift + Z)" aria-label="Rehacer">↷</button>
         </div>
       </div>
       {tableEditorId && (()=>{
@@ -5087,7 +5097,7 @@ function App() {
             <label>Repetir<select value={handwrittenEvent.recurrence} onChange={e => setHandwrittenEvent({ ...handwrittenEvent, recurrence: e.target.value as CalendarEvent['recurrence'] })}><option value="none">No repetir</option><option value="daily">Diariamente</option><option value="weekly">Semanalmente</option><option value="monthly">Mensualmente</option></select></label>
             <div className="handwriting-color-picker"><strong>Color</strong><div>{EVENT_COLORS.map(c => <button type="button" key={c} title={c} aria-label={`Color ${c}`} className={handwrittenEvent.color === c ? 'chosen' : ''} style={{ backgroundColor: c }} onClick={() => setHandwrittenEvent({ ...handwrittenEvent, color: c })}/>)}</div></div>
             <label>Notas<textarea rows={2} value={handwrittenEvent.notes} onChange={e => setHandwrittenEvent({ ...handwrittenEvent, notes: e.target.value })}/></label>
-            
+
             <div className="recognition-actions"><button type="submit" disabled={handwrittenBusy}>{handwrittenBusy ? 'Guardando...' : 'Guardar evento'}</button><button type="button" onClick={() => { setHandwrittenEvent(null); setHandwrittenError('') }}>Cancelar</button></div>
           </form>}
           {!handwrittenEvent && <button onClick={() => setHandwrittenError('')}>Cerrar</button>}

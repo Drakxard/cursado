@@ -1,5 +1,7 @@
 "use client"
 
+import { isNativeReadOnly } from '@/lib/native-workspace'
+
 import { SubjectHomeCard } from '@/components/subject-home-card'
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react"
@@ -1336,7 +1338,7 @@ export function SubjectWheel({
   const visibleSubjectIds = useMemo(() => visibleSubjects.map((subject) => subject.id), [visibleSubjects])
 
   useEffect(() => {
-    if (!LOCAL_STORAGE_MODE || !localWorkspaceReady) return
+    if (isNativeReadOnly() || !LOCAL_STORAGE_MODE || !localWorkspaceReady) return
     const subjects = Object.values(customSubjects).map(({ id, name, color }) => ({ id, name, color }))
     void enqueueLocalWidgetCatalog(subjects)
       .then(() => enqueueLocalNotebookWidgetTargets(subjects.map((subject) => subject.id)))
@@ -1387,7 +1389,7 @@ export function SubjectWheel({
           if (isCancelled) return
 
           const nextState = localResult.exists ? localResult.state : createEmptyWorkspaceTabsState()
-          if (!localResult.exists) {
+          if (!localResult.exists && !isNativeReadOnly()) {
             await saveLocalWorkspaceTabsState(nextState)
             if (isCancelled) return
           }
@@ -1457,7 +1459,7 @@ export function SubjectWheel({
 
     saveWorkspaceTabsState(nextState)
 
-    if (hasResolvedPersistentWorkspaceState) {
+    if (hasResolvedPersistentWorkspaceState && !isNativeReadOnly()) {
       setWorkspaceSaveStatus("saving")
       const canUseLocalWorkspace =
         LOCAL_STORAGE_MODE &&
@@ -1704,6 +1706,7 @@ export function SubjectWheel({
   }, [])
 
   const startLongPressDelete = useCallback((target: DeleteConfirmationTarget) => {
+    if (isNativeReadOnly()) return
     clearLongPressDeleteTimer()
     shouldSuppressLongPressClickRef.current = false
     longPressDeleteTimerRef.current = window.setTimeout(() => {
@@ -2353,6 +2356,7 @@ export function SubjectWheel({
   }, [activeContainerControlsId])
 
   const startContainerLongPress = (container: SubjectMaterialContainer) => {
+    if (isNativeReadOnly()) return
     if (container.kind !== "custom") return
     if (containerLongPressTimerRef.current != null) window.clearTimeout(containerLongPressTimerRef.current)
     suppressContainerClickRef.current = false
@@ -2726,6 +2730,7 @@ export function SubjectWheel({
   }, [])
 
   const forceSaveWorkspaceTabsLocally = useCallback(async () => {
+    if (isNativeReadOnly()) return
     const nextState = normalizeWorkspaceTabsState(workspaceTabsStateRef.current)
     saveWorkspaceTabsState(nextState)
     if (!LOCAL_STORAGE_MODE) {
@@ -4751,6 +4756,7 @@ export function SubjectWheel({
   }
 
   const handleShortcutPointerDown = (button: SubjectShortcutButton) => {
+    if (isNativeReadOnly()) return
     shouldSuppressShortcutClickRef.current = false
     clearShortcutLongPressTimer()
     shortcutLongPressTimerRef.current = window.setTimeout(() => {
@@ -6869,7 +6875,7 @@ export function SubjectWheel({
         <div className="flex flex-col gap-2" data-container-controls={container?.id}>
           <div className="flex min-h-8 items-center justify-between gap-2">
             {container?.kind === "custom" && editingContainerId === container.id ? (
-              <Input
+              <Input data-workspace-write={isNativeReadOnly() || undefined}
                 value={editingContainerName}
                 onChange={(event) => setEditingContainerName(event.target.value)}
                 onKeyDown={(event) => {
@@ -6910,12 +6916,12 @@ export function SubjectWheel({
             )}
             {container?.kind === "custom" && activeContainerControlsId === container.id && editingContainerId !== container.id ? (
               <div className="flex shrink-0 items-center gap-0.5" aria-label={`Opciones de ${container.name}`}>
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"
+                <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"
                   onClick={() => { setEditingContainerId(container.id); setEditingContainerName(container.name) }}
                   disabled={isSavingContainer} aria-label={`Editar ${container.name}`} title="Editar nombre">
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon"
+                <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" variant="ghost" size="icon"
                   className={cn("h-7 w-7 rounded-full", container.isPinned ? "text-foreground" : "text-muted-foreground/45")}
                   onClick={() => void toggleContainerPinned(container)} disabled={isSavingContainer}
                   aria-pressed={container.isPinned}
@@ -6923,12 +6929,12 @@ export function SubjectWheel({
                   title={container.isPinned ? "Desfijar" : "Fijar"}>
                   <Pin className={cn("h-3.5 w-3.5", container.isPinned && "fill-current")} />
                 </Button>
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"
+                <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"
                   onClick={() => void moveContainer(container, "up")}
                   disabled={isSavingContainer || containerGroupIndex <= 0} aria-label={`Subir ${container.name}`} title="Subir">
                   <ArrowUp className="h-3.5 w-3.5" />
                 </Button>
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"
+                <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"
                   onClick={() => void moveContainer(container, "down")}
                   disabled={isSavingContainer || containerGroupIndex < 0 || containerGroupIndex >= containerGroup.length - 1}
                   aria-label={`Bajar ${container.name}`} title="Bajar">
@@ -7040,7 +7046,7 @@ export function SubjectWheel({
                               >
                                 #{tag.name}
                               </button>
-                              <button
+                              <button data-workspace-write={isNativeReadOnly() || undefined}
                                 type="button"
                                 onClick={() => void materialTags.unassignTag(material.id, tag.id)}
                                 className="rounded-r-full px-1.5 py-0.5 text-[0.68rem] text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -7075,7 +7081,7 @@ export function SubjectWheel({
                           </Button>
                         ) : null
                       })()}
-                      <Button
+                      <Button data-workspace-write={isNativeReadOnly() || undefined}
                         type="button"
                         variant="ghost"
                         size="icon"
@@ -7270,17 +7276,17 @@ export function SubjectWheel({
   const calculateFontSize = (text: string, anglePerSegment: number) => {
     const baseSize = 14
     const textLength = text.split("\n").reduce((max, line) => Math.max(max, line.length), 0)
-    
+
     // Adjust based on text length
     let fontSize = baseSize
     if (textLength > 15) fontSize = 11
     else if (textLength > 12) fontSize = 12
     else if (textLength > 10) fontSize = 13
-    
+
     // Further adjust based on segment angle (narrower segments need smaller text)
     if (anglePerSegment < 60) fontSize = Math.max(10, fontSize - 2)
     else if (anglePerSegment < 75) fontSize = Math.max(11, fontSize - 1)
-    
+
     return fontSize
   }
 
@@ -7443,7 +7449,7 @@ export function SubjectWheel({
                   </button>
                 )
               })}
-              <button
+              <button data-workspace-write={isNativeReadOnly() || undefined}
                 type="button"
                 className="flex min-h-8 w-14 shrink-0 items-center justify-center rounded-full border border-dashed border-border bg-background/70 px-3 py-1.5 text-foreground transition-colors hover:bg-background/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 aria-label="Nueva pestaña"
@@ -7468,12 +7474,12 @@ export function SubjectWheel({
           </nav>
 
           <div className="pointer-events-auto ml-auto shrink-0">
-            <VoiceModeButton
+            {!isNativeReadOnly() && <VoiceModeButton
               active={isVoiceModeEnabled}
               label={isVoiceModeEnabled ? "Desactivar modo de voz" : "Activar modo de voz"}
               onClick={() => setIsVoiceModeEnabled((enabled) => !enabled)}
               onLongPress={() => setIsTtsTestOpen(true)}
-            />
+            />}
           </div>
         </div>
       </header>
@@ -7653,7 +7659,7 @@ export function SubjectWheel({
                 <Button variant="outline" onClick={() => { setIsAiOpen(false) }}>
                   Cancelar
                 </Button>
-                <Button
+                <Button data-workspace-write={isNativeReadOnly() || undefined}
                   onClick={handleAiSubmit}
                   disabled={!aiPrompt.trim() || isAiLoading}
                   className="bg-primary text-primary-foreground hover:bg-primary/90"
@@ -7702,7 +7708,7 @@ export function SubjectWheel({
           />
 
           <DialogFooter>
-            <Button type="button" onClick={createWorkspaceTab} disabled={!workspaceTabNameDraft.trim()}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" onClick={createWorkspaceTab} disabled={!workspaceTabNameDraft.trim()}>
               Crear
             </Button>
           </DialogFooter>
@@ -7775,7 +7781,7 @@ export function SubjectWheel({
           </div>
 
           <DialogFooter>
-            <Button type="button" onClick={saveCustomSubject} disabled={!customSubjectNameDraft.trim()}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" onClick={saveCustomSubject} disabled={!customSubjectNameDraft.trim()}>
               {editingCustomSubjectId ? "Guardar" : "Crear"}
             </Button>
           </DialogFooter>
@@ -7874,7 +7880,7 @@ export function SubjectWheel({
           />
           {droppedTextPdfError ? <p className="text-sm text-red-600">{droppedTextPdfError}</p> : null}
           <DialogFooter>
-            <Button
+            <Button data-workspace-write={isNativeReadOnly() || undefined}
               type="button"
               onClick={() => void createDroppedTextPdf()}
               disabled={!droppedTextPdfName.trim() || isCreatingTextPdf}
@@ -7903,10 +7909,10 @@ export function SubjectWheel({
           {synthesisDeleteError ? <p role="alert" className="text-sm text-red-600">{synthesisDeleteError}</p> : null}
           <DialogFooter className="gap-2 sm:flex-wrap">
             <Button variant="outline" disabled={isDeletingMaterialId !== null} onClick={() => setSynthesisDeleteTarget(null)}>Cancelar</Button>
-            <Button variant="destructive" disabled={isDeletingMaterialId !== null} onClick={() => {
+            <Button data-workspace-write={isNativeReadOnly() || undefined} variant="destructive" disabled={isDeletingMaterialId !== null} onClick={() => {
               if (synthesisDeleteTarget) void deleteMaterial(synthesisDeleteTarget, true)
             }}>Borrar PDF y desarrollo</Button>
-            <Button disabled={isDeletingMaterialId !== null} onClick={() => replacementPdfInputRef.current?.click()}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} disabled={isDeletingMaterialId !== null} onClick={() => replacementPdfInputRef.current?.click()}>
               {isDeletingMaterialId !== null ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Reemplazar PDF
             </Button>
           </DialogFooter>
@@ -7940,7 +7946,7 @@ export function SubjectWheel({
           />
           {containerError ? <p className="text-sm text-red-600">{containerError}</p> : null}
           <DialogFooter>
-            <Button type="button" onClick={() => void saveNewContainer()} disabled={!containerNameDraft.trim() || isSavingContainer}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" onClick={() => void saveNewContainer()} disabled={!containerNameDraft.trim() || isSavingContainer}>
               {isSavingContainer ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Crear
             </Button>
@@ -8074,7 +8080,7 @@ export function SubjectWheel({
 
             <label className="flex items-center justify-between gap-4 rounded-xl border border-border px-3 py-3">
               <span className="text-sm font-medium text-foreground">CheckUp hecho</span>
-              <Switch
+              <Switch data-workspace-write={isNativeReadOnly() || undefined}
                 checked={materialEditDraft.isCheckupDone}
                 onCheckedChange={(checked) =>
                   setMaterialEditDraft((previous) => ({ ...previous, isCheckupDone: checked }))
@@ -8090,7 +8096,7 @@ export function SubjectWheel({
             <Button type="button" variant="outline" onClick={closeMaterialEditDialog} disabled={isMaterialEditSaving}>
               Cancelar
             </Button>
-            <Button type="button" onClick={() => void saveMaterialEdit()} disabled={isMaterialEditSaving}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" onClick={() => void saveMaterialEdit()} disabled={isMaterialEditSaving}>
               {isMaterialEditSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Guardar
             </Button>
@@ -8300,7 +8306,7 @@ export function SubjectWheel({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="sm:justify-start">
-            <Button
+            <Button data-workspace-write={isNativeReadOnly() || undefined}
               type="button"
               onClick={() => void startNextWeek()}
               disabled={homeSelectedWeekNumber >= currentCalendarWeek + 1}
@@ -8351,7 +8357,7 @@ export function SubjectWheel({
                     </DialogTitle>
                   )}
                   {currentSubject ? (
-                    <Button
+                    <Button data-workspace-write={isNativeReadOnly() || undefined}
                       type="button"
                       variant="ghost"
                       size="icon"
@@ -8404,7 +8410,7 @@ export function SubjectWheel({
                           </Button>
                         )
                       })}
-                      <Button
+                      <Button data-workspace-write={isNativeReadOnly() || undefined}
                         type="button"
                         variant="outline"
                         className="h-8 w-8 px-0 text-base"
@@ -8462,7 +8468,7 @@ export function SubjectWheel({
                     </Button>
                   ) : null}
                   {practiceSectionView === "theory" ? (
-                    <Button
+                    <Button data-workspace-write={isNativeReadOnly() || undefined}
                       type="button"
                       variant="outline"
                       size="icon"
@@ -8524,7 +8530,7 @@ export function SubjectWheel({
 
                     return (
                       <article key={entry.id} className="relative rounded-2xl border border-border bg-card px-3 py-3 sm:px-4">
-                        <Button
+                        <Button data-workspace-write={isNativeReadOnly() || undefined}
                           type="button"
                           variant="ghost"
                           size="icon"
@@ -8549,7 +8555,7 @@ export function SubjectWheel({
                                   }
                                   className="h-9 max-w-xs"
                                 />
-                                <Button size="sm" onClick={() => void saveTitle(entry)} disabled={isSavingTitleId === entry.id}>
+                                <Button data-workspace-write={isNativeReadOnly() || undefined} size="sm" onClick={() => void saveTitle(entry)} disabled={isSavingTitleId === entry.id}>
                                   {isSavingTitleId === entry.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                                   Guardar
                                 </Button>
@@ -8560,14 +8566,14 @@ export function SubjectWheel({
                               </div>
                             ) : (
                               <div className="flex flex-wrap items-center gap-2 pr-8">
-                                <Checkbox
+                                <Checkbox data-workspace-write={isNativeReadOnly() || undefined}
                                   checked={entry.is_featured}
                                   onCheckedChange={() => void toggleFeaturedEntry(entry)}
                                   className="h-4 w-4"
                                 />
                                 <p className="text-xs font-medium text-foreground sm:text-sm">{getEntryDisplayTitle(entry)}</p>
                               {canMoveEntryToTheory(entry) ? (
-                                <Button
+                                <Button data-workspace-write={isNativeReadOnly() || undefined}
                                   size="sm"
                                   variant="outline"
                                   onClick={() => openMoveEntryDialog(entry)}
@@ -8576,7 +8582,7 @@ export function SubjectWheel({
                                   Llevar a teoria
                                 </Button>
                               ) : null}
-                              <Button size="icon" variant="ghost" onClick={() => startTitleEdit(entry)} className="h-8 w-8">
+                              <Button data-workspace-write={isNativeReadOnly() || undefined} size="icon" variant="ghost" onClick={() => startTitleEdit(entry)} className="h-8 w-8">
                                 <Pencil className="h-4 w-4 text-muted-foreground" />
                               </Button>
                             </div>
@@ -8590,7 +8596,7 @@ export function SubjectWheel({
                                   </a>
                                 </Button>
                               ))}
-                              <Button
+                              <Button data-workspace-write={isNativeReadOnly() || undefined}
                                 type="button"
                                 variant="outline"
                                 size="icon"
@@ -8645,12 +8651,12 @@ export function SubjectWheel({
                               >
                                 {isRevealed ? entry.answer_text : "Click para revelar la respuesta"}
                               </button>
-                              <Button variant="outline" onClick={() => startAnswerEdit(entry)} className="h-10 px-3">
+                              <Button data-workspace-write={isNativeReadOnly() || undefined} variant="outline" onClick={() => startAnswerEdit(entry)} className="h-10 px-3">
                                 Responder
                               </Button>
                             </div>
                           ) : (
-                            <Button variant="outline" onClick={() => startAnswerEdit(entry)} className="h-10 px-3">
+                            <Button data-workspace-write={isNativeReadOnly() || undefined} variant="outline" onClick={() => startAnswerEdit(entry)} className="h-10 px-3">
                               Responder
                             </Button>
                           )}
@@ -8683,7 +8689,7 @@ export function SubjectWheel({
                   practiceSectionView !== "theory" ? "pointer-events-none opacity-0" : ""
                 }`}
               >
-                <button
+                <button data-workspace-write={isNativeReadOnly() || undefined}
                   type="button"
                   onClick={() => {
                     if (practiceSectionView !== "theory") return
@@ -8709,7 +8715,7 @@ export function SubjectWheel({
                   {isRecording ? <Square className="h-8 w-8 sm:h-10 sm:w-10" /> : <Mic className="h-8 w-8 sm:h-10 sm:w-10" />}
                 </button>
 
-                <button
+                <button data-workspace-write={isNativeReadOnly() || undefined}
                   type="button"
                   onClick={() => {
                     if (practiceSectionView !== "theory") return
@@ -8799,7 +8805,7 @@ export function SubjectWheel({
                         Sin audio previo
                       </div>
                     )}
-                    <Button
+                    <Button data-workspace-write={isNativeReadOnly() || undefined}
                       type="button"
                       variant="outline"
                       className="h-12 border-border px-5 text-base text-foreground"
@@ -8846,7 +8852,7 @@ export function SubjectWheel({
                     </div>
                     {currentContinueMaterial ? (
                       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-lg text-foreground">
-                        <Checkbox
+                        <Checkbox data-workspace-write={isNativeReadOnly() || undefined}
                           checked={currentContinueMaterial.is_checkup_done}
                           onCheckedChange={(checked) => void toggleMaterialCheckup(currentContinueMaterial, Boolean(checked))}
                         />
@@ -8863,7 +8869,7 @@ export function SubjectWheel({
                           >
                             {currentContinueMaterial.file_name}
                           </a>
-                        <Button
+                        <Button data-workspace-write={isNativeReadOnly() || undefined}
                           type="button"
                           variant="ghost"
                           size="icon"
@@ -8899,7 +8905,7 @@ export function SubjectWheel({
 
                           return (
                             <article key={group.pairId} className="relative space-y-5 border-t border-border pt-5">
-                              <Button
+                              <Button data-workspace-write={isNativeReadOnly() || undefined}
                                 type="button"
                                 variant="ghost"
                                 size="icon"
@@ -8923,7 +8929,7 @@ export function SubjectWheel({
                                     }
                                     className="h-10 max-w-sm text-base"
                                   />
-                                  <Button size="sm" onClick={() => void saveTitle(titleEntry)} disabled={isSavingTitleId === titleEntry.id}>
+                                  <Button data-workspace-write={isNativeReadOnly() || undefined} size="sm" onClick={() => void saveTitle(titleEntry)} disabled={isSavingTitleId === titleEntry.id}>
                                     {isSavingTitleId === titleEntry.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                                   </Button>
                                   <Button size="sm" variant="outline" onClick={() => setEditingTitleId(null)}>
@@ -8933,7 +8939,7 @@ export function SubjectWheel({
                               ) : (
                                 <div className="flex flex-wrap items-center gap-2 pr-8 text-foreground">
                                   <p className="text-lg font-medium">{getEntryDisplayTitle(titleEntry)}</p>
-                                  <Button
+                                  <Button data-workspace-write={isNativeReadOnly() || undefined}
                                     size="sm"
                                     variant="outline"
                                     onClick={() => void promoteEntryToSubjectAnchor(titleEntry)}
@@ -8942,7 +8948,7 @@ export function SubjectWheel({
                                     Promover a ancla
                                   </Button>
                                   {continueMode === "practice" ? (
-                                    <Button
+                                    <Button data-workspace-write={isNativeReadOnly() || undefined}
                                       size="sm"
                                       variant="outline"
                                       onClick={() => openMoveEntryDialog(titleEntry)}
@@ -8951,7 +8957,7 @@ export function SubjectWheel({
                                       Llevar a teoria
                                     </Button>
                                   ) : null}
-                                  <Button size="icon" variant="ghost" onClick={() => startTitleEdit(titleEntry)} className="h-8 w-8">
+                                  <Button data-workspace-write={isNativeReadOnly() || undefined} size="icon" variant="ghost" onClick={() => startTitleEdit(titleEntry)} className="h-8 w-8">
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                 </div>
@@ -8990,10 +8996,10 @@ export function SubjectWheel({
                                       audio
                                     </Button>
                                   ) : null}
-                                  <Button variant="outline" onClick={() => startAudioPairEdit(group.questionEntry)} className="h-11 border-border px-4 text-base text-foreground">
+                                  <Button data-workspace-write={isNativeReadOnly() || undefined} variant="outline" onClick={() => startAudioPairEdit(group.questionEntry)} className="h-11 border-border px-4 text-base text-foreground">
                                     Editar audio
                                   </Button>
-                                  <Button variant="outline" onClick={() => startAnswerEdit(group.questionEntry)} className="h-11 border-border px-4 text-base text-foreground">
+                                  <Button data-workspace-write={isNativeReadOnly() || undefined} variant="outline" onClick={() => startAnswerEdit(group.questionEntry)} className="h-11 border-border px-4 text-base text-foreground">
                                     Editar texto
                                   </Button>
                                 </div>
@@ -9022,7 +9028,7 @@ export function SubjectWheel({
 
                         return (
                           <article key={`single-${entry.id}-${index}`} className="relative space-y-3 border-t border-border pt-5">
-                            <Button
+                            <Button data-workspace-write={isNativeReadOnly() || undefined}
                               type="button"
                               variant="ghost"
                               size="icon"
@@ -9045,7 +9051,7 @@ export function SubjectWheel({
                                   }
                                   className="h-10 max-w-sm text-base"
                                 />
-                                <Button size="sm" onClick={() => void saveTitle(entry)} disabled={isSavingTitleId === entry.id}>
+                                <Button data-workspace-write={isNativeReadOnly() || undefined} size="sm" onClick={() => void saveTitle(entry)} disabled={isSavingTitleId === entry.id}>
                                   {isSavingTitleId === entry.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                                 </Button>
                                 <Button size="sm" variant="outline" onClick={() => setEditingTitleId(null)}>
@@ -9056,7 +9062,7 @@ export function SubjectWheel({
                               <div className="flex flex-wrap items-center gap-2 pr-8 text-foreground">
                                 <p className="text-lg font-medium">{getEntryDisplayTitle(entry)}</p>
                                 {continueMode === "practice" ? (
-                                  <Button
+                                  <Button data-workspace-write={isNativeReadOnly() || undefined}
                                     size="sm"
                                     variant="outline"
                                     onClick={() => openMoveEntryDialog(entry)}
@@ -9065,7 +9071,7 @@ export function SubjectWheel({
                                     Llevar a teoria
                                   </Button>
                                 ) : null}
-                                <Button size="icon" variant="ghost" onClick={() => startTitleEdit(entry)} className="h-8 w-8">
+                                <Button data-workspace-write={isNativeReadOnly() || undefined} size="icon" variant="ghost" onClick={() => startTitleEdit(entry)} className="h-8 w-8">
                                   <Pencil className="h-4 w-4" />
                                 </Button>
                               </div>
@@ -9073,7 +9079,7 @@ export function SubjectWheel({
 
                             <p className="text-base leading-7 text-foreground">{entry.transcript_text}</p>
 
-                            <button
+                            <button data-workspace-write={isNativeReadOnly() || undefined}
                               type="button"
                               onClick={() => {
                                 if (!entry.answer_text) {
@@ -9096,11 +9102,11 @@ export function SubjectWheel({
 
                             <div className="flex flex-wrap items-center gap-2">
                               {entry.pair_id ? (
-                                <Button variant="outline" onClick={() => startAudioPairEdit(entry)} className="h-11 border-border px-4 text-base text-foreground">
+                                <Button data-workspace-write={isNativeReadOnly() || undefined} variant="outline" onClick={() => startAudioPairEdit(entry)} className="h-11 border-border px-4 text-base text-foreground">
                                   Completar dupla
                                 </Button>
                               ) : null}
-                              <Button variant="outline" onClick={() => startAnswerEdit(entry)} className="h-11 border-border px-4 text-base text-foreground">
+                              <Button data-workspace-write={isNativeReadOnly() || undefined} variant="outline" onClick={() => startAnswerEdit(entry)} className="h-11 border-border px-4 text-base text-foreground">
                                 {entry.pair_id ? "Editar texto" : "Responder"}
                               </Button>
                               {entryHasAudio(entry) ? (
@@ -9140,7 +9146,7 @@ export function SubjectWheel({
                     No hay un PDF de practica activo para guardar audio o texto.
                   </div>
                 ) : null}
-                <button
+                <button data-workspace-write={isNativeReadOnly() || undefined}
                   type="button"
                   onClick={() => {
                     if (!currentSubject || !currentContinueMaterial) return
@@ -9168,7 +9174,7 @@ export function SubjectWheel({
                   )}
                 </button>
 
-                <button
+                <button data-workspace-write={isNativeReadOnly() || undefined}
                   type="button"
                   onClick={() => {
                     if (!currentSubject || !currentContinueMaterial) return
@@ -9331,7 +9337,7 @@ export function SubjectWheel({
             <Button variant="outline" onClick={closeAnswerDialog}>
               Cancelar
             </Button>
-            <Button
+            <Button data-workspace-write={isNativeReadOnly() || undefined}
               onClick={() => (editingEntry ? void saveAnswer(editingEntry) : void saveManualEntry())}
               disabled={isSavingAnswerId === (editingEntry?.id ?? -1)}
             >
@@ -9381,7 +9387,7 @@ export function SubjectWheel({
             <Button variant="outline" onClick={cancelReview} disabled={isUploadingAudio}>
               Cancelar
             </Button>
-            <Button onClick={() => void confirmReview()} disabled={!reviewAudio || isUploadingAudio}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} onClick={() => void confirmReview()} disabled={!reviewAudio || isUploadingAudio}>
               {isUploadingAudio ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Confirmar
             </Button>
@@ -9421,7 +9427,7 @@ export function SubjectWheel({
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card/40 px-4 py-3">
                 <p className="text-sm text-muted-foreground">Ajusta el sentido antes de confirmar.</p>
-                <Button type="button" variant="outline" onClick={swapAudioPairDraftRoles} disabled={isUploadingAudio || isRecording}>
+                <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" variant="outline" onClick={swapAudioPairDraftRoles} disabled={isUploadingAudio || isRecording}>
                   <RotateCcw className="h-4 w-4" />
                   Invertir roles
                 </Button>
@@ -9439,7 +9445,7 @@ export function SubjectWheel({
                           {isThisRecording ? "Grabando..." : slot ? (slot.source === "persisted" && !slot.blob ? "Audio guardado" : "Audio listo") : "Sin audio"}
                         </p>
                       </div>
-                      <Button
+                      <Button data-workspace-write={isNativeReadOnly() || undefined}
                         type="button"
                         variant="outline"
                         onClick={() => void startAudioPairSlotRecording(role)}
@@ -9473,7 +9479,7 @@ export function SubjectWheel({
                 <Button variant="outline" onClick={cancelAudioPairReview} disabled={isUploadingAudio}>
                   Cancelar
                 </Button>
-                <Button
+                <Button data-workspace-write={isNativeReadOnly() || undefined}
                   onClick={() => void confirmAudioPairReview()}
                   disabled={(!audioPairDraft.slots.question && !audioPairDraft.slots.answer) || isUploadingAudio || isRecording}
                 >
@@ -9530,7 +9536,7 @@ export function SubjectWheel({
             <Button variant="outline" onClick={() => setIsLinkDialogOpen(false)} disabled={isSavingLink}>
               Cancelar
             </Button>
-            <Button onClick={() => void saveEntryLink()} disabled={isSavingLink || !linkDraft.label.trim() || !linkDraft.url.trim()}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} onClick={() => void saveEntryLink()} disabled={isSavingLink || !linkDraft.label.trim() || !linkDraft.url.trim()}>
               {isSavingLink ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Guardar
             </Button>
@@ -9578,7 +9584,7 @@ export function SubjectWheel({
                 Cambia automáticamente al navegar por días o semanas.
               </p>
             </div>
-            <Switch
+            <Switch data-workspace-write={isNativeReadOnly() || undefined}
               id="shortcut-section-scoped"
               checked={shortcutSectionScopedDraft}
               onCheckedChange={(checked) => {
@@ -9608,13 +9614,13 @@ export function SubjectWheel({
           </div>
 
           <DialogFooter>
-            <Button variant="destructive" onClick={() => void deleteCurrentSubjectShortcut()} disabled={isSavingShortcut}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} variant="destructive" onClick={() => void deleteCurrentSubjectShortcut()} disabled={isSavingShortcut}>
               Borrar
             </Button>
             <Button variant="outline" onClick={closeShortcutDialog} disabled={isSavingShortcut}>
               Cancelar
             </Button>
-            <Button onClick={() => void saveSubjectShortcut()} disabled={isSavingShortcut || !shortcutDraft.trim()}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} onClick={() => void saveSubjectShortcut()} disabled={isSavingShortcut || !shortcutDraft.trim()}>
               {isSavingShortcut ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Guardar
             </Button>
@@ -9630,8 +9636,8 @@ export function SubjectWheel({
           </DialogHeader>
           <Input value={shortcutNameDraft} onChange={(event) => setShortcutNameDraft(event.target.value)} placeholder="Nombre" autoFocus />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsShortcutNameDialogOpen(false)} disabled={isSavingShortcut}>Cancelar</Button>
-            <Button onClick={() => void createSubjectShortcut()} disabled={isSavingShortcut || !shortcutNameDraft.trim()}>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} variant="outline" onClick={() => setIsShortcutNameDialogOpen(false)} disabled={isSavingShortcut}>Cancelar</Button>
+            <Button data-workspace-write={isNativeReadOnly() || undefined} onClick={() => void createSubjectShortcut()} disabled={isSavingShortcut || !shortcutNameDraft.trim()}>
               {isSavingShortcut ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Crear
             </Button>
@@ -9967,7 +9973,7 @@ export function SubjectWheel({
                             <div className="space-y-3">
                               <div className="flex flex-wrap gap-2">
                                 {socraticTurn.questions.map((question, index) => (
-                                  <Button
+                                  <Button data-workspace-write={isNativeReadOnly() || undefined}
                                     key={`${socraticTurn.turnId}-play-${index}`}
                                     type="button"
                                     variant="outline"
@@ -10010,7 +10016,7 @@ export function SubjectWheel({
                                 <div>
                                   <p className="text-sm text-foreground">{socraticCurrentPair.answerTitle}</p>
                                 </div>
-                                <Button
+                                <Button data-workspace-write={isNativeReadOnly() || undefined}
                                   type="button"
                                   onClick={() => void handleSocraticRevealAnswer()}
                                   disabled={isSocraticRevealing}
@@ -10031,7 +10037,7 @@ export function SubjectWheel({
                             </div>
 
                             <div className="flex justify-end">
-                              <Button
+                              <Button data-workspace-write={isNativeReadOnly() || undefined}
                                 type="button"
                                 variant="outline"
                                 onClick={() => void handleSocraticNextConcept()}
@@ -10155,7 +10161,7 @@ export function SubjectWheel({
               <div className="mx-auto mb-4 flex w-full max-w-5xl items-center justify-between gap-3">
                 {practiceLaunchView === "exercises" ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Switch
+                    <Switch data-workspace-write={isNativeReadOnly() || undefined}
                       checked={dialogShowAllSubjectsForDay}
                       onCheckedChange={handleShowAllSubjectsChange}
                       aria-label="Mostrar todas las materias del dia"
@@ -10238,7 +10244,7 @@ export function SubjectWheel({
                             : "border-border bg-muted/50 hover:border-border hover:bg-card"
                         }`}
                       >
-                        <Checkbox checked={practiceFilters.random} className="mt-0.5 pointer-events-none" />
+                        <Checkbox data-workspace-write={isNativeReadOnly() || undefined} checked={practiceFilters.random} className="mt-0.5 pointer-events-none" />
                         <span className="space-y-1">
                           <span className="block text-sm font-semibold text-foreground">Aleatorio</span>
                           <span className="block text-xs text-muted-foreground">Mezcla el orden de las dudas cargadas.</span>
@@ -10260,7 +10266,7 @@ export function SubjectWheel({
                             : "border-border bg-muted/50 hover:border-border hover:bg-card"
                         }`}
                       >
-                        <Checkbox checked={practiceFilters.unanswered} className="mt-0.5 pointer-events-none" />
+                        <Checkbox data-workspace-write={isNativeReadOnly() || undefined} checked={practiceFilters.unanswered} className="mt-0.5 pointer-events-none" />
                         <span className="space-y-1">
                           <span className="block text-sm font-semibold text-foreground">Sin respuesta</span>
                           <span className="block text-xs text-muted-foreground">Solo dudas que aun no tienen respuesta.</span>
@@ -10282,7 +10288,7 @@ export function SubjectWheel({
                             : "border-border bg-muted/50 hover:border-border hover:bg-card"
                         }`}
                       >
-                        <Checkbox checked={practiceFilters.erre} className="mt-0.5 pointer-events-none" />
+                        <Checkbox data-workspace-write={isNativeReadOnly() || undefined} checked={practiceFilters.erre} className="mt-0.5 pointer-events-none" />
                         <span className="space-y-1">
                           <span className="block text-sm font-semibold text-foreground">Erre</span>
                           <span className="block text-xs text-muted-foreground">Solo dudas marcadas como erre.</span>
@@ -10422,14 +10428,14 @@ export function SubjectWheel({
 
                           {isAnswerRevealed && (
                             <div className="grid gap-3 sm:grid-cols-2">
-                              <Button
+                              <Button data-workspace-write={isNativeReadOnly() || undefined}
                                 className="h-12 bg-green-600 text-base text-white hover:bg-green-700"
                                 onClick={() => handlePracticeAnswer("bien")}
                               >
                                 <Check className="mr-2 h-4 w-4" />
                                 Bien
                               </Button>
-                              <Button
+                              <Button data-workspace-write={isNativeReadOnly() || undefined}
                                 className="h-12 bg-red-500 text-base text-white hover:bg-red-600"
                                 onClick={() => handlePracticeAnswer("erre")}
                               >

@@ -1,4 +1,7 @@
+import { isNativeReadOnly, nativePdfHref } from '../native-workspace.ts'
+
 export function buildCronogramaViewerHref(fileName: string, workspaceFileId?: string | null) {
+  if (isNativeReadOnly() && workspaceFileId) return nativePdfHref(workspaceFileId, fileName)
   const isLocalWorkspaceFile = Boolean(workspaceFileId?.startsWith("workspace://"))
   const searchParams = new URLSearchParams({
     resourceType: "cronograma",

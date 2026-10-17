@@ -1,5 +1,7 @@
 "use client"
 
+import { isNativeReadOnly } from '@/lib/native-workspace'
+
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from "react"
 import { Button } from "@/components/progress-original/button"
 import { Input } from "@/components/progress-original/input"
@@ -15,6 +17,7 @@ function HoldableTaskRow({ children, label, onHold, onHover }: { children: React
   return <div className="relative overflow-hidden bg-card border rounded-lg shadow-sm" role="group" aria-label={`Fila ${label}`} tabIndex={0}
     onMouseEnter={() => onHover(true)} onMouseLeave={() => { onHover(false); cancel() }}
     onPointerDown={event => {
+      if (isNativeReadOnly()) return
       if (!event.isPrimary || event.button !== 0 || (event.target as Element).closest('button, input, textarea, select, a, [data-row-activation-stop="true"]')) return
       cancel()
       origin.current = { x: event.clientX, y: event.clientY }
@@ -25,6 +28,7 @@ function HoldableTaskRow({ children, label, onHold, onHover }: { children: React
     onPointerUp={cancel} onPointerCancel={cancel} onLostPointerCapture={cancel}
     onContextMenu={event => { if (!(event.target as Element).closest('button, input, textarea, select, a, [data-row-activation-stop="true"]')) event.preventDefault() }}
     onKeyDown={event => {
+      if (isNativeReadOnly()) return
       if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return
       event.preventDefault()
       if (!event.repeat) { cancel(); timer.current = setTimeout(() => { timer.current = null; onHold() }, 650) }
@@ -100,6 +104,7 @@ function TopicChip({ topic, onRemove, onOpen }: { topic: string; onRemove: () =>
     className="flex min-h-[4.5rem] min-w-0 items-center justify-center break-words rounded-[1.25rem] bg-green-500 px-4 py-3 text-center text-[1.75rem] leading-tight text-white cursor-pointer select-none touch-pan-y transition-colors hover:bg-green-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     data-row-activation-stop="true"
     onPointerDown={event => {
+      if (isNativeReadOnly()) return
       if (!event.isPrimary || event.button !== 0) return
       cancel()
       held.current = false
@@ -116,6 +121,7 @@ function TopicChip({ topic, onRemove, onOpen }: { topic: string; onRemove: () =>
     onClick={() => { if (!held.current) onOpen() }}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
+      if (isNativeReadOnly()) return
       if ((event.key === " " || event.key === "Enter") && !event.repeat) {
         event.preventDefault()
         cancel()
@@ -312,7 +318,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
     })
   }, [active])
   useEffect(() => {
-    if (!loaded.current || !rootHandle) return
+    if (isNativeReadOnly() || !loaded.current || !rootHandle) return
     const today = normalizeDate(new Date())
     const tasks = tables[0].tasks.map(task => {
       const due = new Date(today)
@@ -323,7 +329,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
     })
     queue.current = queue.current.catch(() => {}).then(() => writeImportantTasks(rootHandle, tasks)).then(() => setStorageError("")).catch(error => setStorageError(String(error)))
   }, [tables, rootHandle])
-  const changeTask = (id: string, patch: Partial<TaskItem>) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, ...patch } : task) }])
+  const changeTask = (id: string, patch: Partial<TaskItem>) => { if (!isNativeReadOnly()) setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, ...patch } : task) }]) }
   const saveTask = async (id: string) => { changeTask(id, { text: editText }); setEditingId(null); setEditText("") }
   const addImportantTask = () => setTables(prev => [{ ...prev[0], tasks: [...prev[0].tasks, { id: crypto.randomUUID(), text: "", days: 7, numerator: 0, denominator: 7, topics: [] }] }])
   const removeImportantTask = (id: string) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.filter(task => task.id !== id) }])
@@ -924,6 +930,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                         className="inline-flex min-h-[2.5rem] items-center rounded px-2 text-left text-foreground transition-colors hover:text-muted-foreground"
                         data-row-activation-stop="true"
                         onClick={(event) => {
+                          if (isNativeReadOnly()) return
                           event.preventDefault()
                           setEditingId(task.id)
                           setEditText(task.text)
@@ -952,7 +959,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                     placeholder="Agregar tema..."
                     className="w-32 h-7 bg-white/80 backdrop-blur-sm text-xs"
                     data-row-activation-stop="true"
-                  /> : <button
+                  /> : <button data-workspace-write={isNativeReadOnly() || undefined}
                     type="button"
                     aria-label="Agregar tema"
                     title="Agregar tema"
@@ -977,7 +984,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
 
         {currentTable.title === "Importantes" && (
           <div className="flex justify-center mt-8">
-            <Button onClick={addImportantTask} className="bg-blue-500 hover:bg-blue-600">
+            <Button data-workspace-write={isNativeReadOnly() || undefined} onClick={addImportantTask} className="bg-blue-500 hover:bg-blue-600">
               Agregar
             </Button>
           </div>

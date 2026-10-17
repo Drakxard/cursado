@@ -68,16 +68,38 @@ La falta de conexión o espacio deja disponibles los archivos ya descargados.
 emitidas vencen en dos minutos y las copias locales pueden seguir leyéndose.
 **Quitar biblioteca** desde el celular elimina su descarga local.
 
-## Recursos compartidos de interfaz
+## Cursado original dentro de Android
 
-`public/library` contiene el HTML, CSS y navegación de lectura empaquetados en el
-APK. La preparación extrae las mismas variables de temas de `app/globals.css`,
-los íconos del inicio y el componente circular de materias que usa Estudio.
-Pizarra reutiliza las formas, tablas y gráficos del editor, con cámara y zoom de
-lectura. Los PDF usan el mismo `public/pdfjs/web/viewer.html` de Cursado, con su
-barra, búsqueda, selección, miniaturas y zoom; el modo `libraryReadOnly=1`
-desactiva edición y scripting de PDF. Verlo se abre en otra WebView sin puente
-nativo ni acceso a la red. No se requiere regenerar contenido con IA.
+La primera pestaña ejecuta la entrada sin conexión de Cursado, con los componentes
+originales de Inicio, Estudio, Síntesis y Pizarra. El lector separado anterior se
+retiró. La entrada usa el adaptador de navegación de `native-web` en lugar del
+servidor de Next.js, conserva los estilos originales y usa el mismo PDF.js.
+
+`CursadoNative` versión 1 entrega el inventario y las acciones de vinculación y
+descarga. `lib/native-workspace.ts` presenta una carpeta virtual de solo lectura:
+enumera las rutas publicadas y lee `/files/<revision>/<id>`. Android resuelve cada
+identificador contra los blobs verificados de esa revisión; no entrega rutas del
+sistema ni credenciales. No se solicitan carpeta o `User.Services`, no se ejecutan
+migraciones ni se publican cambios desde el celular. Las operaciones de escritura
+fallan aunque se intenten fuera de los controles ocultos de la interfaz.
+
+Pizarra usa su biblioteca y lienzo originales con un proveedor de documentos
+sincronizados. `boards/library.json` conserva nombres y carpetas; los documentos
+referencian sus imágenes por rutas publicadas. Los inventarios anteriores siguen
+siendo legibles; una nueva publicación desde la PC incorpora la estructura de
+carpetas. Las preferencias de navegación y apariencia permanecen en el celular.
+
+Los PDF usan `libraryReadOnly=1`, que desactiva edición y scripting. Los documentos
+HTML guardados se abren en otra WebView sin puente nativo ni acceso a la red.
+
+Cada compilación web genera `public/native-web/current.json` y los recursos de su
+revisión en `public/native-web/releases/<revision>/`. El manifiesto público incluye
+la versión del puente y tamaño/SHA-256 de cada archivo, sin documentos personales.
+Android obtiene los paquetes únicamente del origen HTTPS de la biblioteca,
+rechaza rutas inseguras, redirecciones, versiones incompatibles y tamaños excesivos,
+y activa la interfaz solo después de verificar todos sus recursos. Una descarga
+fallida conserva la interfaz anterior. Al volver a abrir la app se usa la nueva
+versión; las actualizaciones de archivos y de interfaz son independientes.
 
 ## Configuración y publicación del APK
 
@@ -97,7 +119,7 @@ pizarras compartidas del servidor. Las eliminaciones desaparecen del catálogo;
 las revisiones anteriores se retienen para finalizar descargas en curso.
 
 InScreen fija el commit de este repositorio en `.github/cursado-reader-ref`.
-GitHub Actions prepara los recursos compartidos, prueba el lector en Chrome
+GitHub Actions prepara una interfaz inicial sin conexión, prueba los componentes en Chrome
 móvil, ejecuta pruebas/lint de Android y compila el APK. La etiqueta `vX.Y.Z` debe
 coincidir con `versionName`; el workflow existente conserva la firma y publica
 `InScreenMic.apk` en GitHub Releases. No hace falta compilar Android en la PC.
@@ -105,8 +127,8 @@ coincidir con `versionName`; el workflow existente conserva la firma y publica
 Validación local de la interfaz, sin compilar Android:
 
 ```powershell
-node scripts/prepare-workspace-library.mjs ../InScreen/modules/library
-node --test tests/workspace-library.browser.mjs
+node scripts/build-native-web.mjs
+node --test tests/native-web.browser.mjs
 npm.cmd run typecheck
 npm.cmd test
 ```

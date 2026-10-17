@@ -1,5 +1,7 @@
 "use client"
 
+import { isNativeReadOnly } from '@/lib/native-workspace'
+
 import { useEffect, useRef, useState } from "react"
 
 import { fetchDailySession, saveDailySession } from "@/lib/daily-study-client"
@@ -58,7 +60,7 @@ export function useDailySessionState<TSubject extends SubjectLike>(params: {
   const hasLoadedOnce = useRef(false)
 
   useEffect(() => registerHomeSave(async () => {
-    if (!enabled || !readyToSync.current) return
+    if (isNativeReadOnly() || !enabled || !readyToSync.current) return
     await saveDailySession({
       date: currentDateKey,
       activeSubjectIds: activeSubjects.map(subject => subject.id),
@@ -140,7 +142,7 @@ export function useDailySessionState<TSubject extends SubjectLike>(params: {
   ])
 
   useEffect(() => {
-    if (!enabled) return
+    if (isNativeReadOnly() || !enabled) return
     if (!readyToSync.current) return
 
     let cancelled = false

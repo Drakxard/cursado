@@ -6,6 +6,7 @@ __v0_jsx-dev-runtime.ts
 # Common ignores
 /public/pizarra/
 /public/library-reader/
+/public/native-web/
 /.cache/
 /test-results/
 /playwright-report/

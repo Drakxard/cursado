@@ -1,5 +1,7 @@
 "use client"
 
+import { isNativeReadOnly } from './native-workspace.ts'
+
 const WORKSPACE_DB_NAME = "local-workspace"
 const WORKSPACE_DB_VERSION = 1
 const WORKSPACE_STORE_NAME = "workspace"
@@ -258,6 +260,7 @@ export async function requestWorkspacePermission(handle: FileSystemDirectoryHand
 }
 
 export async function ensureWorkspaceSubdirectories(rootHandle: FileSystemDirectoryHandle) {
+  if (isNativeReadOnly()) return
   await Promise.all(
     ["cronograma", "teoria", "practica", "audio", "manifests"].map((directoryName) =>
       rootHandle.getDirectoryHandle(directoryName, { create: true })

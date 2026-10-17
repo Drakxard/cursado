@@ -27,6 +27,8 @@ const nextConfig = {
   },
   async headers() {
     return [
+      { source: '/native-web/current.json', headers: [{ key: 'Cache-Control', value: 'no-cache' }] },
+      { source: '/native-web/releases/:path*', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
       { source: '/pizarra/sw.js', headers: [{ key: 'Cache-Control', value: 'no-cache' }] },
       { source: '/pizarra/manifest.webmanifest', headers: [{ key: 'Cache-Control', value: 'no-cache' }] },
       { source: '/pizarra/api/:path*', headers: [{ key: 'Cache-Control', value: 'private, no-store' }] },

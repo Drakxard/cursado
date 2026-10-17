@@ -12,6 +12,11 @@ test('publication excludes credentials, technical manifests, backups and travers
   for (const path of ['manifests/materials/calculo/week-1.json', 'manifests/entries/calculo/week-1.json', 'manifests/sintesis/calculo/semana-1/workspace.json', 'sintesis/images/image.png', 'manifests/pdf-explanations/key/id.html', 'teoria/Cálculo/synchronization.pdf', 'boards/scene.json', 'boards/asset.bin']) assert.equal(isLibraryPath(path), true, path)
 })
 test('manifest validates references, unique paths, identifiers and sizes', () => {
+  assert.equal(isLibraryPath('boards/library.json'),true)
+  assert.equal(isLibraryPath('manifests/sessions.json'),true)
+  assert.equal(isLibraryPath('progreso/importantes.json'),true)
+  assert.equal(isLibraryPath('progreso/pizarras/topic-test.json'),true)
+  assert.equal(isLibraryPath('progreso/User.Services'),false)
   assert.equal(validateLibraryManifest(manifest()).workspaceId, workspaceId)
   assert.throws(() => libraryId('../some-other-workspace'))
   const duplicate = manifest(); duplicate.files.push({ ...duplicate.files[0] }); assert.throws(() => validateLibraryManifest(duplicate))

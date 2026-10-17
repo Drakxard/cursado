@@ -47,6 +47,8 @@ jobs:
       - name: Conexión R2 guardada y guía ilustrada
         run: node --test --experimental-strip-types tests/workspace-library-panel.browser.mts
       - run: npm run build
+      - name: Interfaz original de Cursado en Android sin conexión
+        run: node --test tests/native-web.browser.mjs
       - name: Pruebas del servidor Python con base temporal
         run: python pizarraproyecto-main/tests/hosting_namespace.test.py
       - name: Navegación, sesiones, guardado y modo sin conexión

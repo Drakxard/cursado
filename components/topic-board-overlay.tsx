@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { isNativeReadOnly } from '@/lib/native-workspace'
 
 export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
   boardId: string
@@ -20,7 +21,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
       if (event.origin !== location.origin || event.source !== frame.current?.contentWindow || event.data?.boardId !== boardId) return
       if (event.data.type === "topic-board:request-init") {
         try {
-          frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle }, location.origin)
+          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle }, location.origin)
         } catch (reason) { setError(String(reason)) }
       }
       if (event.data.type === "topic-board:ready") { setReady(true); frame.current?.focus() }
@@ -35,6 +36,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
     }
   }, [boardId, name, rootHandle, onClose])
   const close = () => {
+    if (isNativeReadOnly()) { onClose(); return }
     if (!ready) { onClose(); return }
     setClosing(true)
     setError("")
@@ -51,7 +53,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
     <iframe ref={frame} title={`Pizarra de ${name}`} src={`/pizarra/?topicBoard=${encodeURIComponent(boardId)}`} className="min-h-0 w-full flex-1 border-0"
       onLoad={() => {
         try {
-          frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle }, location.origin)
+          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle }, location.origin)
         } catch (reason) { setError(String(reason)) }
       }} />
   </div>

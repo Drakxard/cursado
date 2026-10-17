@@ -1,4 +1,5 @@
 import { PIZARRA_API_ROOT } from './backend'
+import { nativeBoardMode, nativeBoardLibrary, loadNativeBoard, loadNativeAsset, readOnlyError } from './nativeWorkspace'
 import type { Point, Stroke, TextItem, MediaItem, BoardData } from './storage/database'
 import { deviceDB, isPrivate, newLocalId, emptyContent, readDeviceBoard, writeDeviceBoard, localLibrary, migrateLegacy } from './storage/device'
 import type { DeviceBoard } from './storage/device'
@@ -74,6 +75,7 @@ export function getCommittedBoardContent() {
   return committed?.key===cacheKey(activeId)?structuredClone(committed.content):null
 }
 export async function getLibrary() {
+  if (nativeBoardMode()) return nativeBoardLibrary()
   await migrateLegacy()
   const local = await localLibrary()
   let remote: { folders: Folder[]; boards: BoardInfo[] } = { folders: [], boards: [] }
@@ -106,11 +108,13 @@ export async function getLibrary() {
       folder_id:placements&&Object.hasOwn(placements,b.id)?placements[b.id]:b.folder_id, storage: 'shared' as const }))] }
 }
 export async function addFolder(name: string) {
+  if (nativeBoardMode()) readOnlyError()
   const folder = { id: newLocalId(), name }
   await (await deviceDB).put('folders', folder)
   return folder
 }
 export async function removeFolder(id: string) {
+  if (nativeBoardMode()) readOnlyError()
   if (!isPrivate(id)) return request(`/api/folders/${id}`, {method: 'DELETE'})
   const db = await deviceDB
   const tx = db.transaction(['boards', 'folders'], 'readwrite')
@@ -125,6 +129,7 @@ export async function removeFolder(id: string) {
   }
 }
 export async function addBoard(name: string, folder_id: string | null, storage: 'private' | 'shared' = 'private') {
+  if (nativeBoardMode()) readOnlyError()
   if (storage === 'shared') {
     if (!remoteEnabled) throw new Error('Ingresá a tu cuenta y conectá el servidor para crear una compartida.')
     return request<{id:string}>('/api/boards', json('POST', {name,folder_id: folder_id && !isPrivate(folder_id) ? folder_id : null}))
@@ -135,6 +140,7 @@ export async function addBoard(name: string, folder_id: string | null, storage: 
   return { id }
 }
 export async function renameBoard(id: string, name: string, folder_id: string | null) {
+  if (nativeBoardMode()) readOnlyError()
   if (!isPrivate(id)) {
     const db=await deviceDB,key=`placements:${account}`
     const placements=(await db.get('meta',key)??{}) as Record<string,string|null>
@@ -154,6 +160,7 @@ export async function renameBoard(id: string, name: string, folder_id: string | 
   await writeDeviceBoard({ ...board, name, folder_id })
 }
 export async function removeBoard(id: string) {
+  if (nativeBoardMode()) readOnlyError()
   if (!isPrivate(id)) {
     await request(`/api/boards/${id}`, {method:'DELETE'})
     const db=await deviceDB,tx=db.transaction('meta','readwrite'),key=`library:${account}`
@@ -214,6 +221,11 @@ async function cacheRemote(result: { id: string; name?: string; version: number;
 // localStorage. La pizarra «principal» puede haber sido borrada o renombrada.
 // Recuperamos una existente en lugar de bloquear completamente la aplicación.
 export async function loadBoard(): Promise<BoardContentWithExtras | undefined> {
+  if (nativeBoardMode()) {
+    const library = nativeBoardLibrary()
+    if (!library.boards.some(board => board.id === activeId)) activeId = library.boards[0]?.id || ''
+    return loadNativeBoard(activeId)
+  }
   const library = await getLibrary()
   if (!library.boards.some(b => b.id === activeId)) {
     selectBoard(library.boards[0]?.id ?? (await addBoard('Mi pizarra privada', null)).id)
@@ -246,6 +258,7 @@ export async function loadBoard(): Promise<BoardContentWithExtras | undefined> {
 }
 
 export async function saveBoard(content: BoardContentWithExtras) {
+  if (nativeBoardMode()) readOnlyError()
   const id = activeId
   const key = cacheKey(id)
   const confirmed=committed?.key===key?committed:null
@@ -349,6 +362,7 @@ function uploadPendingAsset(id:string):Promise<void> {
   return upload
 }
 export async function saveAsset(id: string, blob: Blob) {
+  if (nativeBoardMode()) readOnlyError()
   await (await deviceDB).put('assets', blob, assetKey(id))
   if (!privateBoard()) {
     await (await deviceDB).put('meta', true, `upload:${assetKey(id)}`)
@@ -358,6 +372,7 @@ export async function saveAsset(id: string, blob: Blob) {
   }
 }
 export async function loadAsset(id: string): Promise<Blob | undefined> {
+  if (nativeBoardMode()) return loadNativeAsset(id)
   const key=assetKey(id)
   const pending=assetDownloads.get(key)
   if(pending)return pending
@@ -378,6 +393,7 @@ async function readAsset(id:string,key:string,local:boolean,remote:boolean):Prom
 }
 
 export async function duplicateAsPrivate() {
+  if (nativeBoardMode()) readOnlyError()
   const saved = await readDeviceBoard(cacheKey(activeId))
   if (!saved) throw new Error('No hay copia descargada.')
   const content = saved.draft ?? saved.content
@@ -413,6 +429,7 @@ export async function listBoardHistory(boardId: string): Promise<BoardHistoryLis
   return request<BoardHistoryList>(`/api/boards/${encodeURIComponent(boardId)}/history`)
 }
 export async function createBoardHistory(boardId: string, title: string, expected_version?: number) {
+  if (nativeBoardMode()) readOnlyError()
   if (isPrivate(boardId)) return localSnapshot(boardId,title,'manual',expected_version)
   return request<{id:string;board_version:number}>(`/api/boards/${encodeURIComponent(boardId)}/history`,
     json('POST', {title, ...(expected_version === undefined ? {} : {expected_version})}))
@@ -427,6 +444,7 @@ export async function inspectBoardHistory(boardId: string, snapshotId: string) {
     `/api/boards/${encodeURIComponent(boardId)}/history/${encodeURIComponent(snapshotId)}`)
 }
 export async function restoreBoardHistory(boardId: string, snapshotId: string, expected_version?: number) {
+  if (nativeBoardMode()) readOnlyError()
   if (isPrivate(boardId)) {
     const snapshot = await inspectBoardHistory(boardId,snapshotId)
     const safety = await localSnapshot(boardId,'Antes de restaurar','safety',expected_version)
@@ -439,6 +457,7 @@ export async function restoreBoardHistory(boardId: string, snapshotId: string, e
     json('POST', expected_version === undefined ? {} : {expected_version}))
 }
 export async function deleteBoardHistoryVersion(boardId: string, snapshotId: string) {
+  if (nativeBoardMode()) readOnlyError()
   if (isPrivate(boardId)) {
     await inspectBoardHistory(boardId,snapshotId)
     await (await deviceDB).delete('history',snapshotId)
@@ -448,6 +467,7 @@ export async function deleteBoardHistoryVersion(boardId: string, snapshotId: str
     `/api/boards/${encodeURIComponent(boardId)}/history/${encodeURIComponent(snapshotId)}`, {method:'DELETE'})
 }
 export async function clearBoardHistory(boardId: string) {
+  if (nativeBoardMode()) readOnlyError()
   if (isPrivate(boardId)) {
     const history = await listBoardHistory(boardId)
     for (const item of history.history) await (await deviceDB).delete('history',item.id)
@@ -478,6 +498,7 @@ export async function acceptBoardLiveVersion(boardId: string, version: number, c
 }
 
 export async function publishPrivateCopy() {
+  if (nativeBoardMode()) readOnlyError()
   if (!privateBoard() || !remoteEnabled) throw new Error('Ingresá a tu cuenta para publicar una copia compartida.')
   const saved = await readDeviceBoard(activeId)
   if (!saved) throw new Error('No se encontró la privada.')
@@ -530,6 +551,7 @@ async function localSnapshot(boardId:string,title:string,kind:BoardHistoryVersio
 }
 
 export async function importBoardBackup(file:File) {
+  if (nativeBoardMode()) readOnlyError()
   const backup = JSON.parse(await file.text()) as {format:string;name:string;content:BoardContentWithExtras;assets:Record<string,string>}
   if (backup.format!=='pizarra-backup-v1' || typeof backup.name!=='string' || !backup.content ||
       !Array.isArray(backup.content.strokes) || !Array.isArray(backup.content.texts) || !Array.isArray(backup.content.media) ||

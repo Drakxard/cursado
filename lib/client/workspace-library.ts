@@ -111,6 +111,8 @@ async function readPrivateBoards(): Promise<Candidate[]> {
     const readAll = <T,>(store: string) => new Promise<T[]>((resolve, reject) => { const q = db.transaction(store).objectStore(store).getAll(); q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error) })
     const boards = await readAll<{ id: string; name: string; storage: string; updated_at: string; content: Record<string, unknown>; draft?: Record<string, unknown>; folder_id?: string }>('boards')
     const results: Candidate[] = [], usedAssets = new Set<string>()
+    const folders = await readAll<{id: string; name: string}>('folders')
+    const boardIndex: {id: string; name: string; folderId: string | null; path: string}[] = []
     for (const board of boards.filter(b => b.id.startsWith('local:'))) {
       const scene = board.draft || board.content
       const media = (scene.media || []) as { assetId: string }[]
@@ -124,8 +126,10 @@ async function readPrivateBoards(): Promise<Candidate[]> {
         }
       }
       const id = await hash(new Blob([board.id]))
+      boardIndex.push({ id: board.id, name: board.name, folderId: board.folder_id || null, path: `boards/${id}.json` })
       results.push({ path: `boards/${id}.json`, blob: new Blob([JSON.stringify({ id: board.id, name: board.name, folderId: board.folder_id, scene, assets })], { type: 'application/vnd.cursado.board+json' }), modified: 0 })
     }
+    results.push({ path: 'boards/library.json', blob: new Blob([JSON.stringify({ version: 1, folders, boards: boardIndex })], {type:'application/json'}), modified:0 })
     return results
   } finally { db.close() }
 }
@@ -162,7 +166,7 @@ async function catalog(candidates: Candidate[], files: LibraryFile[]) {
       const file = resolveFile(String(e.drive_file_id || '')); if (file) referenced.add(file.id)
       items.push({ id: `entry:${e.id}`, title: String(e.custom_title || e.drive_file_name || 'Apunte'), kind: file?.mime.startsWith('audio/') ? 'audio' : 'text', subjectId: String(e.subject_id), week: Number(e.week_number), section: 'Apuntes', text: [e.transcript_text, e.answer_text].filter(Boolean).join('\n\n'), important: e.is_featured === true, ...(file ? { fileId: file.id } : {}) })
     }
-    if (path.startsWith('boards/') && path.endsWith('.json')) {
+    if (path.startsWith('boards/') && path.endsWith('.json') && path !== 'boards/library.json') {
       const f = byPath.get(path)!; referenced.add(f.id)
       items.push({ id: String(payload.id), title: String(payload.name || 'Pizarra'), kind: 'board', fileId: f.id })
     }

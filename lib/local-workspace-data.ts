@@ -1,5 +1,7 @@
 "use client"
 
+import { isNativeReadOnly, nativeFileUrl, readOnlyError } from './native-workspace.ts'
+
 import type {
   CronogramaRecord,
   DailySessionRecord,
@@ -848,6 +850,7 @@ async function readJsonFile<T>(pathSegments: string[], fallback: T): Promise<T> 
 const jsonWriteQueues = new Map<string, Promise<unknown>>()
 
 async function writeJsonFile(pathSegments: string[], value: unknown) {
+  if (isNativeReadOnly()) readOnlyError()
   const queueKey = pathSegments.join("/")
   const previous = jsonWriteQueues.get(queueKey) ?? Promise.resolve()
   const write = previous.catch(() => undefined).then(async () => {
@@ -912,6 +915,7 @@ export async function getWorkspaceFile(workspaceId: string) {
 }
 
 export async function createObjectUrlForWorkspaceFile(workspaceId: string) {
+  if (isNativeReadOnly()) return nativeFileUrl(workspaceId)
   const file = await getWorkspaceFile(workspaceId)
   return URL.createObjectURL(file)
 }
@@ -1862,6 +1866,7 @@ export async function readLocalWorkspaceTabsState(): Promise<LocalWorkspaceTabsR
 }
 
 export async function reconcileLocalWorkspaceTabsState(): Promise<LocalWorkspaceTabsReadResult> {
+  if (isNativeReadOnly()) return readLocalWorkspaceTabsState()
   const exists = await jsonFileExists(WORKSPACE_STATE_MANIFEST)
   await ensureLocalReconciliationBackups()
   const loaded = await readWorkspaceStateWithBackup()

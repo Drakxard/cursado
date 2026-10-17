@@ -1,10 +1,12 @@
 "use client"
 
+import { isNativeReadOnly } from '@/lib/native-workspace'
+
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { registerHomeSave } from "@/lib/client/home-navigation"
-import { ArrowLeft, Download, LoaderCircle, Mic, MicOff, Pencil, Trash2 } from "lucide-react"
+import { ArrowLeft, Download, Eye, LoaderCircle, Mic, MicOff, Pencil, Trash2 } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { fetchSubjectMaterialContainers } from "@/lib/material-containers-client"
 import { requireOkJson } from "@/lib/client/api"
@@ -187,6 +189,7 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
         try {
           record = await (await getSynthesisFolderStore()).read(context)
         } catch (error) {
+          if (isNativeReadOnly()) throw error
           const fallback = readLocalWorkspace(pendingKey) ?? readLocalWorkspace(storageKey)
           if (!fallback) throw error
           if (disposed || editorOpenRef.current || autosave.dirty) return
@@ -312,6 +315,7 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
   }, [currentParentId, loadState])
 
   const updateEditorDocument = useCallback((documentInput: TiptapJSON) => {
+    if (isNativeReadOnly()) return
     const session = editorSession
     if (!session) return
     let firstGeneratedId = true
@@ -466,10 +470,11 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
       </DialogContent>
     </Dialog>
     {message ? <div className={styles.notice}>{message}<button onClick={() => setMessage("")} aria-label="Cerrar aviso">×</button></div> : null}
-    <SimpleEditor key={editorSession.key} content={editorSession.document} onChange={updateEditorDocument} onError={setMessage}
+    <SimpleEditor key={editorSession.key} content={editorSession.document} editable={!isNativeReadOnly()} onChange={updateEditorDocument} onError={setMessage}
       onPendingChange={autosave.markDirty} onFlushReady={onEditorFlushReady}
       toolbarAction={<button type="button" className={styles.exportSvgButton} onClick={() => { void downloadSvg() }} disabled={exportingSvg} aria-busy={exportingSvg} aria-label={exportingSvg ? "Exportando página como SVG…" : "Exportar página como SVG"} title={exportingSvg ? "Exportando página como SVG…" : "Exportar página como SVG"}>{exportingSvg ? <LoaderCircle className={styles.spinner} aria-hidden="true" /> : <Download aria-hidden="true" />}</button>}
       fontSize={workspace.editorFontSize} onFontSizeChange={(editorFontSize) => {
+        if (isNativeReadOnly()) return
         void acceptWorkspace({ ...workspaceRef.current, editorFontSize }).catch(() => setMessage(SAVE_ERROR_MESSAGE))
       }} />
   </main>
@@ -508,7 +513,7 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
         </select>
       </label>
       {currentNode ? <div className={styles.location} title={currentNode.name}><strong>{currentNode.name}</strong></div> : null}
-      <button className={styles.trashButton} onClick={async () => {
+      <button data-workspace-write={isNativeReadOnly() || undefined} className={styles.trashButton} onClick={async () => {
         try { setTrash(await (await getSynthesisFolderStore()).listTrash()) }
         catch { setMessage("No se pudo abrir la papelera de Síntesis.") }
       }} aria-label="Abrir papelera de Síntesis" title="Papelera"><Trash2 /></button>
@@ -523,17 +528,18 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
             : speech.enabled ? "Desactivar micrófono" : "Activar micrófono"}>
           {speech.status === "listening" || speech.status === "starting" ? <Mic aria-hidden="true" /> : <MicOff aria-hidden="true" />}
         </button>
-        <button disabled={loadState !== "ready"} onClick={() => openEditor(currentParentId)} aria-label={currentNode ? `Editar ${currentNode.name}` : "Editar la Síntesis completa"} title="Editar"><Pencil /></button>
+        <button data-workspace-write={isNativeReadOnly() || undefined} disabled={loadState !== "ready"} onClick={() => openEditor(currentParentId)} aria-label={currentNode ? `Editar ${currentNode.name}` : "Editar la Síntesis completa"} title="Editar"><Pencil /></button>
+        {isNativeReadOnly() && <button disabled={loadState !== 'ready'} onClick={() => openEditor(currentParentId)} aria-label="Leer Síntesis" title="Leer"><Eye /></button>}
       </div>
     </header>
     {message ? <div className={styles.notice}>{message}<button onClick={() => setMessage("")} aria-label="Cerrar aviso">×</button></div> : null}
     {trash !== null ? <section className={styles.trashPanel} role="dialog" aria-label="Papelera de Síntesis">
       <h2>Papelera</h2>
       <p>Cada entrada restaura el estado completo previo a un borrado. También se incluyen respaldos anteriores para recuperar borrados recientes.</p>
-      <button onClick={() => setTrash(null)}>Cerrar</button>
+      <button data-workspace-write={isNativeReadOnly() || undefined} onClick={() => setTrash(null)}>Cerrar</button>
       {trash.length === 0 ? <p>La papelera está vacía.</p> : trash.map((copy) => <article key={copy.key}>
         <p>{copy.preview || "Contenido sin texto."}</p>
-        <button onClick={async () => {
+        <button data-workspace-write={isNativeReadOnly() || undefined} onClick={async () => {
           try {
             await acceptWorkspace(parseStoredSynthesisWorkspace(copy.raw).workspace)
             setTrash(null)
@@ -566,11 +572,12 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
       {loadState === "loading" ? "Cargando la Síntesis guardada…" : "No se pudo cargar la Síntesis guardada."}
       {loadState === "error" ? <button onClick={() => { setLoadState("loading"); setRetry((value) => value + 1) }}>Reintentar</button> : null}
     </div> : nodes.length === 0 ? <div className={styles.emptyState}>No hay contenido cargado para la semana {context.weekNumber}. Podés consultar otra semana desde el selector.</div> : null}
-    {loadState === "ready" && currentNode && currentNodes.length === 0 ? <div className={styles.emptyState}>No hay subtemas en «{currentNode.name}». Podés abrir su editor con el lápiz.</div> : null}
+    {loadState === "ready" && currentNode && currentNodes.length === 0 && !isNativeReadOnly() ? <div className={styles.emptyState}>No hay subtemas en «{currentNode.name}». Podés abrir su editor con el lápiz.</div> : null}
     <section className={styles.board} style={{ "--board-height": `${Math.max(1.5, ...currentNodes.map((node) => (workspace.layout[node.id]?.y ?? 0) + 0.3)) * 100}dvh` } as React.CSSProperties} aria-label="Nodos de Síntesis">{currentNodes.map((node) => {
         const position = workspace.layout[node.id] ?? { x: 0.5, y: 0.4, scale: 1 }
         return <div key={node.id} className={styles.nodeWrap} style={{ left: `${position.x * 100}%`, top: `${position.y * 100}dvh`, "--node-scale": position.scale } as React.CSSProperties}>
           <button className={styles.plaque} onPointerDown={(event) => {
+            if (isNativeReadOnly()) return
             if (event.button !== 0) return
             event.currentTarget.setPointerCapture(event.pointerId)
             setDrag({ id: node.id, startX: event.clientX, startY: event.clientY, originX: position.x, originY: position.y, moved: false })
@@ -582,10 +589,12 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
             workspaceRef.current = next; setWorkspace(next); autosave.markDirty(); setDrag({ ...drag, moved: true }); suppressClickRef.current = true
           }} onPointerUp={() => { if (drag?.id === node.id && drag.moved) void acceptWorkspace(workspaceRef.current).catch(() => setMessage(SAVE_ERROR_MESSAGE)); setDrag(null) }} onClick={() => {
             if (suppressClickRef.current) { suppressClickRef.current = false; return }
+            if (isNativeReadOnly() && childrenOf(nodes,node.id).length === 0) { openEditor(node.id); return }
             setCurrentParentId(node.id)
           }} aria-label={`Abrir ${node.name}`}>{node.name}</button>
-          <button className={styles.nodeEdit} onPointerDown={(event) => event.stopPropagation()} onClick={() => openEditor(node.id)} aria-label={`Editar ${node.name}`} title="Editar"><Pencil /></button>
-          <button className={`${styles.nodeEdit} ${styles.nodeDelete}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => deleteNode(node.id)} aria-label={`Eliminar ${node.name} de Síntesis`} title="Eliminar de Síntesis"><Trash2 /></button>
+          <button data-workspace-write={isNativeReadOnly() || undefined} className={styles.nodeEdit} onPointerDown={(event) => event.stopPropagation()} onClick={() => openEditor(node.id)} aria-label={`Editar ${node.name}`} title="Editar"><Pencil /></button>
+          {isNativeReadOnly() && <button className={styles.nodeEdit} onClick={() => openEditor(node.id)} aria-label={`Leer ${node.name}`} title="Leer"><Eye /></button>}
+          <button data-workspace-write={isNativeReadOnly() || undefined} className={`${styles.nodeEdit} ${styles.nodeDelete}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => deleteNode(node.id)} aria-label={`Eliminar ${node.name} de Síntesis`} title="Eliminar de Síntesis"><Trash2 /></button>
         </div>
       })}</section>
   </main>
