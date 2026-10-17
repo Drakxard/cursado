@@ -61,12 +61,13 @@ export async function discoverLegacyLibrary(s: Storage): Promise<LegacyLibraryCa
     const day = Number(meta['weekday-index'] ?? WEEKDAY_NAMES.findIndex(name => slug(name) === parts[3]))
     if (!subjectId || !/^[a-zA-Z0-9_-]{1,100}$/.test(subjectId) || !Number.isInteger(week) || week < 1 || week > 100 || !Number.isInteger(day) || day < 0 || day > 6) continue
     const filename = meta['original-file-name'] || parts.at(-1)!.replace(/^\d+-/, '')
-    const kind = meta['material-type'] === 'practice' || /guia|ejer|pract|resp/i.test(filename) ? 'practice' : 'theory'
+    const kind = ['theory', 'practice'].includes(meta['material-type']) ? meta['material-type'] : /guia|ejer|pract|resp/i.test(filename) ? 'practice' : 'theory'
     await register(key, kind)
     const file = output.files.find(f => f.key === key)!, path = `manifests/materials/${subjectId}/week-${week}.json`
     let doc = output.documents.find(d => d.path === path)
     if (!doc) { doc = { path, data: { version: 1, subjectId, weekNumber: week, materials: [] } }; output.documents.push(doc) }
     const createdAt = head.LastModified?.toISOString() || new Date().toISOString()
+    const materialId = Number(meta['material-id'])
     if (!SUBJECTS.some(subject => subject.id === subjectId)) {
       let workspace = output.documents.find(d => d.path === 'manifests/workspace-state.json')
       if (!workspace) { workspace = { path: 'manifests/workspace-state.json', data: { customSubjects: {} } }; output.documents.push(workspace) }
@@ -74,7 +75,7 @@ export async function discoverLegacyLibrary(s: Storage): Promise<LegacyLibraryCa
       custom[subjectId] ||= { id: subjectId, storageKey: subjectId, name: meta['subject-name'] || parts[1], color: '#f59e0b', tabId: 'main', createdAt, targetWeekday: day }
       workspace.data.customSubjects = custom
     }
-    ;(doc.data.materials as unknown[]).push({ id: Number.parseInt(createHash('sha256').update(key).digest('hex').slice(0, 12), 16), subject_id: subjectId, subject_name: meta['subject-name'] || SUBJECTS.find(subject => subject.id === subjectId)?.name || parts[1], week_number: week, session_date: meta['session-date'] || formatDateKey(getWeekDates(week)[day]), weekday_index: day, material_type: kind, order_index: (doc.data.materials as unknown[]).length, file_name: filename, drive_file_id: `workspace://${file.path}`, drive_mime_type: head.ContentType || 'application/pdf', drive_web_view_link: '', is_checkup_done: false, created_at: createdAt, updated_at: createdAt })
+    ;(doc.data.materials as unknown[]).push({ id: Number.isSafeInteger(materialId) && materialId > 0 ? materialId : Number.parseInt(createHash('sha256').update(key).digest('hex').slice(0, 12), 16), subject_id: subjectId, subject_name: meta['subject-name'] || SUBJECTS.find(subject => subject.id === subjectId)?.name || parts[1], week_number: week, session_date: meta['session-date'] || formatDateKey(getWeekDates(week)[day]), weekday_index: day, material_type: kind, order_index: (doc.data.materials as unknown[]).length, file_name: filename, drive_file_id: `workspace://${file.path}`, drive_mime_type: head.ContentType || 'application/pdf', drive_web_view_link: '', is_checkup_done: false, created_at: createdAt, updated_at: createdAt })
   }
   return output
 }

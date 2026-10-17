@@ -74,10 +74,13 @@ test('publication commits only complete inventories; QR claims, device isolation
   corsForbidden = false
   const oldKey = 'r2/calculo-2/semana-1/lunes/123-guia.pdf', oldBody = 'Previously uploaded PDF'
   objects.set(oldKey, { body: oldBody, etag: 'old-r2-etag', size: oldBody.length, metadata: {} })
+  objects.set('r2/calculo-2/semana-1/lunes/124-guia-teorica.pdf', { body: oldBody, etag: 'theory', size: oldBody.length, metadata: { 'material-id': '77', 'material-type': 'theory' } })
+  objects.set('r2/calculo-2/semana-1/lunes/125-replacement.pdf', { body: oldBody, etag: 'temporary', size: oldBody.length, metadata: { 'replacement-temporary': 'true' } })
   objects.set('manifests/inscreen/provider/private.json', { body: '{"secret":"excluded"}', etag: 'private', size: 21, metadata: {} })
   const legacy = await (await owner('legacy/catalog', {}, 'GET')).json()
-  assert.equal(legacy.files.length, 1)
+  assert.equal(legacy.files.length, 2)
   assert.equal(legacy.documents[0].data.materials[0].material_type, 'practice')
+  assert.equal(legacy.documents[0].data.materials.find((row: { id: number }) => row.id === 77).material_type, 'theory')
   assert.equal(legacy.documents.some((doc: { path: string }) => doc.path.includes('private')), false)
   const oldHash = createHash('sha256').update(oldBody).digest('hex')
   const reuse = await (await owner('upload', { hash: oldHash, size: oldBody.length, mime: 'application/pdf', previousKey: oldKey })).json()
