@@ -758,7 +758,7 @@ export function LocalWorkspaceProvider({
       setReadyWorkspaceHandle(rootHandle)
       setApiStatus(status.services ?? sealedPayload.services ?? { groq: false, r2: false })
       setServicesFileMessage(`User.Services creado y verificado · ${new Date(saved.validatedAt || saved.savedAt).toLocaleString()}`)
-      if (configStep === 1) void processLocalWidgetTargetSyncQueue().then(setWidgetTargetSummary).catch(() => {})
+      if (status.services?.r2 || sealedPayload.services?.r2) void processLocalWidgetTargetSyncQueue().then(setWidgetTargetSummary).catch(() => {})
       setConfigValues(EMPTY_INSCREEN_CONFIG)
       setConfigStep(4)
       window.dispatchEvent(new Event("cursado-services-changed"))

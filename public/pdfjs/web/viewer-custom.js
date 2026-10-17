@@ -424,6 +424,7 @@
     if (event.source === window.parent && event.origin === window.location.origin && event.data?.type === "cursado-services-changed") {
       state.inscreenConfigToken = "";
       window.dispatchEvent(new Event("cursado-services-changed"));
+      if (canUseInscreen()) void loadInscreenState();
     }
   });
 
@@ -438,7 +439,12 @@
       cache: "no-store",
     });
     const payload = await response.json().catch(() => null);
-    if (response.ok && payload?.configured !== false) return;
+    if (response.ok && payload?.configured !== false && payload?.services?.r2 !== false) return;
+    if (payload?.services?.r2 === false) {
+      const error = new Error("La sincronizacion se activara al configurar R2 desde | en el inicio.");
+      error.name = "InscreenConfigurationUnavailable";
+      throw error;
+    }
     const error = new Error(payload?.error || INSCREEN_CONFIGURATION_MESSAGE);
     error.name = "InscreenConfigurationUnavailable";
     throw error;
@@ -3103,7 +3109,7 @@
       }
       state.inscreenLoaded = true;
     } catch (error) {
-      if (error?.name === "InscreenConfigurationUnavailable") {
+      if (isInscreenConfigurationUnavailable(error) || /Missing required environment variable: R2_|Falta.*R2/i.test(String(error?.message || ""))) {
         return;
       }
       console.error("Inscreen state load failed:", error);
