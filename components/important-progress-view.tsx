@@ -295,20 +295,22 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   const queue = useRef(Promise.resolve())
   const loaded = useRef(false)
   useEffect(() => {
-    let active = true
+    if (!active) return
+    let subscribed = true
     loaded.current = false
     setIsLoading(true)
-    if (rootHandle && isReady) readImportantTasks(rootHandle).then(tasks => {
-      if (!active) return
+    setStorageError("")
+    if (rootHandle && isReady) readImportantTasks(rootHandle, isNativeReadOnly()).then(tasks => {
+      if (!subscribed) return
       setTables([{ title: "Importantes", tasks: tasks.map(task => {
         const progress = importantTaskProgress(task)
         return { id: task.id, text: task.text, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
       }).sort(compareTaskDaysRemaining) }])
       loaded.current = true
       setIsLoading(false)
-    }).catch(error => { if (active) { setStorageError(String(error)); setIsLoading(false) } })
-    return () => { active = false }
-  }, [rootHandle, isReady])
+    }).catch(error => { if (subscribed) { setStorageError(String(error)); setIsLoading(false) } })
+    return () => { subscribed = false }
+  }, [rootHandle, isReady, active])
   useEffect(() => {
     if (!active || !loaded.current) return
     setTables(previous => {

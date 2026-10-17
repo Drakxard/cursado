@@ -14,6 +14,16 @@ function pdf() {
   return Buffer.from(text+`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`)
 }
 const hash=value=>createHash('sha256').update(value).digest('hex')
+async function swipe(page, startX, endX, y = 450) {
+  const client = await page.context().newCDPSession(page)
+  try {
+    await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:startX,y}]})
+    for(let step=1;step<=8;step++) {
+      await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:startX+(endX-startX)*step/8,y}]})
+    }
+    await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
+  } finally { await client.detach() }
+}
 async function setup(browser, {legacy = false} = {}) {
   const root=path.resolve(process.env.INSCREEN_NATIVE_WEB_ASSETS || 'public/native-web')
   const packageManifest=JSON.parse(await readFile(path.join(root,'current.json'),'utf8'))
@@ -21,6 +31,7 @@ async function setup(browser, {legacy = false} = {}) {
   const resources=new Map(), files=[]
   function add(pathname,content,mime='application/json') { const bytes=Buffer.isBuffer(content)?content:Buffer.from(JSON.stringify(content));const id=hash(pathname);files.push({id,path:pathname,hash:hash(bytes),size:bytes.length,mime});resources.set(id,bytes) }
   const now='2026-10-17T12:00:00Z'
+  add('progreso/importantes.json',{version:1,tasks:[{id:'exam-native',text:'Parcial sincronizado desde la web',startDate:'2026-10-01',dueDate:'2026-11-01',url:'',topics:['Integrales'],topicBoardIds:['topic-native']}]})
   add('manifests/workspace-state.json',{workspaceTabs:{},activeWorkspaceTabId:'main',isMainWorkspaceTabVisible:true,subjectWeekdays:{'custom-calculo3':0},customSubjects:{'custom-calculo3':{id:'custom-calculo3',name:'Cálculo 3',color:'#0f766e',storageKey:'calculo3',tabId:'main',createdAt:now,targetWeekday:0}}})
   add('manifests/subject-catalog.json',{version:2,subjects:{'custom-calculo3':{id:'custom-calculo3',name:'Cálculo 3',normalizedName:'calculo 3',storageKey:'calculo3',createdAt:now,updatedAt:now}}})
   add('manifests/subject-shortcuts.json',{calculo3:{subjectId:'calculo3',buttons:[{id:'campus',label:'Campus',url:'https://campus.example.edu/calculo3',orderIndex:0,sectionScoped:false,sectionUrls:{}}]}})
@@ -58,8 +69,7 @@ test('original home, study, board and PDF work with a native read-only revision 
     const page=await context.newPage()
     await context.setOffline(true)
     await page.goto('https://workspace.inscreen.local/')
-    await page.locator('main').dispatchEvent('touchstart',{touches:[{identifier:1,clientX:70,clientY:350}]})
-    await page.locator('main').dispatchEvent('touchend',{changedTouches:[{identifier:1,clientX:260,clientY:355}]})
+    await swipe(page,70,260,350)
     assert.deepEqual(await page.evaluate(()=>window.nativeActions),['app-home'])
     await page.evaluate(()=>{window.nativeActions=[]})
     await page.getByRole('link',{name:'Abrir organizador de estudio'}).click()
@@ -71,16 +81,14 @@ test('original home, study, board and PDF work with a native read-only revision 
     const study = page.locator('[data-native-study-tabs]')
     const tabs = page.locator('[data-study-workspace-tabs]>div')
     assert.equal(await tabs.isVisible(),false)
-    await study.dispatchEvent('touchstart',{touches:[{identifier:1,clientX:300,clientY:450}]})
-    await study.dispatchEvent('touchend',{changedTouches:[{identifier:1,clientX:100,clientY:455}]})
+    await swipe(page,300,100)
     assert.equal(await study.getAttribute('data-native-study-tabs'),'open')
     assert.equal(await tabs.isVisible(),true)
-    await study.dispatchEvent('touchstart',{touches:[{identifier:1,clientX:90,clientY:450}]})
-    await study.dispatchEvent('touchend',{changedTouches:[{identifier:1,clientX:290,clientY:455}]})
+    await swipe(page,90,290)
     assert.equal(await study.locator(':scope>div').first().isVisible(),false)
+    await page.getByText('Parcial sincronizado desde la web',{exact:true}).waitFor()
     assert.deepEqual(await page.evaluate(()=>window.nativeActions),[])
-    await study.dispatchEvent('touchstart',{touches:[{identifier:1,clientX:300,clientY:450}]})
-    await study.dispatchEvent('touchend',{changedTouches:[{identifier:1,clientX:100,clientY:455}]})
+    await swipe(page,300,100)
     await page.getByRole('button',{name:/C\u00e1lculo 3/}).click()
     const campus = page.getByRole('link',{name:'Campus',exact:true})
     await campus.waitFor({timeout:15000})
@@ -137,6 +145,28 @@ test('missing native files are reported and incompatible bridges never open the 
     await page.getByText(/Actualizá InScreen/).waitFor()
     await context.close()
   }finally{await browser.close()}
+})
+
+test('important tasks absent from the publication explain how to synchronize them',async()=>{
+  const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})
+  try {
+    const {context,errors}=await setup(browser)
+    await context.addInitScript(()=>{
+      const snapshot=window.CursadoNative.snapshot
+      window.CursadoNative.snapshot=()=>{
+        const value=JSON.parse(snapshot())
+        value.manifest.files=value.manifest.files.filter(file=>file.path!=='progreso/importantes.json')
+        return JSON.stringify(value)
+      }
+    })
+    const page=await context.newPage()
+    await page.goto('https://workspace.inscreen.local/estudio')
+    await page.getByRole('button',{name:/Cálculo 3/}).waitFor()
+    await swipe(page,90,290)
+    await page.getByRole('alert').filter({hasText:'Importantes todavía no está en esta publicación'}).waitFor()
+    assert.deepEqual(errors,[])
+    await context.close()
+  } finally { await browser.close() }
 })
 test('existing linked inventories open boards without another QR or a new publication',async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})

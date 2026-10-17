@@ -64,6 +64,19 @@ indica cuántos archivos están guardados y verifica tamaño y SHA-256 antes de
 conservarlos. Se mantiene la revisión completa anterior hasta terminar la nueva.
 La falta de conexión o espacio deja disponibles los archivos ya descargados.
 
+En Estudio, deslizar hacia la derecha abre **Importantes**; deslizar hacia la
+izquierda desde la rueda muestra las pestañas, y desde Importantes vuelve a la
+rueda. Se publica `progreso/importantes.json`, junto con las pizarras de sus
+temas. Los cambios guardados avisan al sincronizador de la web. Si una publicación
+anterior no incluye ese archivo, InScreen indica que hay que sincronizar desde
+la web y luego actualizar los archivos del celular. Una lista publicada vacía
+se distingue de un archivo ausente.
+
+Desde Inicio (los dos accesos de Cursado), deslizar a la derecha vuelve a la pila
+de InScreen. Al instalar un APK con una interfaz inicial nueva, se verifica y
+activa esa interfaz aunque hubiera una copia antigua guardada. Las posteriores
+actualizaciones web siguen conservándose al reiniciar la app.
+
 **Desvincular** desde la PC bloquea nuevas solicitudes. Las URLs de descarga ya
 emitidas vencen en dos minutos y las copias locales pueden seguir leyéndose.
 **Quitar biblioteca** desde el celular elimina su descarga local.

@@ -35,6 +35,8 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
   }
   function put(path: string, value: BlobPart) { const parts = path.split('/'); for (let i = 1; i < parts.length; i++) directories.add(parts.slice(0, i).join('/')); values.set(path, new File([value], parts.at(-1)!, { lastModified: ++modified })) }
   put('User.Services', 'DO NOT PUBLISH MY CREDENTIALS')
+  const importantTasks = { version: 1, tasks: [{ id: 'exam', text: 'Parcial desde la web', startDate: '2026-10-01', dueDate: '2026-11-01', url: '', topics: ['Integrales'], topicBoardIds: ['topic-exam'] }] }
+  put('progreso/importantes.json', JSON.stringify(importantTasks))
   put('manifests/drive-sync.json', '{"credentials":"private"}')
   put('manifests/materials/calculo/week-1.json', JSON.stringify({ materials: [{ id: 1, subject_id: 'calculo', week_number: 1, material_type: 'theory', file_name: 'PDF', drive_file_id: 'workspace://teoria/calculo/semana-1/a.pdf' }] }))
   put('teoria/calculo/semana-1/a.pdf', 'PDF fixture one')
@@ -109,6 +111,9 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
     assert.equal(first.files.some(f => /User.Services|drive-sync/.test(f.path)), false)
     assert.equal(first.items.find(i => i.id === 'material:1')?.fileId, first.files.find(f => f.path.endsWith('a.pdf'))?.id)
     assert.equal(first.items.find(i => i.id === 'entry:1')?.important, true)
+    const important = first.files.find(f => f.path === 'progreso/importantes.json')!
+    assert.ok(important)
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(uploaded.get(important.hash))), importantTasks)
     assert.equal((await publish(root)).revision, first.revision)
     assert.equal(uploads, count); assert.equal(commits, 1)
     // Exercises bounded-memory hashing for a larger file as well as retry reuse.
@@ -139,6 +144,12 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
     const afterFailure = uploads; failCommit = false
     const second = await publish(root)
     assert.notEqual(second.revision, first.revision); assert.equal(uploads, afterFailure)
+    importantTasks.tasks[0].text = 'Parcial actualizado'
+    put('progreso/importantes.json', JSON.stringify(importantTasks))
+    const changed = await publish(root)
+    const updated = changed.files.find(f => f.path === 'progreso/importantes.json')!
+    assert.notEqual(updated.hash, important.hash)
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(uploaded.get(updated.hash))), importantTasks)
     values.delete('teoria/calculo/semana-1/a.pdf')
     const third = await publish(root)
     assert.equal(third.files.some(f => f.path.endsWith('a.pdf')), false)

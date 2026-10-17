@@ -20,13 +20,16 @@ export function importantTaskProgress(task: ImportantTask, today = new Date()) {
   return { total, remaining, elapsed, percentage: Math.round(elapsed / total * 100) }
 }
 
-export async function readImportantTasks(root: FileSystemDirectoryHandle): Promise<ImportantTask[]> {
+export async function readImportantTasks(root: FileSystemDirectoryHandle, requirePublished = false): Promise<ImportantTask[]> {
   let text: string
   try {
     const directory = await root.getDirectoryHandle("progreso")
     text = await (await (await directory.getFileHandle("importantes.json")).getFile()).text()
   } catch (error) {
-    if (error instanceof DOMException && error.name === "NotFoundError") return []
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      if (requirePublished) throw new Error("Importantes todavía no está en esta publicación. Abrí la web con tu carpeta, sincronizá los dispositivos y luego actualizá los archivos en InScreen.")
+      return []
+    }
     throw error
   }
   const data = JSON.parse(text)
@@ -45,4 +48,5 @@ export async function writeImportantTasks(root: FileSystemDirectoryHandle, tasks
   const writer = await file.createWritable()
   await writer.write(JSON.stringify({ version: 1, tasks }, null, 2))
   await writer.close()
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("cursado-workspace-saved"))
 }
