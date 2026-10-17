@@ -414,7 +414,7 @@
     const response = await fetch(input, { ...init, headers });
     if (!response.ok) {
       const payload = await response.clone().json().catch(() => null);
-      if (/semilla|INSCREEN_CONFIG_SEED/.test(payload?.error || "")) {
+      if (new URL(String(input), window.location.origin).pathname === "/api/pdf-explanation" && /semilla|INSCREEN_CONFIG_SEED/.test(payload?.error || "")) {
         window.parent.postMessage({ type: "cursado-services-recovery-required" }, window.location.origin);
       }
     }

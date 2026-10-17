@@ -788,7 +788,7 @@ export function LocalFetchInterceptor() {
     const servicesFetch: typeof fetch = async (input, init) => {
       const response = await originalFetch(input, init)
       const requestedUrl = input instanceof Request ? input.url : String(input)
-      if (!response.ok && !new URL(requestedUrl, window.location.origin).pathname.startsWith("/api/subject-voice/pdf-extraction")) {
+      if (!response.ok && new URL(requestedUrl, window.location.origin).pathname === "/api/pdf-explanation") {
         const payload = await response.clone().json().catch(() => null)
         if (/semilla|INSCREEN_CONFIG_SEED|No se pudo desbloquear User\.Drive/.test(payload?.error || "")) {
           window.dispatchEvent(new Event("cursado-services-recovery-required"))

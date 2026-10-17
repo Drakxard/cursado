@@ -97,8 +97,9 @@ async function setup(t, initialFiles = {}) {
         const token = route.request().headers()['x-inscreen-config-token'] || ''
         const config = openInscreenUserConfig(token)
         return route.fulfill({ json: { configured: true, seedFingerprint: getInscreenConfigSeedFingerprint(), services: servicesStatus(config) } })
-      } catch { return route.fulfill({ json: { configured: false, error: 'No se pudo abrir User.Services' } }) }
+      } catch { return route.fulfill({ json: { configured: false, error: 'No se pudo desbloquear User.Services con la semilla de este despliegue.' } }) }
     }
+    if (path === '/api/pdf-explanation') return route.fulfill({ status:428, json:{ error:'No se pudo desbloquear User.Services con la semilla de este despliegue.' } })
     if (path.startsWith('/api/')) return route.fulfill({ json: { configured: false, connected: false } })
     return route.fulfill({ contentType: 'text/html', body: `<style>${css.css} body {font-family:Arial,sans-serif} *,*::before,*::after {animation:none!important;transition:none!important}</style><div id="root"></div><script>${bundle.outputFiles[0].text}</script>` })
   })
@@ -207,4 +208,20 @@ test('API card defaults to Azure, offers Groq and saves a new encrypted configur
   assert.equal(config.GROQ_API_KEY, '')
   assert.equal(saved.driveToken, '')
   assert.equal(await page.evaluate(() => window.fixtureFiles.get('User.Services.backup')), JSON.stringify(JSON.parse(initial), null, 2))
+})
+
+
+test('entering with incompatible credentials stays quiet; using the star opens the API card on failure', async t => {
+  const initial = JSON.stringify({ version: 1, inscreenToken: 'v1.old.tag.ciphertext', driveToken: '', seedFingerprint: 'old', savedAt: new Date().toISOString(), validatedAt: new Date().toISOString() })
+  const page = await setup(t, { 'User.Services': initial })
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.evaluate(() => fetch('/api/inscreen/config/status', {headers:{'x-inscreen-config-token':'v1.old.tag.ciphertext'}}))
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.evaluate(() => fetch('/api/pdf-explanation', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:'Explicar',transcription:'Texto'})}))
+  await page.getByRole('heading', { name: /Cargamos tu API/ }).waitFor()
+  await page.getByRole('button', {name:'Ahora no',exact:true}).click()
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.evaluate(() => fetch('/api/inscreen/config/status'))
+  assert.equal(await page.getByRole('dialog').count(), 0)
 })
