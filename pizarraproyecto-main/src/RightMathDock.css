@@ -6,7 +6,7 @@
 .math-dock>button,.math-dock-pdfs button {flex-shrink:0;}
 .math-dock-pdfs {display:flex;flex-direction:column;gap:7px;min-height:0;max-height:40dvh;overflow-y:auto;border-top:1px solid var(--math-border,#d4d9e2);padding-top:7px;}
 .pinned-pdf-button {touch-action:pan-y;user-select:none;-webkit-touch-callout:none;}
-.pdf-pin-control {position:fixed;z-index:24;width:38px;height:42px;display:grid;place-items:center;border:1px solid var(--ui-border,#d9dfeb);border-radius:9px;background:var(--ui-surface,#fff);color:var(--ui-text,#243047);cursor:pointer;box-shadow:0 3px 10px #0001;}
+.math-dock .pdf-pin-control {flex-shrink:0;}
 .pdf-pin-control[aria-pressed='true'] {color:#4f46e5;background:var(--math-active,#e5e9ff);}
 .pdf-pin-control:focus-visible,.pinned-pdf-button:focus-visible {outline:2px solid #6366f1;outline-offset:2px;}
 .math-panel { position:fixed; z-index:27; right:78px; top:50%; transform:translateY(-50%); width:min(340px,calc(100vw - 98px)); max-height:85vh; display:flex; flex-direction:column; background:var(--math-panel-bg,#fff); color:var(--math-text,#202938); border:1px solid var(--math-border,#d4d9e2); border-radius:16px; overflow:hidden; box-shadow:0 14px 38px #15203035; font:13px system-ui,sans-serif; }

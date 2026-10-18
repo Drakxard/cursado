@@ -5,7 +5,7 @@ import { useBoardLibrary } from './BoardLibraryPanels'
 import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace } from './topicWorkspace'
 import { mergeBoard } from './storage/merge'
 import { applyScenePatch } from './storage/livePatch'
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { LuHand, LuStickyNote, LuWorkflow, LuBookOpen, LuCalendarDays } from 'react-icons/lu'
 import { createNote, defaultConnector, findAnchor, hitsConnector, isConnector, materializeConnector, mergeVisual,
   pointsBounds, refKey, remapConnector, detachTargets, transformVisual, visualBounds } from './canvas/visualObjects'
@@ -757,7 +757,6 @@ function InlineTableEditor({ table, camera, anchorRef, onChange, onCellChange, o
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pdfPointer = useRef<{pointerId:number;id:string;x:number;y:number;moved:boolean;transform:Transform}|null>(null)
-  const pdfPinRef = useRef<HTMLButtonElement>(null)
   const sceneRef = useRef<HTMLDivElement>(null)
   const contentCanvasesRef = useRef(new Map<number,HTMLCanvasElement>())
   const navigationPointerRef = useRef<number|null>(null)
@@ -1499,7 +1498,6 @@ function App() {
   function redraw() {
     sendCamera()
     inlineNoteRef.current?.layout()
-    positionPdfPin()
     if(sceneRef.current){
       const cam=cameraRef.current
       sceneRef.current.style.transform=`translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})`
@@ -2062,7 +2060,9 @@ function App() {
     }, privateBoard() ? 400 : 80)
   }
 
-  useEffect(()=>beforeAppUpdate(flushBoardForHistory))
+  useEffect(()=>beforeAppUpdate(flushBoardForHistory,()=>loadedRef.current&&pointerRef.current===null&&
+    !activeStroke.current&&!pdfPointer.current&&!touchPointersRef.current.size&&!importBusyRef.current&&
+    !recognizing&&!studyAssistant&&!imageCrop&&!materialLibrary.reader&&!materialLibrary.splitOpen))
   useEffect(()=>beforeHome(async()=>{
     // There is nothing to commit if the initial board has not loaded yet.
     if(!loadedRef.current&&!dirtyRef.current)return
@@ -3699,17 +3699,6 @@ function App() {
     return shapesRef.current.find(item=>item.id===selected[0].id&&item.visualType==='pdf-shortcut'&&item.pdfReference)??null
   }
 
-  function positionPdfPin() {
-    const button=pdfPinRef.current,item=selectedPdfShortcut()
-    if(!button||!item)return
-    const bounds=rotatedRect(item,item.rotation),camera=cameraRef.current,canvas=canvasRef.current?.getBoundingClientRect()
-    const left=(canvas?.left??0)+(bounds.x+bounds.width)*camera.zoom+camera.x+12
-    const top=(canvas?.top??0)+bounds.y*camera.zoom+camera.y
-    button.style.left=`${Math.max(canvas?.left??8,Math.min(left,(canvas?.right??innerWidth)-46))}px`
-    button.style.top=`${Math.max(8,Math.min(top,innerHeight-50))}px`
-  }
-  useLayoutEffect(()=>{positionPdfPin()})
-
   function togglePdfPin() {
     const item=selectedPdfShortcut()
     if(!item)return
@@ -5069,6 +5058,12 @@ function App() {
         pinnedPdfs={shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).map(item=>({id:item.id,name:item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')}))}
         onOpenPdf={id=>{const reference=shapesRef.current.find(item=>item.id===id)?.pdfReference;if(reference)materialLibrary.openReader(reference)}}
         onRevealPdf={revealPdfShortcut}
+        pdfPinControl={!visualEditor&&!openMenu&&!treePanel&&selectedPdfShortcut()&&(()=>{
+        const item=selectedPdfShortcut()!,name=item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')
+        return <button type="button" className="pdf-pin-control" aria-pressed={!!item.pdfPinned}
+          aria-label={`${item.pdfPinned?'Desfijar':'Fijar'} PDF ${name}`} title={item.pdfPinned?'Desfijar de la barra lateral':'Fijar en la barra lateral'}
+          onClick={togglePdfPin}><PdfPinIcon/></button>
+      })()}
         getSelectedMatrix={()=>{
           const selected=groupRef.current
           if(selected.length!==1||selected[0].kind!=='shape')return null
@@ -5297,12 +5292,6 @@ function App() {
               <button type="button" onClick={()=>{rememberChange();item.note=navigateStudyNote(item.note!,'repeat');redraw();scheduleSave()}}>Repetir tarjeta</button>
               <button type="button" onClick={()=>{rememberChange();item.note=navigateStudyNote(item.note!,'next');redraw();scheduleSave()}}>Siguiente tarjeta</button>
             </div>}</>:null
-      })()}
-      {!visualEditor&&!openMenu&&!treePanel&&selectedPdfShortcut()&&(()=>{
-        const item=selectedPdfShortcut()!,name=item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')
-        return <button ref={pdfPinRef} type="button" className="pdf-pin-control" aria-pressed={!!item.pdfPinned}
-          aria-label={`${item.pdfPinned?'Desfijar':'Fijar'} PDF ${name}`} title={item.pdfPinned?'Desfijar de la barra lateral':'Fijar en la barra lateral'}
-          onClick={togglePdfPin}><PdfPinIcon/></button>
       })()}
       {visualEditor && (()=>{
         const item=shapesRef.current.find(item=>item.id===visualEditor)
