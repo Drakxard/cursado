@@ -19,6 +19,15 @@ async function setup(t) {
   const errors=[]
   context.on('page',page=>page.on('pageerror',error=>{errors.push(error.message);console.error('Excepción de navegador:',error.stack)}))
   await context.addInitScript(()=>{try{localStorage.setItem('inscreen.config-skipped.v1','1')}catch{}})
+  await context.addInitScript(()=>{
+    for(const method of ['text','arrayBuffer']) {
+      const original=Blob.prototype[method]
+      Blob.prototype[method]=function(...args){
+        const call=new Error(`Reading ${this.name||'blob'} via ${method} at ${location.href}`)
+        return original.apply(this,args).catch(error=>{error.stack=call.stack+'\n'+error.message;throw error})
+      }
+    }
+  })
   await context.route('**/pizarra/api/**',route=>route.fulfill({status:401,json:{}}))
   const page=await context.newPage()
   await page.goto(origin)
