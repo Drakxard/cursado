@@ -6,6 +6,8 @@ import { chromium } from "@playwright/test"
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai"
 import { structuredLessonHtml } from "../lib/server/pdf-explanation-renderer.ts"
 import { graphFixture } from "./helpers/explanation-graphs-fixture.mts"
+import { explanationSystemConfig } from "../lib/server/pdf-explanation-system.ts"
+import { composeExplanationSystem } from "../lib/pdf-explanation-system.ts"
 
 const require = createRequire(import.meta.url)
 const { PDFDocument } = require("../public/vendor/pdf-lib.min.js")
@@ -16,6 +18,7 @@ let bytes = await pdf.save()
 test("PDF.js star generates from cached Datalab text; note drags, persists and reopens with Escape", async () => {
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
+  const promptConfig = await explanationSystemConfig('azure')
   let generations = 0, transcriptions = 0, modelsConfigured = false
   const errors = []
   page.on("pageerror", error => errors.push(error.message))
@@ -23,7 +26,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     const url = new URL(route.request().url())
     if (url.pathname === "/api/pdf-explanation") {
       if (route.request().method() === "GET" && !modelsConfigured) return route.fulfill({status:428,json:{error:"No se pudo desbloquear User.Services con la semilla de este despliegue."}})
-      if (route.request().method() === "GET") return route.fulfill({ json: { provider: "azure", models: [{ id: "gpt-5-mini", name: "GPT-5 mini · Azure" }] } })
+      if (route.request().method() === "GET") return route.fulfill({ json: { provider: "azure", models: [{ id: "gpt-5-mini", name: "GPT-5 mini · Azure" }], ...promptConfig } })
       const body = route.request().postDataJSON()
       assert.equal(body.instructions, "HTML interactivo paso a paso")
       assert.equal(body.model, "gpt-5-mini")
@@ -88,8 +91,13 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     assert.equal(await page.locator("#pdf-explanation-question").inputValue(), "Borrador conservado")
     assert.equal(await page.getByText("No se pudo desbloquear User.Services con la semilla de este despliegue.", {exact:true}).count(), 0)
     await page.getByText("Página lista · Enter para explicar", { exact: true }).waitFor()
-    await page.getByRole("button", {name:"Editar instrucción final",exact:true}).click()
+    await page.getByRole("button", {name:"Prompt de sistema y preferencias",exact:true}).click()
     await page.getByRole("textbox", {name:"Instrucción final",exact:true}).fill("HTML interactivo paso a paso")
+    const systemPreview = page.getByRole('textbox', { name: 'System prompt enviado al modelo', exact: true })
+    assert.equal(await systemPreview.inputValue(), composeExplanationSystem(promptConfig.systemPromptBase, 'HTML interactivo paso a paso'))
+    assert.equal(await systemPreview.getAttribute('readonly'), '')
+    await page.getByText('Esquema JSON enviado como salida estructurada', { exact: true }).click()
+    assert.deepEqual(JSON.parse(await page.getByRole('textbox', { name: 'Esquema de salida estructurada', exact: true }).inputValue()), promptConfig.outputSchema)
     await page.locator(".pdf-explanation-preferences").getByRole("button", {name:"Guardar",exact:true}).click()
     await page.locator("#pdf-explanation-question").fill("¿Qué representa la derivada?")
     await page.locator("#pdf-explanation-question").press("Shift+Enter")

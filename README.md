@@ -451,6 +451,15 @@ Recommended Cloudflare R2 CORS configuration for operational hardening:
 ## Explicaciones visuales: `pantilla1_grafos`
 
 La estrella de PDF.js en Estudio admite presentaciones gráficas generadas como JSON.
+La tuerca «Prompt de sistema y preferencias» muestra el system prompt completo
+que se envía al modelo, con reglas comunes, secciones independientes por formato,
+ejemplos y las preferencias editables. La vista previa usa la misma función que
+el servidor y cambia mientras editás; Guardar conserva las preferencias para los
+pedidos siguientes. Estas preferencias ahora se envían en el mensaje de sistema.
+La pregunta, transcripción y región del PDF forman el mensaje de usuario.
+En Azure se muestra además el esquema de salida estructurada; en Gateway ese
+esquema forma parte del system prompt. Los ejemplos se adaptan al transporte
+de cada proveedor (sobre lesson y posiciones en array en Azure).
 El servidor valida los datos y compila un HTML con motor, estilos y recursos locales:
 el modelo no genera código. Las explicaciones mixtas siguen usando la lección version 2.
 La selección del formato es automática según el contenido; también podés pedir

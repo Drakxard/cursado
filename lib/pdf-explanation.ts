@@ -16,8 +16,8 @@ export function explanationInput(body: unknown) {
   return { question, transcription, ...(typeof instructions === "string" ? { instructions: instructions.trim() } : {}), ...(typeof image === "string" ? { image } : {}) }
 }
 
-export function explanationPrompt(question: string, transcription: string, instructions = DEFAULT_EXPLANATION_INSTRUCTIONS) {
-  return `${question}\n\n${transcription}\n\n${instructions}`
+export function explanationPrompt(question: string, transcription: string) {
+  return `${question}\n\n${transcription}`
 }
 
 export function explanationHtml(text: string) {

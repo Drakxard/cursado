@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { explanationHtml, explanationInput, explanationPrompt, DEFAULT_EXPLANATION_INSTRUCTIONS } from "../lib/pdf-explanation.ts"
+import { explanationHtml, explanationInput, explanationPrompt } from "../lib/pdf-explanation.ts"
 import { explanationFailure } from "../lib/pdf-explanation-errors.ts"
 
 test("optional region is accepted while page transcription remains required", () => {
@@ -13,11 +13,11 @@ test("optional region is accepted while page transcription remains required", ()
   assert.throws(() => explanationInput({ question: "", transcription: "", image }))
 })
 
-test("explanation appends editable visual instructions after the request and page transcription", () => {
+test("user message contains the request and transcription; preferences are composed separately in system", () => {
   const input = explanationInput({ question: " ¿Por qué cambia el signo? ", transcription: "La derivada es -2x." })
   const prompt = explanationPrompt(input.question, input.transcription)
-  assert.equal(prompt, "¿Por qué cambia el signo?\n\nLa derivada es -2x.\n\n" + DEFAULT_EXPLANATION_INSTRUCTIONS)
-  assert.equal(explanationPrompt("Consulta", "Texto", "Paso a paso"), "Consulta\n\nTexto\n\nPaso a paso")
+  assert.equal(prompt, "¿Por qué cambia el signo?\n\nLa derivada es -2x.")
+  assert.equal(explanationPrompt("Consulta", "Texto"), "Consulta\n\nTexto")
   assert.throws(() => explanationInput({question:"x",transcription:"x",instructions:"x".repeat(4001)}))
   assert.equal(explanationInput({ question: "  ", transcription: "x" }).question, "Explicalo")
   assert.throws(() => explanationInput({ transcription: "x" }))

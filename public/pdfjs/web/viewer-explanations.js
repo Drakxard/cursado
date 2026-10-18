@@ -473,17 +473,24 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     view.panel.append(form);
     const settings = document.createElement("button");
     settings.type = "button"; settings.className = "pdf-explanation-icon";
-    settings.textContent = "⚙"; settings.title = "Editar instrucción final"; settings.setAttribute("aria-label", settings.title);
+    settings.textContent = "⚙"; settings.title = "Prompt de sistema y preferencias"; settings.setAttribute("aria-label", settings.title);
     const header = view.panel.querySelector("header");
     header.insertBefore(settings, header.lastElementChild);
     const preferences = document.createElement("div"); preferences.className = "pdf-explanation-preferences"; preferences.hidden = true;
-    preferences.innerHTML = '<label>Instrucción final<textarea maxlength="4000" rows="5" aria-label="Instrucción final"></textarea></label><button type="button">Guardar</button><p role="alert"></p>';
+    preferences.innerHTML = '<label>Instrucción final<textarea maxlength="4000" rows="5" aria-label="Instrucción final"></textarea></label><p>Estas preferencias se añaden al mensaje de sistema. La pregunta, la transcripción y la región del PDF se envían como mensaje de usuario.</p><label>System prompt enviado al modelo<textarea class="pdf-explanation-system-preview" rows="14" readonly aria-label="System prompt enviado al modelo" placeholder="Cargando prompt de sistema…"></textarea></label><details class="pdf-explanation-output-schema" hidden><summary>Esquema JSON enviado como salida estructurada</summary><textarea rows="10" readonly aria-label="Esquema de salida estructurada"></textarea></details><button type="button">Guardar</button><p role="alert"></p>';
     const instructionInput = preferences.querySelector("textarea");
     instructionInput.value = getInstructions();
+    const systemPreview = preferences.querySelector('.pdf-explanation-system-preview');
+    const schemaDetails = preferences.querySelector('.pdf-explanation-output-schema');
+    let systemPromptBase = "";
+    const updateSystemPreview = () => {
+      systemPreview.value = systemPromptBase ? window.composeExplanationSystem(systemPromptBase, instructionInput.value) : "";
+    };
+    instructionInput.addEventListener('input', updateSystemPreview);
     view.panel.append(preferences);
     settings.addEventListener("click", () => {
       preferences.hidden = !preferences.hidden; form.hidden = !preferences.hidden;
-      if (!preferences.hidden) instructionInput.focus();
+      if (!preferences.hidden) { instructionInput.value = getInstructions(); updateSystemPreview(); instructionInput.focus(); }
     });
     preferences.querySelector("button").addEventListener("click", () => {
       if (!instructionInput.value.trim()) return;
@@ -599,6 +606,8 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     let modelsRevision = 0;
     async function loadModels() {
       const revision = ++modelsRevision;
+      systemPromptBase = ""; updateSystemPreview(); schemaDetails.hidden = true;
+      systemPreview.placeholder = "Cargando prompt de sistema…";
       modelSelect.disabled = true; refresh.disabled = true;
       modelStatus.hidden = true;
       modelStatus.textContent = "Consultando el modelo de explicación…";
@@ -608,6 +617,11 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         if (revision !== modelsRevision || modal !== view) return;
         if (!response.ok) throw new Error(payload.error || "No se pudo cargar la lista de modelos.");
         if (!Array.isArray(payload.models) || !payload.models.length) throw new Error("No hay modelos disponibles.");
+        systemPromptBase = typeof payload.systemPromptBase === 'string' ? payload.systemPromptBase : "";
+        systemPreview.placeholder = systemPromptBase ? "" : "El servidor no envió el prompt de sistema. Actualizá la aplicación.";
+        updateSystemPreview();
+        schemaDetails.hidden = !payload.outputSchema;
+        schemaDetails.querySelector('textarea').value = payload.outputSchema ? JSON.stringify(payload.outputSchema, null, 2) : "";
         const fixedAzure = payload.provider === "azure";
         form.querySelector('label[for="pdf-explanation-model"]').textContent = fixedAzure ? "Modelo de explicación" : "Modelo gratuito de AI Gateway";
         form.querySelector(".pdf-explanation-model-row").hidden = fixedAzure;
@@ -627,6 +641,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         modelSelect.replaceChildren(new Option("No se pudo cargar la lista", ""));
         modelStatus.hidden = false;
         modelStatus.textContent = error.message;
+        systemPreview.placeholder = "No se pudo cargar el prompt de sistema: " + error.message;
         throw error;
       } finally { if (revision === modelsRevision) { modelSelect.disabled = generating || !modelSelect.value; refresh.disabled = generating; } }
     }

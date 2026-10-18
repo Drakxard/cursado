@@ -1,5 +1,6 @@
 import { DefaultChatTransport, readUIMessageStream } from "ai"
 import { downloadPdfExplanationAttempt, type ExplanationAttempt } from "../pdf-explanation-debug"
+import { composeExplanationSystem } from "../pdf-explanation-system"
 
 export async function requestPdfExplanation(question: string, transcription: string, onProgress: (text: string) => void,
   debug?: ExplanationAttempt, model?: string, image?: string, requestFetch: typeof fetch = fetch, instructions?: string) {
@@ -90,7 +91,9 @@ declare global {
   interface Window {
     requestPdfExplanation: typeof requestPdfExplanation
     downloadPdfExplanationAttempt: typeof downloadPdfExplanationAttempt
+    composeExplanationSystem: typeof composeExplanationSystem
   }
 }
 window.requestPdfExplanation = requestPdfExplanation
 window.downloadPdfExplanationAttempt = downloadPdfExplanationAttempt
+window.composeExplanationSystem = composeExplanationSystem

@@ -8,7 +8,8 @@ import { explanationStream } from "../lib/server/pdf-explanation-stream.ts"
 import { DefaultChatTransport, readUIMessageStream } from "ai"
 import { lessonHtml } from "../lib/pdf-explanation-lesson.ts"
 import { structuredFixture } from "./helpers/explanation-lesson-fixture.mts"
-import { STRUCTURED_EXPLANATION_INSTRUCTIONS } from "../lib/pdf-explanation-structured.ts"
+import { explanationSystemConfig } from "../lib/server/pdf-explanation-system.ts"
+import { composeExplanationSystem } from "../lib/pdf-explanation-system.ts"
 import { gridGraphFixture } from "./helpers/explanation-graphs-fixture.mts"
 
 function textModel(text: string, reason: "stop" | "length" = "stop") {
@@ -53,12 +54,13 @@ test("Azure requests strict structured output and preserves region, transcriptio
   assert.ok(chunks.some(part => part.type === "data-explanation"))
   const request = model.doStreamCalls[0]
   assert.equal(request.prompt[0].role, "system")
-  assert.ok(String(request.prompt[0].content).startsWith(STRUCTURED_EXPLANATION_INSTRUCTIONS))
+  const { systemPromptBase } = await explanationSystemConfig("azure")
+  assert.equal(request.prompt[0].content, composeExplanationSystem(systemPromptBase, "Con las letras del apunte"))
   assert.ok(String(request.prompt[0].content).includes("pantilla1_grafos"))
   const content = request.prompt.find(message => message.role === "user")!.content
   assert.ok(Array.isArray(content))
   assert.equal(content[0].type, "text")
-  assert.equal(content[0].text, "Explicá el árbol\n\nTexto de la página\n\nCon las letras del apunte")
+  assert.equal(content[0].text, "Explicá el árbol\n\nTexto de la página")
   assert.equal(content[1].type, "file")
   assert.equal(request.responseFormat?.type, "json")
   assert.ok(request.responseFormat?.type === "json" && request.responseFormat.schema)
@@ -85,6 +87,9 @@ test("real UI SDK receives reusable lesson HTML with usage and elapsed diagnosti
   assert.ok(delivered.includes("connect-src 'none'"))
   assert.ok(usage)
   assert.equal(typeof elapsed, "number")
+  const { systemPromptBase } = await explanationSystemConfig("gateway")
+  assert.equal(model.doStreamCalls[0].prompt[0].content, composeExplanationSystem(systemPromptBase))
+  assert.ok(String(model.doStreamCalls[0].prompt[0].content).endsWith(DEFAULT_EXPLANATION_INSTRUCTIONS))
 })
 
 test("Gateway corrects invalid JSON exactly once and never renders generated HTML", async () => {

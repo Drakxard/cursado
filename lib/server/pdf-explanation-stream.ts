@@ -1,10 +1,11 @@
-import { createUIMessageStream, createUIMessageStreamResponse, streamText, Output, zodSchema, type LanguageModel } from "ai"
-import { explanationPrompt } from "../pdf-explanation.ts"
+import { createUIMessageStream, createUIMessageStreamResponse, streamText, Output, type LanguageModel } from "ai"
 import { explanationFailure } from "../pdf-explanation-errors.ts"
-import { STRUCTURED_EXPLANATION_INSTRUCTIONS, StructuredLessonError } from "../pdf-explanation-structured.ts"
+import { StructuredLessonError } from "../pdf-explanation-structured.ts"
 import { structuredLessonHtml } from "./pdf-explanation-renderer.ts"
-import { GRAPH_PRESENTATION_INSTRUCTIONS } from "../pdf-explanation-graphs.ts"
-import { explanationFormatSchema, azureExplanationFormatSchema, decodeAzureExplanation } from "../pdf-explanation-formats.ts"
+import { azureExplanationFormatSchema, decodeAzureExplanation } from "../pdf-explanation-formats.ts"
+import { explanationSystemConfig } from "./pdf-explanation-system.ts"
+import { composeExplanationSystem } from "../pdf-explanation-system.ts"
+import { explanationPrompt } from "../pdf-explanation.ts"
 
 export function explanationStream(model: LanguageModel, question: string, transcription: string,
   options: { instructions?: string; fallbackModels?: string[]; maxOutputTokens?: number; reasoning?: "none" | "low"; image?: string; provider?: "azure" | "gateway" } = {}) {
@@ -17,17 +18,15 @@ export function explanationStream(model: LanguageModel, question: string, transc
         })
         const status = (text: string) => writer.write({ type: "data-explanation-status", data: { text } })
         diagnostic("modelo-principal", { model: typeof model === "object" ? model.modelId : model, format: "lesson-v2|pantilla1_grafos" })
-        const schema = await zodSchema(explanationFormatSchema).jsonSchema
-        const system = STRUCTURED_EXPLANATION_INSTRUCTIONS + "\nComo alternativa visual al formato version 2:\n" + GRAPH_PRESENTATION_INSTRUCTIONS + (options.provider === "azure"
-          ? '\nEn el transporte Azure envolvé la respuesta en {"lesson":...}. Para pantilla1_grafos, posiciones es un array de {id,fila,columna,estado}; la aplicación lo convierte al mapa por ID.'
-          : `\nJSON Schema:\n${JSON.stringify(schema)}`)
+        const { systemPromptBase } = await explanationSystemConfig(options.provider ?? "gateway")
+        const system = composeExplanationSystem(systemPromptBase, options.instructions)
         let correction = ""
         for (let attempt = 0; attempt < 2; attempt++) {
           status(attempt ? "Corrigiendo la estructura de la explicación…" : "Preparando los pasos y diagramas…")
           let text = ""
           let reason = ""
           try {
-            const prompt = explanationPrompt(question, transcription, options.instructions) + correction
+            const prompt = explanationPrompt(question, transcription) + correction
             const result = streamText({
               model, system,
               ...(options.image ? { messages: [{ role: "user" as const, content: [
