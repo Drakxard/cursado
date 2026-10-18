@@ -142,7 +142,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         await configureDatalab(state);
         continue;
       }
-      if (!response.ok || !payload.markdown?.trim()) throw new Error(payload.error || "Datalab devolviÛ una p·gina vacÌa.");
+      if (!response.ok || !payload.markdown?.trim()) throw new Error(payload.error || "Datalab devolvi√≥ una p√°gina vac√≠a.");
       break;
     }
     state.data.transcriptions[key] = payload.markdown;
@@ -158,14 +158,14 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       dialog.style.cssText = "width:min(320px,calc(100vw - 48px));padding:20px;border:1px solid #8886;border-radius:14px;background:Canvas;color:CanvasText;box-shadow:0 12px 48px #0004";
       dialog.innerHTML = `<form style="display:grid;gap:12px;font:14px system-ui"><strong>Agregar API de Datalab</strong><label>API key<input aria-label="API key" type="password" autocomplete="off" required style="display:block;box-sizing:border-box;width:100%;margin-top:6px;padding:8px;border:1px solid #888;border-radius:6px"></label><small>Copiala de <a href="https://www.datalab.to/app/keys" target="_blank" rel="noopener noreferrer">Datalab</a>. Se guarda cifrada.</small><span role="alert"></span><div style="display:flex;justify-content:flex-end;gap:8px"><button type="button">Ahora no</button><button type="submit">Guardar y reintentar</button></div></form>`;
       const finish = error => { dialog.close(); dialog.remove(); error ? reject(error) : resolve(); };
-      dialog.addEventListener("cancel", event => { event.preventDefault(); finish(new Error("Agreg· la clave de Datalab para continuar.")); });
-      dialog.querySelector('[type="button"]').onclick = () => finish(new Error("Agreg· la clave de Datalab para continuar."));
+      dialog.addEventListener("cancel", event => { event.preventDefault(); finish(new Error("Agreg√° la clave de Datalab para continuar.")); });
+      dialog.querySelector('[type="button"]').onclick = () => finish(new Error("Agreg√° la clave de Datalab para continuar."));
       dialog.querySelector("form").onsubmit = async event => {
         event.preventDefault();
         const submit = dialog.querySelector('[type="submit"]');
         submit.disabled = true;
         try {
-          if (!state.root) throw new Error("Seleccion· tu carpeta de trabajo para guardar la clave.");
+          if (!state.root) throw new Error("Seleccion√° tu carpeta de trabajo para guardar la clave.");
           const response = await fetch("/api/subject-voice/pdf-extraction/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: dialog.querySelector("input").value.trim() }) });
           const result = await response.json();
           if (!response.ok || !result.token) throw new Error(result.error || "No se pudo guardar la clave.");

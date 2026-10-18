@@ -58,7 +58,7 @@ export async function convertFileWithDatalabMarker(params: {
   })
   const submission = await readJson(submitted)
   if (!submitted.ok || !submission.success || !submission.request_check_url) {
-    throw new DatalabMarkerError(([401, 403].includes(submitted.status) ? "Clave de Datalab inv·lida. VolvÈ a cargarla." : submission.error || "Datalab no pudo iniciar la conversion."))
+    throw new DatalabMarkerError(([401, 403].includes(submitted.status) ? "Clave de Datalab inv√°lida. Volv√© a cargarla." : submission.error || "Datalab no pudo iniciar la conversion."))
   }
 
   const checkUrl = new URL(submission.request_check_url)
@@ -82,7 +82,7 @@ export async function convertFileWithDatalabMarker(params: {
     if (result.status === "complete") {
       if (result.result_url) {
         const download = new URL(result.result_url)
-        if (download.protocol !== "https:" || download.username || download.password) throw new DatalabMarkerError("Datalab devolviÛ una descarga inv·lida.")
+        if (download.protocol !== "https:" || download.username || download.password) throw new DatalabMarkerError("Datalab devolvi√≥ una descarga inv√°lida.")
         const response = await fetchImpl(download)
         if (!response.ok) throw new DatalabMarkerError("No se pudo descargar el resultado de Datalab.")
         result = { ...result, ...await readJson(response) }

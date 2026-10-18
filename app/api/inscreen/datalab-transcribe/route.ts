@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       if (!config.datalab) throw new Error()
       return withInscreenRuntimeConfig(config, () => transcribe(request))
     } catch {
-      return Response.json({ error: "Clave de Datalab no disponible. Volvé a cargarla." }, { status: 428 })
+      return Response.json({ error: "Clave de Datalab no disponible. VolvÃ© a cargarla." }, { status: 428 })
     }
   }
   if (!request.headers.get(INSCREEN_CONFIG_TOKEN_HEADER)) {
