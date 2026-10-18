@@ -47,6 +47,18 @@ async function parts(response: Response) {
   return (await response.text()).split("\n").filter(line => line.startsWith("data: ") && line !== "data: [DONE]").map(line => JSON.parse(line.slice(6)))
 }
 
+test("edited system prompt replaces the generated message exactly for both providers", async () => {
+  const systemPrompt = '  Sos mi profesor. Explicá con las etiquetas del apunte.\n'
+  for (const provider of ["azure", "gateway"] as const) {
+    const model = textModel(JSON.stringify(structuredFixture))
+    const chunks = await parts(explanationStream(model, "Pregunta", "Página", { provider, systemPrompt, instructions: "No debe añadirse al override" }))
+    assert.ok(chunks.some(part => part.type === "data-explanation"))
+    assert.equal(model.doStreamCalls[0].prompt[0].content, systemPrompt)
+    assert.ok(!JSON.stringify(model.doStreamCalls[0].prompt).includes("No debe añadirse al override"))
+    if (provider === "azure") assert.equal(model.doStreamCalls[0].responseFormat?.type, "json")
+  }
+})
+
 test("Azure requests strict structured output and preserves region, transcription and preferences", async () => {
   const model = textModel(JSON.stringify(structuredFixture))
   const image = "data:image/png;base64,aGVsbG8="

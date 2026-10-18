@@ -3,7 +3,7 @@ import { downloadPdfExplanationAttempt, type ExplanationAttempt } from "../pdf-e
 import { composeExplanationSystem } from "../pdf-explanation-system"
 
 export async function requestPdfExplanation(question: string, transcription: string, onProgress: (text: string) => void,
-  debug?: ExplanationAttempt, model?: string, image?: string, requestFetch: typeof fetch = fetch, instructions?: string) {
+  debug?: ExplanationAttempt, model?: string, image?: string, requestFetch: typeof fetch = fetch, instructions?: string, systemPrompt?: string) {
   if (debug) { debug.stage = "solicitud-gateway"; debug.transcription = transcription; debug.wire = "" }
   const transport = new DefaultChatTransport({
     api: "/api/pdf-explanation",
@@ -37,7 +37,7 @@ export async function requestPdfExplanation(question: string, transcription: str
     chatId: crypto.randomUUID(),
     messageId: undefined,
     messages: [{ id: crypto.randomUUID(), role: "user", parts: [{ type: "text", text: question }] }],
-    body: { question, transcription, model, ...(instructions ? { instructions } : {}), ...(image ? { image } : {}) },
+    body: { question, transcription, model, ...(instructions ? { instructions } : {}), ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(image ? { image } : {}) },
     abortSignal: undefined,
   })
   let html: string | undefined

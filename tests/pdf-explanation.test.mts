@@ -24,6 +24,14 @@ test("user message contains the request and transcription; preferences are compo
   assert.throws(() => explanationInput({ question: "x", transcription: "x".repeat(180001) }))
 })
 
+test("custom system prompt preserves text exactly and validates size and emptiness", () => {
+  const base = { question: "Consulta", transcription: "Apunte" }
+  const systemPrompt = "  Instrucciones personalizadas\n"
+  assert.equal(explanationInput({ ...base, systemPrompt }).systemPrompt, systemPrompt)
+  assert.equal(explanationInput(base).systemPrompt, undefined)
+  for (const invalid of ["", "  ", null, 123, "x".repeat(100_001)]) assert.throws(() => explanationInput({ ...base, systemPrompt: invalid }))
+})
+
 test("Gateway errors identify credentials, permissions and rate limits without returning secret error details", () => {
   assert.match(explanationFailure({ statusCode: 401, message: "secret-key" }).message, /401/)
   assert.match(explanationFailure({ cause: { statusCode: 403 } }).message, /permisos/)

@@ -12,6 +12,8 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   const instructionKey = "pdf-explanation-instructions.v1";
   const defaultInstructions = "Explicaci\u00f3n visual e interactiva paso a paso. Us\u00e1 texto, f\u00f3rmulas, tablas y diagramas cuando ayuden a entender; conserv\u00e1 las etiquetas del apunte y aclar\u00e1 las incertidumbres.";
   const getInstructions = () => { try { return localStorage.getItem(instructionKey)?.trim() || defaultInstructions; } catch { return defaultInstructions; } };
+  const systemKey = provider => `pdf-explanation-system.v1.${provider}`;
+  const getSystemPrompt = provider => { try { const text = localStorage.getItem(systemKey(provider)); return text?.trim() ? text : undefined; } catch { return undefined; } };
   let documentState = null, loading = null, modal = null, restoring = false;
   let saving = Promise.resolve();
   const editors = new Map();
@@ -477,24 +479,37 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     const header = view.panel.querySelector("header");
     header.insertBefore(settings, header.lastElementChild);
     const preferences = document.createElement("div"); preferences.className = "pdf-explanation-preferences"; preferences.hidden = true;
-    preferences.innerHTML = '<label>Instrucción final<textarea maxlength="4000" rows="5" aria-label="Instrucción final"></textarea></label><p>Estas preferencias se añaden al mensaje de sistema. La pregunta, la transcripción y la región del PDF se envían como mensaje de usuario.</p><label>System prompt enviado al modelo<textarea class="pdf-explanation-system-preview" rows="14" readonly aria-label="System prompt enviado al modelo" placeholder="Cargando prompt de sistema…"></textarea></label><details class="pdf-explanation-output-schema" hidden><summary>Esquema JSON enviado como salida estructurada</summary><textarea rows="10" readonly aria-label="Esquema de salida estructurada"></textarea></details><button type="button">Guardar</button><p role="alert"></p>';
+    preferences.innerHTML = '<label>Instrucción final<textarea maxlength="4000" rows="5" aria-label="Instrucción final"></textarea></label><p>Estas preferencias se incorporan al prompt predeterminado. Si editás el system prompt completo, se envía exactamente ese texto. La pregunta y el PDF se envían como mensaje de usuario.</p><label>System prompt enviado al modelo<textarea class="pdf-explanation-system-preview" maxlength="100000" rows="14" aria-label="System prompt enviado al modelo" placeholder="Cargando prompt de sistema…" disabled></textarea></label><button type="button" class="pdf-explanation-restore-system">Restaurar prompt predeterminado</button><details class="pdf-explanation-output-schema" hidden><summary>Esquema JSON enviado como salida estructurada</summary><textarea rows="10" readonly aria-label="Esquema de salida estructurada"></textarea></details><button type="button" class="pdf-explanation-save-system">Guardar</button><p role="alert"></p>';
     const instructionInput = preferences.querySelector("textarea");
     instructionInput.value = getInstructions();
     const systemPreview = preferences.querySelector('.pdf-explanation-system-preview');
     const schemaDetails = preferences.querySelector('.pdf-explanation-output-schema');
-    let systemPromptBase = "";
+    let systemPromptBase = "", currentProvider = null, customSystemPrompt, systemEdited = false;
     const updateSystemPreview = () => {
-      systemPreview.value = systemPromptBase ? window.composeExplanationSystem(systemPromptBase, instructionInput.value) : "";
+      systemPreview.disabled = !systemPromptBase;
+      if (!systemEdited) systemPreview.value = customSystemPrompt ?? (systemPromptBase ? window.composeExplanationSystem(systemPromptBase, instructionInput.value) : "");
     };
+    const loadSavedSystem = () => { customSystemPrompt = currentProvider ? getSystemPrompt(currentProvider) : undefined; systemEdited = false; updateSystemPreview(); };
+    systemPreview.addEventListener('input', () => { systemEdited = true; });
     instructionInput.addEventListener('input', updateSystemPreview);
+    preferences.querySelector('.pdf-explanation-restore-system').addEventListener('click', () => {
+      customSystemPrompt = undefined; systemEdited = false; updateSystemPreview(); systemPreview.focus();
+    });
     view.panel.append(preferences);
     settings.addEventListener("click", () => {
       preferences.hidden = !preferences.hidden; form.hidden = !preferences.hidden;
-      if (!preferences.hidden) { instructionInput.value = getInstructions(); updateSystemPreview(); instructionInput.focus(); }
+      if (!preferences.hidden) { instructionInput.value = getInstructions(); loadSavedSystem(); instructionInput.focus(); }
     });
-    preferences.querySelector("button").addEventListener("click", () => {
-      if (!instructionInput.value.trim()) return;
-      try { localStorage.setItem(instructionKey, instructionInput.value.trim()); preferences.hidden = true; form.hidden = false; input.focus(); }
+    preferences.querySelector('.pdf-explanation-save-system').addEventListener("click", () => {
+      const alert = preferences.querySelector('[role="alert"]'); alert.textContent = "";
+      if (!instructionInput.value.trim() || !systemPreview.value.trim()) { alert.textContent = "Completá la instrucción y el prompt de sistema."; return; }
+      if (!systemPromptBase || !currentProvider) { alert.textContent = "Esperá a que se cargue el prompt de sistema."; return; }
+      try {
+        localStorage.setItem(instructionKey, instructionInput.value.trim());
+        if (systemEdited || customSystemPrompt !== undefined) localStorage.setItem(systemKey(currentProvider), systemPreview.value);
+        else localStorage.removeItem(systemKey(currentProvider));
+        preferences.hidden = true; form.hidden = false; input.focus();
+      }
       catch { preferences.querySelector('[role="alert"]').textContent = "No se pudo guardar la instrucción."; }
     });
     const input = form.querySelector("textarea"), status = form.querySelector(".pdf-explanation-progress"), submit = form.querySelector('button[type="submit"]');
@@ -618,6 +633,8 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         if (!response.ok) throw new Error(payload.error || "No se pudo cargar la lista de modelos.");
         if (!Array.isArray(payload.models) || !payload.models.length) throw new Error("No hay modelos disponibles.");
         systemPromptBase = typeof payload.systemPromptBase === 'string' ? payload.systemPromptBase : "";
+        const provider = payload.provider === 'azure' ? 'azure' : 'gateway';
+        if (provider !== currentProvider) { currentProvider = provider; loadSavedSystem(); }
         systemPreview.placeholder = systemPromptBase ? "" : "El servidor no envió el prompt de sistema. Actualizá la aplicación.";
         updateSystemPreview();
         schemaDetails.hidden = !payload.outputSchema;
@@ -701,7 +718,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         debug.transcription = text;
         const image = await captureRegion();
         if (image) debug.region = { ...region };
-        const html = await window.requestPdfExplanation(question, text, message => { status.textContent = `${selectedModel} · ${message}`; }, debug, selectedModel, image, servicesFetch, getInstructions());
+        const html = await window.requestPdfExplanation(question, text, message => { status.textContent = `${selectedModel} · ${message}`; }, debug, selectedModel, image, servicesFetch, getInstructions(), getSystemPrompt(currentProvider));
         debug.html = html;
         debug.stage = "guardar-html-y-nota";
         const pdfPage = await state.pdf.getPage(page);

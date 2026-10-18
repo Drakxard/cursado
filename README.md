@@ -453,9 +453,12 @@ Recommended Cloudflare R2 CORS configuration for operational hardening:
 La estrella de PDF.js en Estudio admite presentaciones gráficas generadas como JSON.
 La tuerca «Prompt de sistema y preferencias» muestra el system prompt completo
 que se envía al modelo, con reglas comunes, secciones independientes por formato,
-ejemplos y las preferencias editables. La vista previa usa la misma función que
-el servidor y cambia mientras editás; Guardar conserva las preferencias para los
-pedidos siguientes. Estas preferencias ahora se envían en el mensaje de sistema.
+ejemplos y las preferencias editables. El system prompt completo también es editable:
+al guardarlo se envía exactamente ese texto, sin añadir otras instrucciones.
+Se conserva localmente por proveedor (Azure o Gateway). «Restaurar prompt
+predeterminado» vuelve al prompt automático; pulsá Guardar para conservar el cambio.
+Mientras no personalices el prompt completo, las preferencias se incorporan
+automáticamente con la misma función que usa el servidor.
 La pregunta, transcripción y región del PDF forman el mensaje de usuario.
 En Azure se muestra además el esquema de salida estructurada; en Gateway ese
 esquema forma parte del system prompt. Los ejemplos se adaptan al transporte

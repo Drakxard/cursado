@@ -9,11 +9,13 @@ export function explanationInput(body: unknown) {
   }
   const instructions = data?.instructions
   if (instructions !== undefined && (typeof instructions !== "string" || !instructions.trim() || instructions.length > 4000)) throw new Error("La instrucción final no es válida.")
+  const systemPrompt = data?.systemPrompt
+  if (systemPrompt !== undefined && (typeof systemPrompt !== "string" || !systemPrompt.trim() || systemPrompt.length > 100_000)) throw new Error("El prompt de sistema debe contener entre 1 y 100000 caracteres.")
   const image = data?.image
   if (image !== undefined && (typeof image !== "string" || image.length > 4_000_000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image))) {
     throw new Error("La región adjunta no es una imagen válida.")
   }
-  return { question, transcription, ...(typeof instructions === "string" ? { instructions: instructions.trim() } : {}), ...(typeof image === "string" ? { image } : {}) }
+  return { question, transcription, ...(typeof instructions === "string" ? { instructions: instructions.trim() } : {}), ...(typeof systemPrompt === "string" ? { systemPrompt } : {}), ...(typeof image === "string" ? { image } : {}) }
 }
 
 export function explanationPrompt(question: string, transcription: string) {

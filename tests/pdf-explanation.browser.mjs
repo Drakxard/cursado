@@ -19,6 +19,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
   const promptConfig = await explanationSystemConfig('azure')
+  const customSystem = composeExplanationSystem(promptConfig.systemPromptBase, 'HTML interactivo paso a paso') + '\n\nExplicá con ejemplos de la materia.\n'
   let generations = 0, transcriptions = 0, modelsConfigured = false
   const errors = []
   page.on("pageerror", error => errors.push(error.message))
@@ -29,6 +30,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
       if (route.request().method() === "GET") return route.fulfill({ json: { provider: "azure", models: [{ id: "gpt-5-mini", name: "GPT-5 mini · Azure" }], ...promptConfig } })
       const body = route.request().postDataJSON()
       assert.equal(body.instructions, "HTML interactivo paso a paso")
+      assert.equal(body.systemPrompt, customSystem)
       assert.equal(body.model, "gpt-5-mini")
       assert.equal(body.transcription, "Una derivada mide el cambio de la función.")
       assert.equal(body.question, generations === 0 ? "¿Qué representa la derivada?" : "Explicalo")
@@ -95,10 +97,20 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.getByRole("textbox", {name:"Instrucción final",exact:true}).fill("HTML interactivo paso a paso")
     const systemPreview = page.getByRole('textbox', { name: 'System prompt enviado al modelo', exact: true })
     assert.equal(await systemPreview.inputValue(), composeExplanationSystem(promptConfig.systemPromptBase, 'HTML interactivo paso a paso'))
-    assert.equal(await systemPreview.getAttribute('readonly'), '')
+    assert.equal(await systemPreview.getAttribute('readonly'), null)
     await page.getByText('Esquema JSON enviado como salida estructurada', { exact: true }).click()
     assert.deepEqual(JSON.parse(await page.getByRole('textbox', { name: 'Esquema de salida estructurada', exact: true }).inputValue()), promptConfig.outputSchema)
+    await systemPreview.fill(customSystem)
     await page.locator(".pdf-explanation-preferences").getByRole("button", {name:"Guardar",exact:true}).click()
+    await page.getByRole('button', { name: 'Prompt de sistema y preferencias', exact: true }).click()
+    assert.equal(await systemPreview.inputValue(), customSystem)
+    await page.getByRole('button', { name: 'Restaurar prompt predeterminado', exact: true }).click()
+    assert.equal(await systemPreview.inputValue(), composeExplanationSystem(promptConfig.systemPromptBase, 'HTML interactivo paso a paso'))
+    await page.locator('.pdf-explanation-preferences').getByRole('button', { name: 'Guardar', exact: true }).click()
+    assert.equal(await page.evaluate(() => localStorage.getItem('pdf-explanation-system.v1.azure')), null)
+    await page.getByRole('button', { name: 'Prompt de sistema y preferencias', exact: true }).click()
+    await systemPreview.fill(customSystem)
+    await page.locator('.pdf-explanation-preferences').getByRole('button', { name: 'Guardar', exact: true }).click()
     await page.locator("#pdf-explanation-question").fill("¿Qué representa la derivada?")
     await page.locator("#pdf-explanation-question").press("Shift+Enter")
     assert.equal(generations, 0)
@@ -254,7 +266,9 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.waitForFunction(async () => {
       const dir = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('manifests')).getDirectoryHandle('pdf-explanations')
       for await (const child of dir.values()) {
-        const saved = JSON.parse(await (await (await child.getFileHandle('explanations.json')).getFile()).text())
+        let saved
+        try { saved = JSON.parse(await (await (await child.getFileHandle('explanations.json')).getFile()).text()) }
+        catch (error) { if (error.name === 'NotReadableError') return false; throw error }
         if (saved.entries.length === 2 && saved.entries.every(entry => entry.deleted)) return true
       }
       return false

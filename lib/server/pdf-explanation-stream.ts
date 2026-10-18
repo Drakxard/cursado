@@ -8,7 +8,7 @@ import { composeExplanationSystem } from "../pdf-explanation-system.ts"
 import { explanationPrompt } from "../pdf-explanation.ts"
 
 export function explanationStream(model: LanguageModel, question: string, transcription: string,
-  options: { instructions?: string; fallbackModels?: string[]; maxOutputTokens?: number; reasoning?: "none" | "low"; image?: string; provider?: "azure" | "gateway" } = {}) {
+  options: { instructions?: string; systemPrompt?: string; fallbackModels?: string[]; maxOutputTokens?: number; reasoning?: "none" | "low"; image?: string; provider?: "azure" | "gateway" } = {}) {
   return createUIMessageStreamResponse({
     stream: createUIMessageStream({
       execute: async ({ writer }) => {
@@ -19,7 +19,7 @@ export function explanationStream(model: LanguageModel, question: string, transc
         const status = (text: string) => writer.write({ type: "data-explanation-status", data: { text } })
         diagnostic("modelo-principal", { model: typeof model === "object" ? model.modelId : model, format: "lesson-v2|pantilla1_grafos" })
         const { systemPromptBase } = await explanationSystemConfig(options.provider ?? "gateway")
-        const system = composeExplanationSystem(systemPromptBase, options.instructions)
+        const system = options.systemPrompt ?? composeExplanationSystem(systemPromptBase, options.instructions)
         let correction = ""
         for (let attempt = 0; attempt < 2; attempt++) {
           status(attempt ? "Corrigiendo la estructura de la explicación…" : "Preparando los pasos y diagramas…")
