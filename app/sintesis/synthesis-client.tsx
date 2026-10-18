@@ -34,8 +34,10 @@ import { useSynthesisSpeech } from "@/lib/client/synthesis-speech"
 import { voiceNodePath, type VoiceDestination } from "@/lib/synthesis-voice-navigation"
 import styles from "./sintesis.module.css"
 
+const loadSimpleEditor = () => import("@/components/tiptap-templates/simple/simple-editor").then((module) => module.SimpleEditor)
+
 const SimpleEditor = dynamic(
-  () => import("@/components/tiptap-templates/simple/simple-editor").then((module) => module.SimpleEditor),
+  loadSimpleEditor,
   { ssr: false, loading: () => <div className={styles.editorLoading}>Abriendo editor…</div> }
 )
 
@@ -55,6 +57,10 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
   const searchParams = useSearchParams()
   const requestedMaterialId = searchParams.get("materialId")
   const openedMaterialRef = useRef<string | null>(null)
+  const [materialLoadFinished, setMaterialLoadFinished] = useState(false)
+  useEffect(() => {
+    if (requestedMaterialId) void loadSimpleEditor().catch(() => { /* The editor loader exposes a failed download. */ })
+  }, [requestedMaterialId])
   const storageKey = buildSynthesisLocalStorageKey(SYNTHESIS_WORKSPACE_STORAGE_KEY, context)
   const pendingKey = buildSynthesisLocalStorageKey(SYNTHESIS_WORKSPACE_PENDING_KEY, context)
   const returnTokenKey = buildSynthesisReturnTokenStorageKey(context)
@@ -242,7 +248,10 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
         if (JSON.stringify(reconciled) !== JSON.stringify(latest)) await acceptWorkspace(reconciled)
       } catch (error) {
         if (!disposed) { setMessage(error instanceof Error ? error.message : "No se pudo actualizar Síntesis."); setLoadState((state) => state === "loading" ? "error" : state) }
-      } finally { loading = false }
+      } finally {
+        loading = false
+        if (!disposed) setMaterialLoadFinished(true)
+      }
     }
     const onStorage = (event: StorageEvent) => {
       if (event.key !== storageKey || editorOpenRef.current || autosave.dirty) return
@@ -533,6 +542,13 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
       void Promise.allSettled(removed.map(deleteSynthesisImage))
     } catch { setMessage("No se pudo guardar la eliminación del nodo.") }
   }
+
+  const awaitingRequestedEditor = requestedMaterialId && openedMaterialRef.current !== requestedMaterialId && (
+    !materialLoadFinished || (loadState === "ready" && nodes.some((node) => node.id === workspace.sources?.materials[requestedMaterialId]?.nodeId) && !workspace.sources?.materials[requestedMaterialId]?.dismissed)
+  )
+  if (awaitingRequestedEditor && loadState !== "error") return <main className={styles.editorOnly}>
+    <div className={styles.editorLoading} role="status">Abriendo editor…</div>
+  </main>
 
   return <main className={styles.root} style={{ backgroundImage: `linear-gradient(rgba(74,30,14,.2),rgba(74,30,14,.2)), url(${backgroundImage.src})` }}>
     <header className={styles.topbar}>
