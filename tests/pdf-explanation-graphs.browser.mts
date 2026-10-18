@@ -51,6 +51,7 @@ test('general graph cards support different topics, complete labels, per-step va
         fixture.elementos_iniciales[0].datos![0].valor = '<script>window.injected=true</script>' + '1234567890'.repeat(8)
       }
       await page.setContent(structuredLessonHtml(fixture))
+      assert.equal(await page.locator('body').getAttribute('data-graph-engine'), 'd3')
       const a = page.locator('[data-node-id="A"]'), b = page.locator('[data-node-id="B"]')
       const original = await b.elementHandle()
       assert.equal(await a.locator('.node-title').allTextContents().then(lines => lines.join('')), fixture.elementos_iniciales[0].etiqueta)
@@ -75,7 +76,12 @@ test('general graph cards support different topics, complete labels, per-step va
               return text.x >= shape.x && text.x + text.width <= shape.x + shape.width + 1 && text.y >= shape.y && text.y + text.height <= shape.y + shape.height + 1 &&
                 p.e + shape.x >= 0 && p.e + shape.x + shape.width <= svg.width && p.f + shape.y >= 0 && p.f + shape.y + shape.height <= svg.height
             })
-            return noOverlap && nodesFit && document.documentElement.scrollWidth <= innerWidth
+            const stage = document.querySelector('#stage')!.getBoundingClientRect()
+            const commentsFit = [...document.querySelectorAll('#stage .callout')].every(el => {
+              const box = el.getBoundingClientRect()
+              return box.left >= stage.left && box.right <= stage.right && box.top >= stage.top && box.bottom <= stage.bottom
+            })
+            return noOverlap && nodesFit && commentsFit && document.documentElement.scrollWidth <= innerWidth
           }), true, `${topic} ${width}x${height} step ${step}`)
           if (step === 2) assert.ok((await b.textContent())!.includes('completado'))
           if (step === 3) { assert.equal(await b.locator('.datum-value').count(), 0); assert.equal(await a.locator('.datum-value').count() > 0, true) }
@@ -130,6 +136,7 @@ test("graph export navigates offline, keeps node identity, anchors comments and 
     await writeFile(path, structuredLessonHtml(fixture))
     await page.context().setOffline(true)
     await page.goto(pathToFileURL(path).href)
+    assert.equal(await page.locator('body').getAttribute('data-graph-engine'), 'd3')
     const a = page.locator('[data-node-id="A"]')
     const original = await a.elementHandle()
     assert.equal(await a.getAttribute("transform"), "translate(380 220)")

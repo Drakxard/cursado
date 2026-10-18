@@ -49,6 +49,13 @@ el modelo y las credenciales existentes. No requiere migrar archivos guardados.
 
 La estrella usa estas mejoras en su flujo habitual, sin un selector por tema:
 
+- El reproductor de grafos usa D3 para actualizar el SVG e interpolar posiciones
+  y opacidades con un reloj compartido. D3 se empaqueta dentro del HTML, sin CDN
+  ni conexión. `build:pdf-explanation-ui` lo regenera antes de desarrollo y build
+  de producción; la fuente está en `lib/client/pdf-explanation-graph-player.mjs`.
+  El módulo `lib/pdf-explanation-graph-player.ts` es un artefacto generado que
+  incorpora el servidor a cada explicación nueva. Las pruebas comprueban que
+  ambos coincidan y que la estrella entregue, descargue y reabra ese motor.
 - Cada elemento admite `datos: [{ etiqueta, valor }]`, hasta cuatro atributos
   de texto. Una posición puede reemplazarlos en ese paso; `null` conserva los
   datos base y `[]` los quita. Sirven para estados, costos, cantidades u otros valores.

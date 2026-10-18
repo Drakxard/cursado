@@ -6,6 +6,13 @@ import { azureExplanationFormatSchema, decodeAzureExplanation } from "../lib/pdf
 import { structuredLessonHtml } from "../lib/server/pdf-explanation-renderer.ts"
 import { graphFixture, gridGraphFixture } from "./helpers/explanation-graphs-fixture.mts"
 import { generalGraphFixture } from './helpers/explanation-general-graphs-fixture.mts'
+import { readFile } from 'node:fs/promises'
+import { graphRuntimeModule } from '../scripts/build-pdf-explanation-graph-runtime.mjs'
+
+test('the runtime embedded by the server matches the bundled D3 player source', async () => {
+  const committed = await readFile(new URL('../lib/pdf-explanation-graph-player.ts', import.meta.url), 'utf8')
+  assert.ok(committed.replace(/\r\n/g, '\n') === await graphRuntimeModule(), 'Run npm run build:pdf-explanation-ui after editing the player')
+})
 
 test('generic attributes, per-step data, directed relations and cycles round-trip for both transports', () => {
   for (const topic of ['process', 'network', 'dependencies'] as const) {

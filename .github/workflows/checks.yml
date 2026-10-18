@@ -37,8 +37,10 @@ jobs:
       - run: python -m pip install -r pizarraproyecto-main/requirements.txt
       - run: npm run typecheck
       - run: npm test
-      - name: Compilar visor y probar explicaciones PDF
-        run: npm run build:pdf-explanation-ui && npm run test:explanations
+      - name: Compilar motor D3 integrado y visor PDF
+        run: npm run build:pdf-explanation-ui
+      - name: Probar estrella, grafos D3 y exportación sin conexión
+        run: npm run test:explanations
       - run: npm run cloudflare:check
       - run: npm test
         working-directory: pizarraproyecto-main

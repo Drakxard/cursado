@@ -1,4 +1,8 @@
 import { build } from "esbuild"
+import { buildGraphRuntime } from './build-pdf-explanation-graph-runtime.mjs'
+
+// The server embeds this offline D3 bundle in every new graph explanation.
+await buildGraphRuntime()
 
 await build({
   entryPoints: ["lib/client/pdf-explanation-ui.ts"],
