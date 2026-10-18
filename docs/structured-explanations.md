@@ -71,7 +71,11 @@ La estrella usa estas mejoras en su flujo habitual, sin un selector por tema:
 - Los comentarios buscan espacio junto al nodo y se conectan con una línea,
   también cuando hay tarjetas o etiquetas en aristas. Se prueban ocho posiciones;
   si no hay espacio, o en móvil, pasan debajo del escenario. Los escenarios
-  grandes permiten desplazamiento para conservar la legibilidad.
+  grandes se encuadran completos y centrados en el espacio disponible.
+- El HTML de grafos usa tema claro y mantiene los controles dentro de la ventana.
+  Ctrl + rueda cambia el zoom sobre el punto señalado; arrastrar mueve el gráfico
+  y **Ajustar** recupera la vista completa. Los comentarios extensos conservan
+  un panel con desplazamiento propio para no reducir el escenario a cero.
 - Al mover nodos aparecen marcas de origen y trayectorias temporales, que se
   retiran al terminar. Se respeta la preferencia de movimiento reducido.
 - Las instrucciones y el ejemplo de generación separan preparación, movimiento,
@@ -82,8 +86,16 @@ Para abrir un ejemplo revisado de ocho páginas de ABB/AVL sin llamar al modelo:
 `node --experimental-strip-types scripts/preview-avl-teaching.mts`.
 Genera `avl-explicado.html`; admite una ruta de salida como primer argumento.
 
-Para probar tras desplegar, generar una explicación nueva desde la estrella:
-los HTML guardados conservan el motor que tenían al crearse. Si hay un system
+Al abrir o importar un HTML guardado de `pantilla1_grafos`, la estrella valida
+su bloque `graph-data` y lo presenta con el motor actual sin llamar al modelo.
+La apertura conserva el archivo original; exportar descarga la versión adaptada.
+Otros HTML mantienen su reproductor original. El módulo compartido
+`lib/pdf-explanation-graph-html.ts` arma el mismo HTML en servidor e importador.
+GitHub Actions regenera el motor y el SDK antes de ejecutar las comprobaciones;
+el artefacto generado no se recompila localmente para estos cambios.
+
+Para probar las instrucciones actualizadas del modelo, generar una explicación
+nueva desde la estrella. Si hay un system
 prompt personalizado antiguo, usar **Restaurar prompt predeterminado** y guardar
 para probar las instrucciones actualizadas. La elección entre grafo y contenido
 mixto depende del material y de la pregunta; se puede pedir explícitamente un

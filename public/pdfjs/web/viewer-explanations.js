@@ -19,7 +19,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   const editors = new Map();
   const notePreview = text => {
     const full = text.replace(/\s+/g, " ").trim();
-    const words = full.split(" ").slice(0, 8).join(" ");
+    const words = full.split(" ").slice(0, 5).join(" ");
     const short = Array.from(words).slice(0, 60).join("").trimEnd();
     return short + (short === full ? "" : "…");
   };
@@ -255,6 +255,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     return modal;
   }
   function openHtml(entry) {
+    let displayedHtml = entry.html;
     const view = overlay(entry.question);
     view.node.classList.add("pdf-explanation-fullpage");
     view.panel.classList.add("pdf-explanation-result");
@@ -267,13 +268,14 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     const escapeBridge = `<script>addEventListener('keydown',e=>{if(e.ctrlKey&&!e.altKey&&!e.shiftKey&&e.key.toLowerCase()==='q'){e.preventDefault();parent.postMessage({type:'cursado-return-home'},'*')}if(e.key==='Escape')parent.postMessage({type:'pdf-explanation-escape'},'*')});<\/script>`;
     const loadHtml = async () => {
       let html = entry.html;
-      if (/cdn\.tailwindcss\.com|data-pdf-slide-deck/.test(html)) {
+      if (/cdn\.tailwindcss\.com|data-pdf-slide-deck|id=["']graph-data["']/.test(html)) {
         const { preparePdfExplanationHtml } = await import("./viewer-explanation-import.js");
         html = await preparePdfExplanationHtml(html);
       }
-      if (modal === view) iframe.srcdoc = csp + escapeBridge + html;
+      if (modal === view) { displayedHtml = html; iframe.srcdoc = csp + escapeBridge + html; }
     };
-    loadHtml().catch(report);
+    let currentLoad = loadHtml();
+    currentLoad.catch(report);
     view.panel.append(iframe);
     const header = view.panel.querySelector("header");
     const icon = (symbol, label, action) => {
@@ -303,16 +305,17 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       } catch (error) { report(error); }
       finally { picker.value = ""; }
     });
-    const reload = icon("\u21bb", "Recargar HTML", () => { loadHtml().catch(report); });
-    const upload = icon("\u2191", "Importar HTML", () => picker.click());
-    const download = icon("\u2193", "Exportar HTML", () => {
-      const url = URL.createObjectURL(new Blob([entry.html], { type: "text/html;charset=utf-8" }));
+    const reload = icon("\u21bb", "Recargar HTML", () => { currentLoad = loadHtml(); currentLoad.catch(report); });
+    const upload = icon("\u2193", "Importar HTML", () => picker.click());
+    const download = icon("\u2191", "Exportar HTML", async () => {
+      try { await currentLoad; } catch (error) { report(error); return; }
+      const url = URL.createObjectURL(new Blob([displayedHtml], { type: "text/html;charset=utf-8" }));
       const link = document.createElement("a");
       link.href = url; link.download = `verlo-pagina-${entry.annotation.pageIndex + 1}.html`;
       document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     });
-    header.prepend(reload, upload, download);
+    header.prepend(reload, download, upload);
     view.panel.append(picker);
     iframe.focus();
   }
@@ -334,6 +337,17 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       return { ...annotation, id: editor.annotationElementId };
     };
     const state = documentState;
+    const syncEditor = () => {
+      if (entry.deleted || state.pdf !== app.pdfDocument || !editor.isAttachedToDOM || editor.isEmpty()) return;
+      editor.show(true);
+      const annotation = editor.serialize();
+      if (!annotation) return;
+      const position = { x: editor.x, y: editor.y };
+      if (JSON.stringify(entry.annotation) === JSON.stringify(annotation) && JSON.stringify(entry.position) === JSON.stringify(position)) return;
+      entry.annotation = annotation;
+      entry.position = position;
+      persist(state).catch(report);
+    };
     const remove = editor.remove.bind(editor), rebuild = editor.rebuild.bind(editor);
     editor.remove = () => {
       if (!entry.deleted) { entry.deleted = true; persist(state).catch(report); }
@@ -344,6 +358,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       // PDF.js restores the same editor when undoing a deletion.
       if (entry.deleted) { entry.deleted = false; persist(state).catch(report); }
       rebuild();
+      // Text undo rebuilds before FreeText finishes measuring its new contents.
+      // Sync afterwards so the manifest and visibility follow undo/redo as well.
+      requestAnimationFrame(syncEditor);
     };
     div.classList.add("pdf-explanation-text");
     div.title = "Clic para ver la explicación; arrastrá para ubicarla";
@@ -354,9 +371,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       if (!editing) return;
       editing = false;
       delete div.dataset.explanationEditing;
-      entry.annotation = editor.serialize() || entry.annotation;
-      entry.position = { x: editor.x, y: editor.y };
-      persist(state).catch(report);
+      syncEditor();
     };
     editor.editorDiv.addEventListener("blur", () => {
       setTimeout(() => { if (editing && !editor.editorDiv.contains(document.activeElement)) editor.commit(); }, 0);

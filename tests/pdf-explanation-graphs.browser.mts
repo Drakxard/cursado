@@ -10,6 +10,55 @@ import { graphFixture, gridGraphFixture } from "./helpers/explanation-graphs-fix
 import { generalGraphFixture } from './helpers/explanation-general-graphs-fixture.mts'
 import { avlTeachingFixture } from './helpers/explanation-avl-teaching-fixture.mts'
 
+test('light graph player fits the viewport, zooms at the pointer with Ctrl+wheel and resets after panning', async () => {
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ reducedMotion: 'reduce' })
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  try {
+    await page.setContent(structuredLessonHtml(avlTeachingFixture))
+    assert.equal(await page.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(241, 245, 249)')
+    for (const [width, height] of [[1366,768],[1280,480],[390,667],[390,400]]) {
+      await page.setViewportSize({ width, height })
+      await page.getByRole('button', { name: 'Ajustar gráfico al espacio', exact: true }).click()
+      for (const step of [1,4,8]) {
+        await page.getByRole('button', { name: `Ir al paso ${step}`, exact: true }).click()
+        assert.equal(await page.evaluate(() => {
+          const stage = document.querySelector<HTMLElement>('#stage')!, box = stage.getBoundingClientRect()
+          const fits = [...document.querySelectorAll('.node .shape')].every(node => {
+            const n = node.getBoundingClientRect()
+            return n.left >= box.left && n.right <= box.right && n.top >= box.top && n.bottom <= box.bottom
+          })
+          const nav = document.querySelector('nav')!.getBoundingClientRect()
+          return fits && box.height > 0 && stage.scrollWidth === stage.clientWidth && stage.scrollHeight === stage.clientHeight &&
+            nav.top >= 0 && nav.bottom <= innerHeight && document.documentElement.scrollHeight <= innerHeight
+        }), true, `${width}x${height}, step ${step}`)
+      }
+    }
+    await page.setViewportSize({ width: 1366, height: 768 })
+    await page.getByRole('button', { name: 'Ajustar gráfico al espacio', exact: true }).click()
+    const stage = (await page.locator('#stage').boundingBox())!, point = { x: stage.x + stage.width * .4, y: stage.y + stage.height * .6 }
+    const worldPoint = () => page.evaluate(point => {
+      const p = new DOMPoint(point.x,point.y).matrixTransform(document.querySelector<SVGSVGElement>('#scene')!.getScreenCTM()!.inverse())
+      return { x: p.x, y: p.y }
+    }, point)
+    const before = await worldPoint()
+    await page.mouse.move(point.x,point.y)
+    await page.keyboard.down('Control'); await page.mouse.wheel(0,-300); await page.keyboard.up('Control')
+    await page.waitForFunction(() => Number(document.body.dataset.graphZoom) > 1)
+    const after = await worldPoint()
+    assert.ok(Math.hypot(before.x-after.x,before.y-after.y) < .001, 'the point under the pointer stays fixed during zoom')
+    assert.equal(await page.evaluate(() => visualViewport!.scale), 1, 'Ctrl+wheel changes the graph rather than browser zoom')
+    const originalView = await page.locator('#scene').getAttribute('viewBox')
+    await page.mouse.move(stage.x+20,stage.y+20); await page.mouse.down(); await page.mouse.move(stage.x+90,stage.y+60,{steps:5}); await page.mouse.up()
+    assert.notEqual(await page.locator('#scene').getAttribute('viewBox'), originalView)
+    await page.getByRole('button', { name: 'Ajustar gráfico al espacio', exact: true }).click()
+    assert.equal(await page.locator('body').getAttribute('data-graph-zoom'), '1')
+    await page.screenshot({ path: 'test-results/graph-light-fit.png', fullPage: true })
+    assert.deepEqual(errors, [])
+  } finally { await browser.close() }
+})
+
 test('teaching sequence explains each change beside its anchor and preserves the subtree order', async () => {
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage({ viewport: { width: 1366, height: 900 }, reducedMotion: 'reduce' })
@@ -19,8 +68,8 @@ test('teaching sequence explains each change beside its anchor and preserves the
       await page.getByRole('button', { name: `Ir al paso ${i+1}`, exact: true }).click()
       assert.equal(await page.locator('#step-title').textContent(), avlTeachingFixture.diapositivas[i].titulo)
       assert.equal(await page.locator('#step-objective').textContent(), avlTeachingFixture.diapositivas[i].objetivo)
-      assert.equal(await page.locator('#stage .callout').count(), 1)
-      assert.equal(await page.locator('.comment-leader').count(), 1)
+      assert.equal(await page.locator('.callout').count(), 1)
+      assert.equal(await page.locator('.comment-leader').count(), await page.locator('#stage .callout').count())
       if (i === 5) {
         assert.equal(await page.locator('[data-edge-id="A:C"]').isVisible(), false)
         assert.equal(await page.locator('[data-edge-id="D:C"]').isVisible(), true)
@@ -61,7 +110,7 @@ test('general graph cards support different topics, complete labels, per-step va
       assert.ok((await page.locator('[data-edge-id="B:A"]').getAttribute('d'))!.includes(' Q '))
       assert.ok((await page.locator('[data-edge-id="B:B"]').getAttribute('d'))!.includes(' C '))
       assert.equal(await page.locator('.callout').count(), 1)
-      assert.equal(await page.locator('#stage .callout').count(), 1, 'card comments stay beside their anchor on desktop')
+      assert.equal(await page.locator('.comment-leader').count(), await page.locator('#stage .callout').count(), 'anchored comments keep their leaders; others stay in the explanation panel')
       for (const [width, height] of [[1366,768],[1280,480],[390,667]]) {
         await page.setViewportSize({ width, height })
         for (let step = 1; step <= 3; step++) {
@@ -74,7 +123,7 @@ test('general graph cards support different topics, complete labels, per-step va
               const shape = node.querySelector<SVGGraphicsElement>('.shape')!.getBBox(), text = node.querySelector<SVGGraphicsElement>('.node-content')!.getBBox()
               const p = node.transform.baseVal.consolidate()!.matrix
               return text.x >= shape.x && text.x + text.width <= shape.x + shape.width + 1 && text.y >= shape.y && text.y + text.height <= shape.y + shape.height + 1 &&
-                p.e + shape.x >= 0 && p.e + shape.x + shape.width <= svg.width && p.f + shape.y >= 0 && p.f + shape.y + shape.height <= svg.height
+                p.e + shape.x >= svg.x && p.e + shape.x + shape.width <= svg.x + svg.width && p.f + shape.y >= svg.y && p.f + shape.y + shape.height <= svg.y + svg.height
             })
             const stage = document.querySelector('#stage')!.getBoundingClientRect()
             const commentsFit = [...document.querySelectorAll('#stage .callout')].every(el => {
@@ -141,7 +190,7 @@ test("graph export navigates offline, keeps node identity, anchors comments and 
     const original = await a.elementHandle()
     assert.equal(await a.getAttribute("transform"), "translate(380 220)")
     assert.equal(await page.locator(".subtree").count(), 3)
-    assert.equal(await page.locator("#stage .callout").count(), 1)
+    assert.equal(await page.locator(".callout").count(), 1)
     const commentPosition = await page.locator(".callout").evaluate(el => ({ x: el.getBoundingClientRect().x, y: el.getBoundingClientRect().y }))
     assert.ok(commentPosition.x > 0 && commentPosition.y > 0)
     await page.keyboard.press("ArrowRight")

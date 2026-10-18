@@ -2,6 +2,39 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { readFile } from "node:fs/promises"
 import { chromium } from "@playwright/test"
+import { graphFixture } from './helpers/explanation-graphs-fixture.mts'
+
+test('a saved graph HTML is upgraded offline using its data without executing its old player', async () => {
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 480 }, reducedMotion: 'reduce' })
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.route('https://import.test/**', async route => {
+    if (new URL(route.request().url()).pathname.endsWith('.js')) return route.fulfill({ body: await readFile('public/pdfjs/web/viewer-explanation-import.js'), contentType: 'text/javascript' })
+    return route.fulfill({ body: '<!doctype html><html><body style="margin:0"><iframe sandbox="allow-scripts" style="display:block;border:0;width:100vw;height:100vh"></iframe></body></html>', contentType: 'text/html' })
+  })
+  try {
+    await page.goto('https://import.test/')
+    const source = '<!doctype html><html><head><style>body{background:black}#scene{min-width:1600px}</style></head><body><div id="stage"><svg id="scene"></svg></div>' +
+      '<script id="graph-data" type="application/json">' + JSON.stringify(graphFixture) + '</script><script>window.oldGraphPlayerRan=true</script></body></html>'
+    const html = await page.evaluate(async source => {
+      const path = '/viewer-explanation-import.js'
+      const module = await import(/* webpackIgnore: true */ path)
+      return module.preparePdfExplanationHtml(source)
+    }, source)
+    assert.ok(!html.includes('oldGraphPlayerRan'))
+    await page.context().setOffline(true)
+    await page.evaluate(html => { document.querySelector('iframe')!.srcdoc = html }, html)
+    const frame = page.frameLocator('iframe')
+    await frame.locator('body[data-graph-engine="d3"]').waitFor()
+    assert.equal(await frame.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(241, 245, 249)')
+    assert.equal(await frame.getByRole('heading', { name: graphFixture.titulo, exact: true }).count(), 1)
+    await frame.getByRole('button', { name: 'Siguiente', exact: true }).click()
+    assert.ok((await frame.locator('#counter').textContent())!.includes('2'))
+    assert.deepEqual(JSON.parse((await frame.locator('#graph-data').textContent())!), graphFixture)
+    assert.deepEqual(errors, [])
+  } finally { await browser.close() }
+})
 
 test("imported AVL compiles Tailwind offline and fits the PDF iframe at different sizes", async () => {
   const browser = await chromium.launch({ headless: true })

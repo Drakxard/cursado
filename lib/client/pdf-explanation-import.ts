@@ -1,6 +1,7 @@
 import { compile } from "tailwindcss"
 import theme from "tailwindcss/theme.css"
 import preflight from "tailwindcss/preflight.css"
+import { graphPresentationHtml } from '../pdf-explanation-graph-html.ts'
 
 const slideStyles = `
 html:has(body[data-pdf-slide-deck]){height:100%;width:100%;overflow:hidden}
@@ -20,6 +21,13 @@ export async function preparePdfExplanationHtml(html: string): Promise<string> {
   if (html.length > 1_500_000) throw new Error("El HTML supera el tamaño permitido.")
   if (!/<html[\s>]/i.test(html) || !/<\/html\s*>/i.test(html)) throw new Error("Elegí un documento HTML completo.")
   const doc = new DOMParser().parseFromString(html, "text/html")
+  // Saved explanations carry their graph data. Re-render this known format
+  // with the current player without asking the model or executing old scripts.
+  const graphData = doc.querySelector<HTMLScriptElement>('script#graph-data[type="application/json"]')
+  if (graphData && doc.querySelector('#stage #scene')) {
+    const graph = JSON.parse(graphData.textContent || 'null')
+    if (graph?.plantilla === 'pantilla1_grafos') return graphPresentationHtml(graph)
+  }
   const tailwind = [...doc.querySelectorAll<HTMLScriptElement>("script[src]")].filter(script => {
     try { return new URL(script.src).hostname === "cdn.tailwindcss.com" } catch { return false }
   })
