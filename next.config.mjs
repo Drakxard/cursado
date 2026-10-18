@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   skipTrailingSlashRedirect: true,
+  outputFileTracingIncludes: {
+    '/api/pdf-explanation': ['./node_modules/katex/dist/katex.min.css', './node_modules/katex/dist/fonts/*.woff2'],
+  },
   turbopack: {
     root: process.cwd(),
   },

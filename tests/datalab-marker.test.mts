@@ -54,7 +54,7 @@ test("acepta una imagen directamente sin envolverla en PDF", async () => {
 })
 
 test("informa clave ausente, fallo remoto y agotamiento de espera", async () => {
-  await assert.rejects(() => convertPdfPageWithDatalabMarker({ file: pagePdf, apiKey: "" }), /MARKER_API/)
+  await assert.rejects(() => convertPdfPageWithDatalabMarker({ file: pagePdf, apiKey: "" }), /Clave de Datalab/)
   await assert.rejects(
     () => convertPdfPageWithDatalabMarker({
       file: pagePdf,

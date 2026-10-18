@@ -41,13 +41,21 @@ export async function requestPdfExplanation(question: string, transcription: str
   })
   let html: string | undefined
   let toolError: string | undefined
+  const seenDiagnostics = new Set<string>()
   if (debug) debug.stage = "lectura-sdk-ui"
   for await (const message of readUIMessageStream({ stream, terminateOnError: true })) {
     if (debug) debug.parts = message.parts
     for (const part of message.parts) {
       if (part.type === "data-explanation-debug") {
-        const detail = part.data as { stage?: unknown } | undefined
-        if (debug && typeof detail?.stage === "string") debug.stage = detail.stage
+        const detail = part.data as { stage?: unknown; attempt?: unknown; elapsedMs?: unknown } | undefined
+        if (debug && typeof detail?.stage === "string") {
+          debug.stage = detail.stage
+          const key = `${detail.stage}:${detail.attempt ?? ""}:${detail.elapsedMs ?? ""}`
+          if (!seenDiagnostics.has(key)) {
+            seenDiagnostics.add(key)
+            ;(debug.diagnostics ??= []).push(part.data)
+          }
+        }
         continue
       }
       if (part.type === "data-explanation-status") {
@@ -55,7 +63,7 @@ export async function requestPdfExplanation(question: string, transcription: str
         if (typeof status?.text === "string") onProgress(status.text)
         continue
       }
-      if (part.type === "text") onProgress("Generando las pantallas y animaciones…")
+      if (part.type === "text") onProgress("Preparando los pasos y diagramas…")
       if (part.type === "data-explanation") {
         const output = part.data as { html?: unknown } | undefined
         if (typeof output?.html === "string") html = output.html

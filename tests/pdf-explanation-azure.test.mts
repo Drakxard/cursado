@@ -1,9 +1,27 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { generateText } from "ai"
+import { generateText, Output } from "ai"
+import { structuredLessonSchema } from "../lib/pdf-explanation-structured.ts"
+import { structuredFixture } from "./helpers/explanation-lesson-fixture.mts"
 import { azureExplanationConfig, azureExplanationModel } from "../lib/server/pdf-explanation-azure.ts"
 import { normalizeInscreenUserConfig } from "../lib/inscreen-user-config.ts"
 import { explanationFailure } from "../lib/pdf-explanation-errors.ts"
+
+test("Azure Responses sends strict JSON Schema on the wire using the real provider", async t => {
+  t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(init.body as string)
+    assert.equal(body.text.format.type, "json_schema")
+    assert.equal(body.text.format.strict, true)
+    assert.equal(body.text.format.schema.additionalProperties, false)
+    assert.deepEqual(body.text.format.schema.required, ["version", "title", "warnings", "steps"])
+    return Response.json({ id: "resp-lesson", created_at: 1, model: "gpt-5-mini", status: "completed",
+      output: [{ type: "message", id: "msg-lesson", role: "assistant", content: [{ type: "output_text", text: JSON.stringify(structuredFixture), annotations: [] }] }],
+      usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 } })
+  })
+  const config = azureExplanationConfig({ gpt5mini: "test-key", conexiongpt5mini: "https://example.openai.azure.com" })!
+  const result = await generateText({ model: azureExplanationModel(config), prompt: "Explicalo", output: Output.object({ schema: structuredLessonSchema }), maxRetries: 0 })
+  assert.deepEqual(result.output, structuredFixture)
+})
 
 test("Azure configuration accepts the saved project endpoint and resource endpoints", () => {
   assert.equal(azureExplanationConfig({}), null)

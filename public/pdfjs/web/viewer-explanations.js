@@ -10,7 +10,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   const toolbar = document.getElementById("toolbarViewerRight");
   if (!toolbar) return;
   const instructionKey = "pdf-explanation-instructions.v1";
-  const defaultInstructions = "Que sea en HTML, visualización simple e intuitiva con interactividad, tratando de sumergir al tema descubriéndolo secuencialmente.";
+  const defaultInstructions = "Explicaci\u00f3n visual e interactiva paso a paso. Us\u00e1 texto, f\u00f3rmulas, tablas y diagramas cuando ayuden a entender; conserv\u00e1 las etiquetas del apunte y aclar\u00e1 las incertidumbres.";
   const getInstructions = () => { try { return localStorage.getItem(instructionKey)?.trim() || defaultInstructions; } catch { return defaultInstructions; } };
   let documentState = null, loading = null, modal = null, restoring = false;
   let saving = Promise.resolve();

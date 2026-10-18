@@ -1,4 +1,4 @@
-export const DEFAULT_EXPLANATION_INSTRUCTIONS = "Que sea en HTML, visualización simple e intuitiva con interactividad, tratando de sumergir al tema descubriéndolo secuencialmente."
+export const DEFAULT_EXPLANATION_INSTRUCTIONS = "Explicaci\u00f3n visual e interactiva paso a paso. Us\u00e1 texto, f\u00f3rmulas, tablas y diagramas cuando ayuden a entender; conserv\u00e1 las etiquetas del apunte y aclar\u00e1 las incertidumbres."
 
 export function explanationInput(body: unknown) {
   const data = body as Record<string, unknown> | null

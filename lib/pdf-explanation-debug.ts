@@ -1,7 +1,7 @@
 export type ExplanationAttempt = {
   question: string; page?: number; model?: string; stage: string; startedAt: string; finishedAt?: string;
   outcome?: "exito" | "fallo"; html?: string; error?: string; transcription?: string;
-  httpStatus?: number; responseBody?: string; wire?: string; parts?: unknown[];
+  diagnostics?: unknown[]; httpStatus?: number; responseBody?: string; wire?: string; parts?: unknown[];
 }
 
 const escape = (text: string) => text.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!)
