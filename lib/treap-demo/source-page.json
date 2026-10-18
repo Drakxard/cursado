@@ -1,0 +1,5 @@
+{
+  "origin": "Transcripción guardada en verlo-pagina-58-exito-2026-10-18T12-12-34-054-.html",
+  "page": 58,
+  "transcription": "# Balanceo del ABB (cont.)\n\n- ***Treaps:*** (Por mezcla de tree y heap). Mantienen el árbol balanceado agregando a cada nodo un elemento entero llamado prioridad. En todo momento se mantiene la propiedad de ABB y además que el árbol este parcialmente ordenado con respecto a la prioridad. Para esto se realizan rotaciones de la misma forma que para AVL. Las prioridades se genera en forma aleatoria al insertar suprimir, esto garantiza un comportamiento casi ideal. (clase `treap_set` en `treap.h`).\n- También ***red-black trees***, ***splay trees***, ...\n"
+}

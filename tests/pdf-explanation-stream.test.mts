@@ -11,6 +11,25 @@ import { structuredFixture } from "./helpers/explanation-lesson-fixture.mts"
 import { explanationSystemConfig } from "../lib/server/pdf-explanation-system.ts"
 import { composeExplanationSystem } from "../lib/pdf-explanation-system.ts"
 import { gridGraphFixture } from "./helpers/explanation-graphs-fixture.mts"
+import { generalGraphFixture } from './helpers/explanation-general-graphs-fixture.mts'
+
+test('normal explanation stream carries general graph attributes and relations for both providers', async () => {
+  const graph = generalGraphFixture('network')
+  for (const provider of ['gateway', 'azure'] as const) {
+    const payload = provider === 'azure' ? { lesson: { ...graph, diapositivas: graph.diapositivas.map(slide => ({ ...slide,
+      posiciones: Object.entries(slide.posiciones).map(([id, position]) => ({ id, ...position, datos: position.datos ?? null })),
+    })) } } : graph
+    const model = textModel(JSON.stringify(payload))
+    const chunks = await parts(explanationStream(model, 'Mostrá cómo cambia la red', 'Cliente, servidor y base de datos', { provider }))
+    const output = chunks.find(chunk => chunk.type === 'data-explanation')?.data?.html
+    assert.ok(output)
+    const data = JSON.parse(output.match(/<script id="graph-data" type="application\/json">([\s\S]*?)<\/script>/)[1])
+    assert.equal(data.elementos_iniciales[1].datos[0].valor, 'pendiente')
+    assert.equal(data.diapositivas[1].posiciones.B.datos[0].valor, 'completado')
+    assert.equal(data.diapositivas[0].aristas[0].dirigida, true)
+    assert.equal(model.doStreamCalls.length, 1)
+  }
+})
 
 function textModel(text: string, reason: "stop" | "length" = "stop") {
   return new MockLanguageModelV4({ doStream: async () => ({ stream: simulateReadableStream({ chunks: [

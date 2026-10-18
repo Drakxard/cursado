@@ -1,15 +1,18 @@
 import { z } from "zod"
 import { structuredLessonSchema } from "./pdf-explanation-structured.ts"
-import { graphPresentationSchema, graphGenerationSchema, gridPositionSchema, pixelPositionSchema } from "./pdf-explanation-graphs.ts"
+import { graphPresentationSchema, graphGenerationSchema, gridPositionSchema, pixelPositionSchema, graphNodeDataSchema, graphEdgeSchema, topologyEdgeSchema } from "./pdf-explanation-graphs.ts"
 
 export const explanationFormatSchema = z.union([structuredLessonSchema, graphGenerationSchema])
 // Strict provider schemas require an object root and fixed object properties.
 // Represent the dynamic position map as entries on this wire only.
 const slide = graphGenerationSchema.shape.diapositivas.element
 const positionId = graphPresentationSchema.shape.elementos_iniciales.element.shape.id
+const azureEdge = graphEdgeSchema.extend({ etiqueta: z.string().trim().max(80).nullable(), dirigida: z.boolean().nullable() })
 const azureGraphSchema = graphGenerationSchema.extend({
+  elementos_iniciales: z.array(graphGenerationSchema.shape.elementos_iniciales.element.extend({ datos: graphNodeDataSchema.nullable() })).min(1).max(40),
   diapositivas: z.array(slide.extend({
-    posiciones: z.array(gridPositionSchema.extend({ id: positionId })).min(1).max(40),
+    posiciones: z.array(gridPositionSchema.extend({ id: positionId, datos: graphNodeDataSchema.nullable() })).min(1).max(40),
+    aristas: z.array(z.union([azureEdge, topologyEdgeSchema])).max(100),
   })).min(1).max(12),
 })
 export const azureExplanationFormatSchema = z.object({

@@ -6,6 +6,7 @@ import { chromium } from "@playwright/test"
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai"
 import { structuredLessonHtml } from "../lib/server/pdf-explanation-renderer.ts"
 import { graphFixture } from "./helpers/explanation-graphs-fixture.mts"
+import { generalGraphFixture } from './helpers/explanation-general-graphs-fixture.mts'
 import { explanationSystemConfig } from "../lib/server/pdf-explanation-system.ts"
 import { composeExplanationSystem } from "../lib/pdf-explanation-system.ts"
 
@@ -38,7 +39,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
       else assert.equal(body.image, undefined)
       generations++
       assert.equal(body.messages[0].role, "user")
-      const html = structuredLessonHtml(graphFixture)
+      const html = structuredLessonHtml(generations === 1 ? { ...generalGraphFixture('network'), titulo: graphFixture.titulo } : graphFixture)
       const response = createUIMessageStreamResponse({ stream: createUIMessageStream({ execute: ({ writer }) => {
         writer.write({ type: "start", messageId: "explanation" })
         if (generations === 2) {
@@ -127,6 +128,10 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     assert.ok(file.suggestedFilename().includes("pagina-1-exito"))
     const downloadedHtml = await readFile(await file.path(), "utf8")
     assert.ok(downloadedHtml.includes('id="graph-data"'))
+    const graphFrame = page.frameLocator('.pdf-explanation-result iframe')
+    await graphFrame.locator('[data-node-id="B"] .datum-value').first().waitFor()
+    assert.ok((await graphFrame.locator('[data-node-id="B"]').textContent()).includes('pendiente'))
+    assert.equal(await graphFrame.locator('[data-edge-id="A:B"]').getAttribute('marker-end'), 'url(#graph-arrow)')
     assert.ok(downloadedHtml.includes("mostrar-explicacion"))
     const assertFullpage = async () => {
       const viewport = page.viewportSize()
@@ -232,6 +237,15 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.getByRole('button', { name: 'Salir de la explicación' }).click()
     await page.locator('.pdf-explanation-text').filter({ hasText: 'Explicalo' }).click()
     await imported.locator('#step-title').waitFor()
+    assert.equal(generations, 2)
+    // Import the standalone D3 prototype through the actual star file picker.
+    await page.locator('.pdf-explanation-result input[type="file"]').setInputFiles('public/demos/treap-d3.html')
+    await imported.locator('#step-title').filter({ hasText: 'Dos valores en cada nodo' }).waitFor()
+    await imported.getByRole('button', { name: 'Ir al paso 6', exact: true }).click()
+    await imported.locator('body[data-step="6"][data-animating="false"]').waitFor()
+    assert.match(await imported.locator('#explanation').textContent(), /10 < 20 < 30 < 40 < 60/)
+    await page.getByRole('button', { name: 'Recargar HTML', exact: true }).click()
+    await imported.locator('#step-title').filter({ hasText: 'Dos valores en cada nodo' }).waitFor()
     assert.equal(generations, 2)
     await page.getByRole("button", { name: "Salir de la explicación" }).click()
     const lastNote = page.locator(".pdf-explanation-text").last()

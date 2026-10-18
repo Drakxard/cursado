@@ -5,6 +5,33 @@ import { resolveGraphPresentation, graphGenerationSchema } from "../lib/pdf-expl
 import { azureExplanationFormatSchema, decodeAzureExplanation } from "../lib/pdf-explanation-formats.ts"
 import { structuredLessonHtml } from "../lib/server/pdf-explanation-renderer.ts"
 import { graphFixture, gridGraphFixture } from "./helpers/explanation-graphs-fixture.mts"
+import { generalGraphFixture } from './helpers/explanation-general-graphs-fixture.mts'
+
+test('generic attributes, per-step data, directed relations and cycles round-trip for both transports', () => {
+  for (const topic of ['process', 'network', 'dependencies'] as const) {
+    const graph = generalGraphFixture(topic)
+    const resolved = resolveGraphPresentation(graph)
+    assert.deepEqual(resolved.elementos_iniciales[1].datos, graph.elementos_iniciales[1].datos)
+    assert.equal(resolved.diapositivas[1].posiciones.B.datos![0].valor, 'completado')
+    assert.equal(resolved.diapositivas[2].posiciones.A.datos, null)
+    assert.deepEqual(resolved.diapositivas[2].posiciones.B.datos, [])
+    const wire = { lesson: { ...graph, diapositivas: graph.diapositivas.map(s => ({ ...s, posiciones: Object.entries(s.posiciones).map(([id, p]) => ({ id, ...p })) })) } }
+    assert.deepEqual(decodeAzureExplanation(wire), graph)
+    assert.equal(resolved.diapositivas[0].aristas[2].desde, resolved.diapositivas[0].aristas[2].hacia)
+    assert.equal(resolved.diapositivas[0].aristas[0].dirigida, true)
+  }
+})
+
+test('graph metadata remains bounded data rather than executable markup', () => {
+  const graph = generalGraphFixture()
+  for (const mutate of [
+    (d: any) => { d.elementos_iniciales[0].datos = Array(5).fill({ etiqueta: 'Dato', valor: '1' }) },
+    (d: any) => { d.elementos_iniciales[0].datos[0].valor = 1 },
+    (d: any) => { d.diapositivas[0].posiciones.A.datos = [{ etiqueta: 'Dato', valor: 'x'.repeat(121) }] },
+    (d: any) => { d.diapositivas[0].aristas[0].dirigida = 'true' },
+    (d: any) => { d.diapositivas[0].aristas[0].etiqueta = 'x'.repeat(81) },
+  ]) { const bad = structuredClone(graph); mutate(bad); assert.throws(() => resolveGraphPresentation(bad)) }
+})
 
 test("grid maps all boundary cells inside the scene and rejects collisions including subtrees", () => {
   const resolved = resolveGraphPresentation(gridGraphFixture)

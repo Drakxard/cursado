@@ -1,9 +1,12 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import type { BoardPdfReference } from "@/lib/board-library-contract"
 import { isNativeReadOnly } from '@/lib/native-workspace'
 
-export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
+export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfReferences, backLabel = "Volver a Temas" }: {
+  pdfReferences?: BoardPdfReference[]
+  backLabel?: string
   boardId: string
   name: string
   rootHandle: FileSystemDirectoryHandle
@@ -22,7 +25,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
       if (event.origin !== location.origin || event.source !== frame.current?.contentWindow || event.data?.boardId !== boardId) return
       if (event.data.type === "topic-board:request-init") {
         try {
-          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle }, location.origin)
+          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle, pdfReferences }, location.origin)
         } catch (reason) { setError(String(reason)) }
       }
       if (event.data.type === "topic-board:ready") { setReady(true); frame.current?.focus() }
@@ -36,7 +39,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
       window.removeEventListener("message", receive)
       previousFocus?.focus({ preventScroll: true })
     }
-  }, [boardId, name, rootHandle, onClose])
+  }, [boardId, name, rootHandle, onClose, pdfReferences])
   const close = () => {
     if (isNativeReadOnly()) { onClose(); return }
     if (!ready) { onClose(); return }
@@ -45,14 +48,14 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose }: {
     frame.current?.contentWindow?.postMessage({ type: "topic-board:close", boardId }, location.origin)
   }
   return <div role="dialog" aria-modal="true" aria-label={`Pizarra de ${name}`} className="fixed inset-0 z-[150] flex flex-col bg-white text-slate-900">
-    {!readerOpen && <button type="button" aria-label="Volver a Temas" title="Volver a Temas" disabled={closing} onClick={close}
+    {!readerOpen && <button type="button" aria-label={backLabel} title={backLabel} disabled={closing} onClick={close}
       className="absolute left-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-xl border bg-white text-xl shadow-sm">{closing ? "…" : "←"}</button>}
     {error && <p role="alert" className="bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>}
     {!ready && !error && <p role="status" className="px-4 py-2 text-sm text-slate-500">Abriendo pizarra…</p>}
     <iframe ref={frame} title={`Pizarra de ${name}`} src={`/pizarra/?topicBoard=${encodeURIComponent(boardId)}`} className="min-h-0 w-full flex-1 border-0"
       onLoad={() => {
         try {
-          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle }, location.origin)
+          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle, pdfReferences }, location.origin)
         } catch (reason) { setError(String(reason)) }
       }} />
   </div>

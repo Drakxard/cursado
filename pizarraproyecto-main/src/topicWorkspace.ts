@@ -1,9 +1,11 @@
+import type { ShapeItem } from './canvas/visualObjects'
+import { boardPdfReference, type BoardPdfReference } from '../../lib/board-library-contract'
 import { getActiveBoardId, selectBoard, setStorageSession } from './biblioteca'
 import type { BoardContentWithExtras } from './biblioteca'
 import { deviceDB, emptyContent, readDeviceBoard, writeDeviceBoard } from './storage/device'
 import { nativeBoardMode } from './nativeWorkspace'
 
-type TopicWorkspace = { boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
+type TopicWorkspace = { pdfReferences?: BoardPdfReference[]; boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
 type TopicSnapshot = { version: 1; boardId: string; name: string; content: BoardContentWithExtras; assets: Record<string, string> }
 let workspace: TopicWorkspace | null = null
 export const getTopicWorkspaceRoot = () => workspace?.rootHandle ?? null
@@ -31,6 +33,18 @@ export async function initializeTopicWorkspace(input: TopicWorkspace) {
   const id = `local:important-${input.boardId}`
   const cached = await readDeviceBoard(id)
   const content = snapshot?.content ?? cached?.content ?? emptyContent()
+  const shapes = (content.shapes ??= []) as ShapeItem[]
+  const existing = new Set(shapes.filter(shape => shape.visualType === 'pdf-shortcut').map(shape => shape.pdfReference?.materialId))
+  const references = Array.isArray(input.pdfReferences) ? input.pdfReferences.map(boardPdfReference).filter((item): item is BoardPdfReference => item !== null) : []
+  const bottom = shapes.reduce((value, shape) => Math.max(value, shape.y + shape.height), 0)
+  let added = 0
+  for (const reference of references) {
+    if (existing.has(reference.materialId)) continue
+    shapes.push({ id: crypto.randomUUID(), kind: 'rounded', visualType: 'pdf-shortcut', pdfReference: reference,
+      label: reference.fileName.replace(/\.pdf$/i, ''), x: 40, y: bottom + 40 + added++ * 74,
+      width: 320, height: 54, color: '#2563eb', strokeWidth: 1.5 })
+    existing.add(reference.materialId)
+  }
   if (snapshot) {
     for (const media of content.media) {
       const data = snapshot.assets[media.assetId]

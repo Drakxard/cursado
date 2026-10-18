@@ -1,5 +1,8 @@
 "use client"
 
+import { TopicBoardOverlay } from "@/components/topic-board-overlay"
+import type { BoardPdfReference } from "@/lib/board-library-contract"
+
 import { isNativeReadOnly } from '@/lib/native-workspace'
 
 import { SubjectHomeCard } from '@/components/subject-home-card'
@@ -1266,6 +1269,8 @@ export function SubjectWheel({
   boardLibrary?: boolean
 }) {
   const router = useRouter()
+  const [containerBoard, setContainerBoard] = useState<{ boardId: string; name: string; pdfReferences: BoardPdfReference[] } | null>(null)
+  const closeContainerBoard = useCallback(() => setContainerBoard(null), [])
   const localWorkspace = useLocalWorkspace()
   const localWorkspaceReady =
     !LOCAL_STORAGE_MODE ||
@@ -3678,7 +3683,7 @@ export function SubjectWheel({
   }
 
   useEffect(() => {
-    if (!isDialogOpen) return
+    if (!isDialogOpen || containerBoard) return
 
     const handleDialogArrowNavigation = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
@@ -3731,6 +3736,7 @@ export function SubjectWheel({
       window.removeEventListener("keyup", handleDialogArrowKeyUp)
     }
   }, [
+    containerBoard,
     cancelNextWeekHold,
     canCreateTransientNextWeek,
     hasNextWeeklyContent,
@@ -6917,6 +6923,21 @@ export function SubjectWheel({
                 {title}
               </button>
             )}
+            <div className="ml-auto flex items-center gap-1">
+              {localWorkspace.rootHandle && currentSubject && <button type="button"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-muted"
+                aria-label={`Abrir pizarra de ${title}`} title={`Abrir pizarra de ${title}`}
+                onClick={() => {
+                  const key = JSON.stringify([currentSubject.id, container?.id ?? mode,
+                    container?.isPinned ? "pinned" : isWeeklyExercisesScope ? dialogSelectedWeekNumber : subjectDialogDateKey])
+                  void crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)).then(hash => {
+                    const boardId = "study-" + Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("")
+                    setContainerBoard({ boardId, name: `${currentSubject.name} - ${title}`, pdfReferences: materialsForMode
+                      .filter(material => !("is_pending_upload" in material) && /\.pdf$/i.test(material.file_name))
+                      .map(material => ({ materialId: material.id, subjectId: material.subject_id, fileName: material.file_name,
+                        workspaceFileId: material.drive_file_id?.startsWith("workspace://") ? material.drive_file_id : null })) })
+                  })
+                }}><img src="/pizarra-home.svg" alt="" className="h-7 w-7 object-contain" /></button>}
             {container?.kind === "custom" && activeContainerControlsId === container.id && editingContainerId !== container.id ? (
               <div className="flex shrink-0 items-center gap-0.5" aria-label={`Opciones de ${container.name}`}>
                 <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"
@@ -6945,6 +6966,7 @@ export function SubjectWheel({
                 </Button>
               </div>
             ) : null}
+            </div>
           </div>
         </div>
 
@@ -7404,6 +7426,7 @@ export function SubjectWheel({
           Actualizando datos locales…
         </div>
       ) : null}
+      {containerBoard && localWorkspace.rootHandle && <TopicBoardOverlay {...containerBoard} rootHandle={localWorkspace.rootHandle} onClose={closeContainerBoard} backLabel="Volver a Estudio" />}
       {/* Header */}
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20">
         <div className="flex items-start justify-between gap-3 px-3 py-3 sm:px-4 sm:py-4">
@@ -8340,7 +8363,7 @@ export function SubjectWheel({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isDialogOpen} onOpenChange={(open) => (!open ? void closeSubjectDialogOrReturn() : undefined)}>
+      <Dialog open={isDialogOpen && !containerBoard} onOpenChange={(open) => (!open ? void closeSubjectDialogOrReturn() : undefined)}>
         <DialogContent className="h-[100dvh] w-screen max-w-none border-0 bg-card p-0 shadow-none sm:h-[96vh] sm:w-[98vw] sm:max-w-[98vw] sm:border sm:border-border" showCloseButton={false}>
           <div className="relative flex h-full flex-col overflow-hidden px-3 py-3 sm:p-8">
             <MaterialTagBar controller={materialTags} />

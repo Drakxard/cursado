@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "catalog": [
+    {
+      "id": "40",
+      "key": 40,
+      "priority": 90
+    },
+    {
+      "id": "20",
+      "key": 20,
+      "priority": 70
+    },
+    {
+      "id": "60",
+      "key": 60,
+      "priority": 50
+    },
+    {
+      "id": "10",
+      "key": 10,
+      "priority": 30
+    },
+    {
+      "id": "30",
+      "key": 30,
+      "priority": 85
+    }
+  ],
+  "initial": {
+    "root": "40",
+    "children": {
+      "40": [
+        null,
+        null
+      ]
+    }
+  },
+  "steps": [
+    {
+      "title": "Dos valores en cada nodo",
+      "text": "La clave decide izquierda o derecha. La prioridad decide quién puede estar arriba: usamos un heap de máximo.",
+      "badge": "CLAVE 40 · PRIORIDAD 90",
+      "focus": [
+        "40"
+      ],
+      "operation": {
+        "type": "observe"
+      }
+    },
+    {
+      "title": "Dos reglas simultáneas",
+      "text": "Las claves menores van a la izquierda y las mayores a la derecha. Cada padre tiene mayor prioridad que sus hijos.",
+      "badge": "ABB válido · Heap válido",
+      "focus": [],
+      "operation": {
+        "type": "show",
+        "tree": {
+          "root": "40",
+          "children": {
+            "10": [
+              null,
+              null
+            ],
+            "20": [
+              "10",
+              null
+            ],
+            "40": [
+              "20",
+              "60"
+            ],
+            "60": [
+              null,
+              null
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Buscar el lugar para 30",
+      "text": "30 < 40: vamos a la izquierda. 30 > 20: vamos a la derecha. Ese lugar está libre.",
+      "badge": "40 → 20 → derecha libre",
+      "focus": [
+        "40",
+        "20"
+      ],
+      "operation": {
+        "type": "observe"
+      }
+    },
+    {
+      "title": "Insertar y detectar el conflicto",
+      "text": "Insertamos 30 como hijo derecho de 20. El ABB sigue correcto, pero la prioridad 85 del hijo supera a 70 del padre.",
+      "badge": "Conflicto: 85 > 70",
+      "focus": [
+        "20",
+        "30"
+      ],
+      "operation": {
+        "type": "insert",
+        "node": "30"
+      }
+    },
+    {
+      "title": "Rotar a la izquierda en 20",
+      "text": "30 sube y 20 pasa a ser su hijo izquierdo. El nodo 10 sigue unido a 20. El padre 40 ahora se conecta con 30.",
+      "badge": "30 sube · 20 baja a la izquierda",
+      "focus": [
+        "20",
+        "30"
+      ],
+      "operation": {
+        "type": "rotateLeft",
+        "pivot": "20"
+      }
+    },
+    {
+      "title": "Comprobar el resultado",
+      "text": "Claves en orden: 10 < 20 < 30 < 40 < 60. Prioridades: 90 > 85 > 70 > 30 y 90 > 50. Ambas reglas se cumplen.",
+      "badge": "ABB válido · Heap válido",
+      "focus": [
+        "30"
+      ],
+      "operation": {
+        "type": "check"
+      }
+    }
+  ]
+}
