@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BoardPdfReference } from '../../lib/board-library-contract'
 import { getTopicWorkspaceRoot } from './topicWorkspace'
 
+// Retain visited iframe documents (PDF.js, page and zoom), rather than just bytes.
+const MAX_RETAINED_READERS = 8
+const INITIAL_PRELOAD_READERS = 2
+
 export function useBoardLibrary(boardId: string, candidates: () => BoardPdfReference[]) {
   const [splitOpen,setSplitOpen] = useState(false)
   const [reader,setReader] = useState<BoardPdfReference | null>(null)
@@ -9,19 +13,28 @@ export function useBoardLibrary(boardId: string, candidates: () => BoardPdfRefer
   const readerFrames = useRef(new Map<number, HTMLIFrameElement>())
   const [prepared, setPrepared] = useState<BoardPdfReference[]>([])
   const [ready, setReady] = useState<Set<number>>(new Set())
+  const visited = useRef<BoardPdfReference[]>([])
+  const session = useMemo(()=>crypto.randomUUID(),[boardId])
+  const frames = useRef({reader,boardId,session})
+  frames.current = {reader,boardId,session}
+  useEffect(()=>{visited.current=[];setSplitOpen(false);setReader(null);setPrepared([]);setReady(new Set())},[boardId])
   useEffect(() => {
     const prepare = () => setPrepared(previous => {
-      const wanted = [...new Map([...(frames.current.reader ? [frames.current.reader] : []), ...candidates()].map(item => [item.materialId, item])).values()].slice(0, 2)
+      const warm = [...new Map(candidates().map(item=>[item.materialId,item])).values()].slice(0,INITIAL_PRELOAD_READERS)
+      const wanted = [...new Map([...visited.current, ...warm].map(item => [item.materialId, item])).values()].slice(0, MAX_RETAINED_READERS)
       return JSON.stringify(previous) === JSON.stringify(wanted) ? previous : wanted
     })
     prepare()
     const timer = window.setInterval(prepare, 1000)
     return () => window.clearInterval(timer)
   }, [boardId])
-  const session = useMemo(()=>crypto.randomUUID(),[boardId])
-  const frames = useRef({reader,boardId,session})
-  frames.current = {reader,boardId,session}
-  useEffect(()=>{setSplitOpen(false);setReader(null);setPrepared([]);setReady(new Set())},[boardId])
+  useEffect(()=>{
+    const retained=new Set(prepared.map(item=>item.materialId))
+    setReady(previous=>{
+      const next=new Set([...previous].filter(id=>retained.has(id)))
+      return next.size===previous.size?previous:next
+    })
+  },[prepared])
   useEffect(()=>{
     const receive = (event: MessageEvent) => {
       if (event.origin !== location.origin || event.data?.session !== session || event.data?.boardId !== boardId) return
@@ -39,7 +52,7 @@ export function useBoardLibrary(boardId: string, candidates: () => BoardPdfRefer
         setSplitOpen(false)
         document.querySelector<HTMLCanvasElement>('.app canvas')?.focus()
       }
-      if(event.data.type === 'board-library:reader-closed' && isReader) {
+      if(event.data.type === 'board-library:reader-closed' && readerEntry && readerEntry[0]===frames.current.reader?.materialId) {
         setReader(null)
         document.querySelector<HTMLCanvasElement>('.app canvas')?.focus()
       }
@@ -64,6 +77,11 @@ export function useBoardLibrary(boardId: string, candidates: () => BoardPdfRefer
       </div>
     })}
   </>
-  return {splitOpen,setSplitOpen,reader,openReader:(reference:BoardPdfReference)=>{setPrepared(previous=>[reference,...previous.filter(item=>item.materialId!==reference.materialId)].slice(0,2));setReader(reference)},panels,
+  return {splitOpen,setSplitOpen,reader,openReader:(reference:BoardPdfReference)=>{
+    visited.current=[reference,...visited.current.filter(item=>item.materialId!==reference.materialId)].slice(0,MAX_RETAINED_READERS)
+    if(!readerFrames.current.has(reference.materialId))setReady(previous=>{const next=new Set(previous);next.delete(reference.materialId);return next})
+    setPrepared(previous=>[reference,...visited.current.filter(item=>item.materialId!==reference.materialId),...previous.filter(item=>!visited.current.some(visited=>visited.materialId===item.materialId))].slice(0,MAX_RETAINED_READERS))
+    setReader(reference)
+  },panels,
     closeReader:()=>readerFrames.current.get(reader?.materialId ?? -1)?.contentWindow?.postMessage({type:'board-library:escape-reader',session,boardId},location.origin)}
 }

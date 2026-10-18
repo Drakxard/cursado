@@ -5,7 +5,7 @@ import { useBoardLibrary } from './BoardLibraryPanels'
 import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace } from './topicWorkspace'
 import { mergeBoard } from './storage/merge'
 import { applyScenePatch } from './storage/livePatch'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LuHand, LuStickyNote, LuWorkflow, LuBookOpen, LuCalendarDays } from 'react-icons/lu'
 import { createNote, defaultConnector, findAnchor, hitsConnector, isConnector, materializeConnector, mergeVisual,
   pointsBounds, refKey, remapConnector, detachTargets, transformVisual, visualBounds } from './canvas/visualObjects'
@@ -17,6 +17,9 @@ import { academicTemplate } from './canvas/academicTemplates'
 import { editableResponse } from './assistant/editableResponse'
 import type { TemplateId } from './canvas/academicTemplates'
 import VisualObjectInspector from './components/VisualObjectInspector'
+import { PdfPinIcon } from './components/PdfPin'
+import StickyNoteEditor from './components/StickyNoteEditor'
+import type { StickyNoteEditorHandle } from './components/StickyNoteEditor'
 import AcademicLibrary from './components/AcademicLibrary'
 import CodeWorkspace from './components/CodeWorkspace'
 import ChatGPTConsultation from './components/ChatGPTConsultation'
@@ -754,6 +757,7 @@ function InlineTableEditor({ table, camera, anchorRef, onChange, onCellChange, o
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pdfPointer = useRef<{pointerId:number;id:string;x:number;y:number;moved:boolean;transform:Transform}|null>(null)
+  const pdfPinRef = useRef<HTMLButtonElement>(null)
   const sceneRef = useRef<HTMLDivElement>(null)
   const contentCanvasesRef = useRef(new Map<number,HTMLCanvasElement>())
   const navigationPointerRef = useRef<number|null>(null)
@@ -796,6 +800,7 @@ function App() {
   tableEditorBusyRef.current = tableEditorId !== null
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null)
   const inlineTableRef=useRef<HTMLDivElement>(null)
+  const inlineNoteRef=useRef<StickyNoteEditorHandle>(null)
   const [tableRevision, refreshTables] = useState(0)
   const [excelNotice, setExcelNotice] = useState('')
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
@@ -940,6 +945,8 @@ function App() {
   const undoRef = useRef<Snapshot[]>([])
   const redoRef = useRef<Snapshot[]>([])
   const clipboardRef = useRef<BoardClipboard | null>(null)
+  const clipboardTokenRef = useRef('')
+  const clipboardLocalOnlyRef = useRef(false)
   const pasteCountRef = useRef(0)
   const editingRef = useRef<EditingText | null>(null)
   const [editing, setEditing] = useState<EditingText | null>(null)
@@ -1491,6 +1498,8 @@ function App() {
 
   function redraw() {
     sendCamera()
+    inlineNoteRef.current?.layout()
+    positionPdfPin()
     if(sceneRef.current){
       const cam=cameraRef.current
       sceneRef.current.style.transform=`translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})`
@@ -2863,7 +2872,8 @@ function App() {
       const shortcut = hit?.kind==='shape' ? shapesRef.current.find(shape=>shape.id===hit.id&&shape.visualType==='pdf-shortcut') : null
       if(shortcut?.pdfReference) {
         e.preventDefault();finishPendingPen();if(editingRef.current)commitText()
-        setTool('select');selectElement({kind:'shape',id:shortcut.id})
+        setTool('select')
+        if(!groupRef.current.some(item=>item.kind==='shape'&&item.id===shortcut.id))selectElement({kind:'shape',id:shortcut.id})
         pdfPointer.current={pointerId:e.pointerId,id:shortcut.id,x:e.clientX,y:e.clientY,moved:false,
           transform:{mode:'move',start:toWorld(e.clientX,e.clientY),bounds:groupBounds()!,initial:snapshot(),group:[...groupRef.current]}}
         e.currentTarget.setPointerCapture(e.pointerId);return
@@ -3129,7 +3139,7 @@ function App() {
       pdfPointer.current=null
       if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId)
       if(pdf.moved)scheduleSave()
-      else {const reference=shapesRef.current.find(shape=>shape.id===pdf.id)?.pdfReference;if(reference)materialLibrary.openReader(reference)}
+      else if(pdf.transform.group.length===1){const reference=shapesRef.current.find(shape=>shape.id===pdf.id)?.pdfReference;if(reference)materialLibrary.openReader(reference)}
       return
     }
     if(cartesianDragRef.current&&e.pointerId===pointerRef.current){moveCartesianResize(toWorld(e.clientX,e.clientY));finishCartesianResize();return}
@@ -3683,6 +3693,41 @@ function App() {
     return toWorld(rect.left + rect.width / 2, rect.top + rect.height / 2)
   }
 
+  function selectedPdfShortcut() {
+    const selected=groupRef.current
+    if(selected.length!==1||selected[0].kind!=='shape')return null
+    return shapesRef.current.find(item=>item.id===selected[0].id&&item.visualType==='pdf-shortcut'&&item.pdfReference)??null
+  }
+
+  function positionPdfPin() {
+    const button=pdfPinRef.current,item=selectedPdfShortcut()
+    if(!button||!item)return
+    const bounds=rotatedRect(item,item.rotation),camera=cameraRef.current,canvas=canvasRef.current?.getBoundingClientRect()
+    const left=(canvas?.left??0)+(bounds.x+bounds.width)*camera.zoom+camera.x+12
+    const top=(canvas?.top??0)+bounds.y*camera.zoom+camera.y
+    button.style.left=`${Math.max(canvas?.left??8,Math.min(left,(canvas?.right??innerWidth)-46))}px`
+    button.style.top=`${Math.max(8,Math.min(top,innerHeight-50))}px`
+  }
+  useLayoutEffect(()=>{positionPdfPin()})
+
+  function togglePdfPin() {
+    const item=selectedPdfShortcut()
+    if(!item)return
+    rememberChange();item.pdfPinned=!item.pdfPinned
+    refreshSelection(n=>n+1);redraw();scheduleSave()
+  }
+
+  function revealPdfShortcut(id:string) {
+    const item=shapesRef.current.find(item=>item.id===id&&item.visualType==='pdf-shortcut')
+    if(!item)return
+    selectTool('select');setTreePanel(null);setOpenMenu(null)
+    const canvas=canvasRef.current?.getBoundingClientRect(),camera=cameraRef.current
+    camera.x=(canvas?.width??innerWidth)/2-(item.x+item.width/2)*camera.zoom
+    camera.y=(canvas?.height??innerHeight)/2-(item.y+item.height/2)*camera.zoom
+    selectElement({kind:'shape',id});redraw();scheduleSave()
+    canvasRef.current?.focus()
+  }
+
   function insertYouTube(link: string, at?: Point): boolean {
     const parsed = parseYouTubeLink(link)
     if (!parsed) {
@@ -4146,6 +4191,11 @@ function App() {
       const clipboard=e.clipboardData
       const html=clipboard?.getData('text/html')??''
       const plain=clipboard?.getData('text/plain')??''
+      const copiedToken=html?new DOMParser().parseFromString(html,'text/html').querySelector('[data-cursado-board-copy]')?.getAttribute('data-cursado-board-copy'):null
+      // Our note may itself contain a URL, tabs or SVG. Paste the object first.
+      if(clipboardRef.current&&copiedToken&&copiedToken===clipboardTokenRef.current){
+        e.preventDefault();pasteSelected();return
+      }
       // Un enlace de YouTube pegado sobre el lienzo se vuelve un reproductor.
       // No afecta el pegado dentro de editores, tablas ni formularios.
       if (parseYouTubeLink(plain)) {
@@ -4360,6 +4410,23 @@ function App() {
       videos: structuredClone(videosRef.current.filter(v=>videoIds.has(v.id))),
     }
     pasteCountRef.current = 0
+    const token=createId()
+    clipboardTokenRef.current=token
+    clipboardLocalOnlyRef.current=true
+    const data=clipboardRef.current
+    const plain=[...data.texts.map(item=>item.text),...data.shapes.map(item=>item.note?.text??item.label??'')].filter(Boolean).join('\n')||'Selección de pizarra'
+    const marker=document.createElement('span')
+    marker.dataset.cursadoBoardCopy=token;marker.textContent=plain
+    // HTML carries only a local reference; the actual shapes remain in memory.
+    // If system clipboard access is unavailable, Ctrl+V uses that local copy.
+    if(navigator.clipboard?.write&&typeof ClipboardItem!=='undefined'){
+      try{
+        void navigator.clipboard.write([new ClipboardItem({
+          'text/plain':new Blob([plain],{type:'text/plain'}),
+          'text/html':new Blob([marker.outerHTML],{type:'text/html'}),
+        })]).then(()=>{if(clipboardTokenRef.current===token)clipboardLocalOnlyRef.current=false}).catch(()=>{})
+      }catch{ /* Keep the local copy when the browser cannot write clipboard data. */ }
+    }
     return true
   }
 
@@ -4389,7 +4456,7 @@ function App() {
     const strokes = data.strokes.map(stroke => ({ ...remapGroup(stroke), id:newId('stroke',stroke.id), points: stroke.points.map(p => ({ ...p, x: p.x + offset, y: p.y + offset })) }))
     const texts = data.texts.map(item => ({ ...remapGroup(item), id: newId('text',item.id), x: item.x + offset, y: item.y + offset }))
     const media = data.media.map(item => ({ ...remapGroup(item), id: newId('media',item.id), x: item.x + offset, y: item.y + offset }))
-    const shapes = (data.shapes??[]).map(item=>remapConnector({...remapGroup(item),id:newId('shape',item.id),x:item.x+offset,y:item.y+offset},freshIds,{x:offset,y:offset}))
+    const shapes = (data.shapes??[]).map(item=>remapConnector({...remapGroup(item),...(item.visualType==='pdf-shortcut'?{pdfPinned:false}:{}),id:newId('shape',item.id),x:item.x+offset,y:item.y+offset},freshIds,{x:offset,y:offset}))
     const tables = (data.tables??[]).map(item=>({...remapGroup(item),id:newId('table',item.id),x:item.x+offset,y:item.y+offset}))
     const graphs = (data.graphs??[]).map(item=>({...remapGroup(item),id:newId('graph',item.id),x:item.x+offset,y:item.y+offset}))
     const videos=(data.videos??[]).map(item=>({...remapGroup(item),id:newId('video',item.id),x:item.x+offset,y:item.y+offset}))
@@ -4590,6 +4657,7 @@ function App() {
           else copySelected()
         } }
         else if (key === 'x') { if (groupRef.current.length) { e.preventDefault(); cutSelected() } }
+        else if (key === 'v' && clipboardRef.current && clipboardLocalOnlyRef.current) { e.preventDefault(); pasteSelected() }
         else if (key === 'g' && groupRef.current.length>1) {e.preventDefault();groupSelected()}
         // Ctrl+V se procesa en el evento paste: primero archivos externos; si no, portapapeles interno.
         else if (key === 'a') { e.preventDefault(); selectAllBoard() }
@@ -4998,6 +5066,9 @@ function App() {
         </div>}
       </div>
       <RightMathDock getSelection={getMathSelectionForDock} addGraphToBoard={(formulas,settings)=>insertBoardGraph(formulas,undefined,settings)}
+        pinnedPdfs={shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).map(item=>({id:item.id,name:item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')}))}
+        onOpenPdf={id=>{const reference=shapesRef.current.find(item=>item.id===id)?.pdfReference;if(reference)materialLibrary.openReader(reference)}}
+        onRevealPdf={revealPdfShortcut}
         getSelectedMatrix={()=>{
           const selected=groupRef.current
           if(selected.length!==1||selected[0].kind!=='shape')return null
@@ -5227,8 +5298,20 @@ function App() {
               <button type="button" onClick={()=>{rememberChange();item.note=navigateStudyNote(item.note!,'next');redraw();scheduleSave()}}>Siguiente tarjeta</button>
             </div>}</>:null
       })()}
+      {!visualEditor&&!openMenu&&!treePanel&&selectedPdfShortcut()&&(()=>{
+        const item=selectedPdfShortcut()!,name=item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')
+        return <button ref={pdfPinRef} type="button" className="pdf-pin-control" aria-pressed={!!item.pdfPinned}
+          aria-label={`${item.pdfPinned?'Desfijar':'Fijar'} PDF ${name}`} title={item.pdfPinned?'Desfijar de la barra lateral':'Fijar en la barra lateral'}
+          onClick={togglePdfPin}><PdfPinIcon/></button>
+      })()}
       {visualEditor && (()=>{
         const item=shapesRef.current.find(item=>item.id===visualEditor)
+        if(item?.note&&!item.note.study)return <StickyNoteEditor key={item.id} item={item} layoutRef={inlineNoteRef}
+          getPlacement={()=>{
+            const origin=canvasRef.current?.getBoundingClientRect()
+            const camera=cameraRef.current
+            return {item:shapesRef.current.find(current=>current.id===item.id)??item,x:camera.x+(origin?.left??0),y:camera.y+(origin?.top??0),zoom:camera.zoom}
+          }} onApply={applyVisualEdit} onClose={()=>setVisualEditor(null)}/>
         return item?.code?<CodeWorkspace key={item.id} item={item} onApply={applyVisualEdit} onClose={()=>setVisualEditor(null)}/>:item&&item.symbol!=='cartesian'?<VisualObjectInspector key={item.id} item={materializeConnector(item,resolveObject)} onApply={applyVisualEdit} onClose={()=>setVisualEditor(null)}/>:null
       })()}
       <div className="zoom-controls">

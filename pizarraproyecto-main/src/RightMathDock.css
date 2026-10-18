@@ -1,6 +1,14 @@
 .math-dock { position:fixed; right:14px; top:50%; transform:translateY(-50%); z-index:28; display:flex; flex-direction:column; gap:7px; padding:7px; border-radius:15px; background:var(--math-panel-bg,#fff); border:1px solid var(--math-border,#d4d9e2); box-shadow:0 8px 26px #17203420; }
 .math-dock button { width:41px; height:41px; border:0; border-radius:11px; display:grid; place-items:center; background:transparent; color:var(--math-text,#202938); cursor:pointer; }
 .math-dock button.math-dock-active,.math-dock button:hover { background:var(--math-active,#e5e9ff); color:var(--math-accent,#505de3); }
+.math-dock {max-height:calc(100dvh - 180px);}
+.app[data-library-split='true'] .math-dock {right:calc(50vw + 14px);}
+.math-dock>button,.math-dock-pdfs button {flex-shrink:0;}
+.math-dock-pdfs {display:flex;flex-direction:column;gap:7px;min-height:0;max-height:40dvh;overflow-y:auto;border-top:1px solid var(--math-border,#d4d9e2);padding-top:7px;}
+.pinned-pdf-button {touch-action:pan-y;user-select:none;-webkit-touch-callout:none;}
+.pdf-pin-control {position:fixed;z-index:24;width:38px;height:42px;display:grid;place-items:center;border:1px solid var(--ui-border,#d9dfeb);border-radius:9px;background:var(--ui-surface,#fff);color:var(--ui-text,#243047);cursor:pointer;box-shadow:0 3px 10px #0001;}
+.pdf-pin-control[aria-pressed='true'] {color:#4f46e5;background:var(--math-active,#e5e9ff);}
+.pdf-pin-control:focus-visible,.pinned-pdf-button:focus-visible {outline:2px solid #6366f1;outline-offset:2px;}
 .math-panel { position:fixed; z-index:27; right:78px; top:50%; transform:translateY(-50%); width:min(340px,calc(100vw - 98px)); max-height:85vh; display:flex; flex-direction:column; background:var(--math-panel-bg,#fff); color:var(--math-text,#202938); border:1px solid var(--math-border,#d4d9e2); border-radius:16px; overflow:hidden; box-shadow:0 14px 38px #15203035; font:13px system-ui,sans-serif; }
 .math-panel-graph { width:min(540px,calc(100vw - 98px)); }
 .math-panel * { box-sizing:border-box; }

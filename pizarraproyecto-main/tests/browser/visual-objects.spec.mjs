@@ -496,7 +496,7 @@ test('private notes and academic templates support transform, group, layers, und
   await page.screenshot({path:'test-results/fase1-movil.png'})
   await note(page,'Nota desde pantalla pequeña')
   await page.getByRole('button',{name:'Editar nota',exact:true}).click()
-  const editor=await page.locator('.visual-inspector').boundingBox()
+  const editor=await page.locator('.inline-note-toolbar').boundingBox()
   expect(editor.x).toBeGreaterThanOrEqual(0)
   expect(editor.y+editor.height).toBeLessThan(844)
   await page.screenshot({path:'test-results/fase1-nota-movil.png'})

@@ -55,6 +55,8 @@ jobs:
         run: node --test tests/native-web.browser.mjs
       - name: Pruebas del servidor Python con base temporal
         run: python pizarraproyecto-main/tests/hosting_namespace.test.py
+      - name: Guardado de accesos a PDF fijados
+        run: python pizarraproyecto-main/tests/pdf_shortcuts.test.py
       - name: Navegación, sesiones, guardado y modo sin conexión
         shell: bash
         run: |
@@ -69,6 +71,9 @@ jobs:
           npm run test:integration
       - name: Actualizaciones y copias sin conexión de Pizarra
         run: npm run test:browser -- tests/browser/offline-study.spec.mjs tests/browser/app-update.spec.mjs tests/browser/pdf-shortcuts.spec.mjs
+        working-directory: pizarraproyecto-main
+      - name: Edición directa de notas adhesivas en escritorio y móvil
+        run: npm run test:browser -- tests/browser/sticky-notes.spec.mjs
         working-directory: pizarraproyecto-main
       - name: Guardar capturas y diagnósticos
         if: always()

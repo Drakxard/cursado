@@ -41,7 +41,7 @@ def validate_visual_content(content: dict):
         if not isinstance(item, dict) or not item.get('visualType'):
             continue
         kind = item['visualType']
-        require(kind in ('sticky', 'connector', 'symbol', 'page', 'code'), 'Tipo de objeto visual desconocido.')
+        require(kind in ('sticky', 'connector', 'symbol', 'page', 'code', 'pdf-shortcut'), 'Tipo de objeto visual desconocido.')
         require(isinstance(item.get('id'), str) and 1 <= len(item['id']) <= 150 and counts[item['id']] == 1,
                 'El objeto visual necesita un identificador único.')
         require(number(item.get('x')) and number(item.get('y')) and number(item.get('width'), .001, 1_000_000)
@@ -51,7 +51,22 @@ def validate_visual_content(content: dict):
                 'El color del objeto visual no es válido.')
         if item.get('label') is not None:
             require(text(item['label'], 2000), 'El texto del elemento es demasiado largo.')
-        if kind == 'page':
+        if kind == 'pdf-shortcut':
+            reference = item.get('pdfReference')
+            require(isinstance(reference, dict), 'Falta la referencia del PDF.')
+            material_id = reference.get('materialId')
+            require(type(material_id) is int and 1 <= material_id <= 9007199254740991,
+                    'El identificador del PDF no es válido.')
+            require(text(reference.get('subjectId'), 200) and bool(reference['subjectId'])
+                    and text(reference.get('fileName'), 500) and re.search(r'\.pdf$', reference['fileName'], re.I),
+                    'La materia o el nombre del PDF no es válido.')
+            workspace = reference.get('workspaceFileId')
+            require(workspace is None or (isinstance(workspace, str) and workspace.startswith('workspace://')
+                    and len(workspace) <= 2000 and not re.search(r'[\\\x00-\x1f]', workspace)
+                    and all(part and part not in ('.', '..') for part in workspace[12:].split('/'))),
+                    'La ubicación del PDF no es válida.')
+            require(type(item.get('pdfPinned', False)) is bool, 'El estado fijado del PDF no es válido.')
+        elif kind == 'page':
             require(abs(item['width'] / item['height'] - 210 / 297) < .002, 'La hoja debe mantener la proporción A4.')
         elif kind == 'code':
             code = item.get('code')

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { LuLayers } from 'react-icons/lu'
 import MatrixCalculator from './components/MatrixCalculator'
 import FlashcardPanel from './components/FlashcardPanel'
+import { PinnedPdfButton } from './components/PdfPin'
 import type { Flashcard } from './study/flashcards'
 import type { MatrixCells } from './study/matrices'
 import type { CSSProperties, DragEvent as ReactDragEvent } from 'react'
@@ -32,13 +33,16 @@ const keys=[
 const newRow=(index:number,expr=''):GraphFormula=>({id:`graph-formula-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,expr,color:palette[index%palette.length],enabled:true})
 const splitSelection=(text:string):GraphFormula[]=>text.split(/[;\n]+/).map(s=>s.trim()).filter(Boolean).map((expr,i)=>newRow(i,expr))
 
-export default function RightMathDock({getSelection,addGraphToBoard,getSelectedMatrix,addMatrixToBoard,addCardsToBoard,onOpenPanel}: {
+export default function RightMathDock({getSelection,addGraphToBoard,getSelectedMatrix,addMatrixToBoard,addCardsToBoard,onOpenPanel,pinnedPdfs=[],onOpenPdf,onRevealPdf}: {
   getSelection:()=>Promise<string>;
   addGraphToBoard:(formulas:GraphFormula[],settings?:GraphSettings)=>void;
   getSelectedMatrix:()=>MatrixCells|null;
   addMatrixToBoard:(cells:MatrixCells)=>void;
   addCardsToBoard:(cards:Flashcard[],asDeck?:boolean)=>void;
   onOpenPanel:()=>void;
+  pinnedPdfs?: {id:string;name:string}[];
+  onOpenPdf?:(id:string)=>void;
+  onRevealPdf?:(id:string)=>void;
 }){
   const [mode,setMode]=useState<Mode>('closed')
   const [calcTab,setCalcTab]=useState<CalcTab>('menu')
@@ -133,6 +137,11 @@ export default function RightMathDock({getSelection,addGraphToBoard,getSelectedM
         onClick={()=>{onOpenPanel();setMode(m=>m==='graph'?'closed':'graph')}}><FiActivity size={20}/></button>
       <button type="button" aria-label="Tarjetas de estudio" title="Tarjetas de estudio" className={mode==='cards'?'math-dock-active':''}
         onClick={()=>{onOpenPanel();setMode(m=>m==='cards'?'closed':'cards')}}><LuLayers size={20}/></button>
+      {!!pinnedPdfs.length&&<div className="math-dock-pdfs" role="group" aria-label="PDF fijados">
+        {pinnedPdfs.map(pdf=><PinnedPdfButton key={pdf.id} name={pdf.name}
+          onOpen={()=>{onOpenPanel();setMode('closed');onOpenPdf?.(pdf.id)}}
+          onReveal={()=>{onOpenPanel();setMode('closed');onRevealPdf?.(pdf.id)}}/>)}
+      </div>}
     </nav>
     {mode==='cards'&&<FlashcardPanel onClose={()=>setMode('closed')} getSelection={getSelection} onInsert={addCardsToBoard}/>}
     {mode!=='closed'&&mode!=='cards'&&<aside className={`math-panel ${mode==='graph'?'math-panel-graph':''}`} aria-label="Panel de matemáticas" onKeyDown={e=>e.stopPropagation()} onPointerDown={e=>e.stopPropagation()} onWheel={e=>e.stopPropagation()}>
