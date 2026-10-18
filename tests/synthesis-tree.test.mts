@@ -123,7 +123,7 @@ test("Síntesis conserva el guardado local y habilita su endpoint R2 protegido",
   const dropdownStyles = readFileSync(new URL("../components/tiptap-ui-primitive/dropdown-menu/dropdown-menu.scss", import.meta.url), "utf8")
   const popoverStyles = readFileSync(new URL("../components/tiptap-ui-primitive/popover/popover.scss", import.meta.url), "utf8")
   const home = readFileSync(new URL("../components/subject-wheel.tsx", import.meta.url), "utf8")
-  const openSynthesis = home.match(/const openCurrentSubjectSynthesis = useCallback\(async \(\) => \{[\s\S]*?\n  \}, \[/)?.[0] ?? ""
+  const openSynthesis = home.match(/const openCurrentSubjectSynthesis = useCallback\(async \(materialId\?: number\) => \{[\s\S]*?\n  \}, \[/)?.[0] ?? ""
   assert.match(client, /beforeunload/)
   assert.match(client, /buildSynthesisLocalStorageKey/)
   assert.match(client, /replaceSynthesisBranch/)
@@ -260,4 +260,14 @@ test("contenido sin delimitadores H1 no crea objetos al normalizar ni recargar",
   assert.deepEqual(workspace.document.content!.map((block) => block.type), ["heading", "paragraph"])
   assert.equal(workspace.document.content![0].attrs!.level, 3)
   assert.deepEqual(normalizeSynthesisWorkspace(workspace), workspace)
+})
+
+
+test("Síntesis acepta los identificadores de materias con espacios y acentos", () => {
+  for (const subjectId of ["Prog 3", "Prog+3", "Análisis Matemático"] ) {
+    assert.deepEqual(parseSynthesisContext(subjectId, 27), { subjectId, weekNumber: 27 })
+  }
+  for (const subjectId of ["../materia", "materia/otra", "materia\\otra"]) {
+    assert.throws(() => parseSynthesisContext(subjectId, 27), /materia/)
+  }
 })

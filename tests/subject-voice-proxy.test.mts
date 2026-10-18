@@ -26,6 +26,7 @@ test("TTS pasa al servidor en modo local únicamente mediante POST", () => {
 test("el proxy permite consultar voz y ejecutar Datalab/Clef con workspace local", () => {
   for (const [path, method] of [
     ["/api/subject-voice", "GET"],
+    ["/api/subject-voice/pdf-extraction/config", "POST"],
     ["/api/subject-voice/pdf-extraction", "POST"],
     ["/api/subject-voice/pdf-extraction?token=signed-job", "GET"],
     ["/api/subject-voice/pdf-evaluate", "POST"],
@@ -43,6 +44,7 @@ test("la excepción no habilita rutas desconocidas, métodos adicionales ni APIs
   for (const [path, method] of [
     ["/api/subject-voice-unknown", "GET"],
     ["/api/subject-voice/unknown", "POST"],
+    ["/api/subject-voice/pdf-extraction/config", "GET"],
     ["/api/subject-voice/pdf-extraction", "DELETE"],
     ["/api/subject-voice/pdf-evaluate", "GET"],
     ["/api/subject-day-materials", "GET"],

@@ -7,7 +7,7 @@ export type SynthesisContext = {
   weekNumber: number
 }
 
-const VALID_SUBJECT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const VALID_SUBJECT_ID = /^[\p{L}\p{N}][\p{L}\p{N} ._+-]*$/u
 
 export class InvalidSynthesisContextError extends Error {}
 

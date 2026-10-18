@@ -6645,12 +6645,6 @@ export function SubjectWheel({
     continueMode === "theory"
       ? selectedTheoryMaterial ?? continuePayload?.material ?? null
       : selectedPracticeMaterial ?? continuePayload?.material ?? null
-  const pdfHoldRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean; x: number; y: number }>({ timer: null, fired: false, x: 0, y: 0 })
-  const cancelPdfHold = () => {
-    if (pdfHoldRef.current.timer) clearTimeout(pdfHoldRef.current.timer)
-    pdfHoldRef.current.timer = null
-  }
-  useEffect(() => cancelPdfHold, [])
   const openCurrentSubjectSynthesis = useCallback(async (materialId?: number) => {
     if (!currentSubject) return
     await flushPendingFeaturedUpdate()
@@ -7022,46 +7016,34 @@ export function SubjectWheel({
                           <span className="text-xs text-red-600">El manifiesto existe, pero falta el archivo. No se elimino la referencia.</span>
                         </div>
                       ) : (
-                        <a
-                          href={buildMaterialViewerHref(
-                            material,
-                            getSubjectDisplayName(currentSubject),
-                            currentSubject,
-                            currentSubject ? subjectWeekdays[currentSubject.id] : undefined
-                          )}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          draggable={false}
-                          title="Mantener presionado: abrir editor en otra pestaña y PDF aquí"
-                          onPointerDown={(event) => {
-                            if (event.button !== 0 || !/\.pdf$/i.test(material.file_name)) return
-                            cancelPdfHold()
-                            pdfHoldRef.current = { timer: null, fired: false, x: event.clientX, y: event.clientY }
-                            pdfHoldRef.current.timer = setTimeout(() => {
-                              pdfHoldRef.current.fired = true
-                            }, 600)
-                          }}
-                          onPointerMove={(event) => {
-                            if (Math.hypot(event.clientX - pdfHoldRef.current.x, event.clientY - pdfHoldRef.current.y) > 10) { cancelPdfHold(); pdfHoldRef.current.fired = false }
-                          }}
-                          onPointerUp={(event) => {
-                            cancelPdfHold()
-                            if (!pdfHoldRef.current.fired) return
-                            event.preventDefault()
-                            const params = new URLSearchParams({ subjectId: material.subject_id, weekNumber: String(material.week_number), materialId: String(material.id) })
-                            window.open(`/sintesis?${params}`, "_blank", "noopener,noreferrer")
-                            router.push(buildMaterialViewerHref(material, getSubjectDisplayName(currentSubject), currentSubject, currentSubject ? subjectWeekdays[currentSubject.id] : undefined))
-                          }}
-                          onPointerLeave={() => { cancelPdfHold(); pdfHoldRef.current.fired = false }}
-                          onPointerCancel={() => { cancelPdfHold(); pdfHoldRef.current.fired = false }}
-                          onContextMenu={(event) => { if (pdfHoldRef.current.fired || pdfHoldRef.current.timer) event.preventDefault() }}
-                          onClick={(event) => {
-                            if (pdfHoldRef.current.fired) { event.preventDefault(); pdfHoldRef.current.fired = false }
-                          }}
-                          className="block min-w-0 truncate text-sm text-foreground hover:underline"
-                        >
-                          {material.file_name}
-                        </a>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <a
+                            href={buildMaterialViewerHref(
+                              material,
+                              getSubjectDisplayName(currentSubject),
+                              currentSubject,
+                              currentSubject ? subjectWeekdays[currentSubject.id] : undefined
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            draggable={false}
+                            className="block min-w-0 truncate text-sm text-foreground hover:underline"
+                          >
+                            {material.file_name}
+                          </a>
+                          {/\.pdf$/i.test(material.file_name) ? (
+                            <a
+                              href={`/sintesis?${new URLSearchParams({ subjectId: material.subject_id, weekNumber: String(material.week_number), materialId: String(material.id) })}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Abrir en Síntesis en otra pestaña"
+                              aria-label={`Editar ${material.file_name} en Síntesis en otra pestaña`}
+                              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </a>
+                          ) : null}
+                        </div>
                       )}
                       <div className="mt-2 flex flex-wrap gap-1">
                         {materialTags.workspace.tags
