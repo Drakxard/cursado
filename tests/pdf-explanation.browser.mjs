@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { chromium } from "@playwright/test"
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai"
+import { structuredLessonHtml } from "../lib/server/pdf-explanation-renderer.ts"
+import { graphFixture } from "./helpers/explanation-graphs-fixture.mts"
 
 const require = createRequire(import.meta.url)
 const { PDFDocument } = require("../public/vendor/pdf-lib.min.js")
@@ -31,7 +33,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
       else assert.equal(body.image, undefined)
       generations++
       assert.equal(body.messages[0].role, "user")
-      const html = '<html><head></head><body><h1>Explicación</h1><button onclick="this.textContent=\'Paso 2\'">Siguiente</button></body></html>'
+      const html = structuredLessonHtml(graphFixture)
       const response = createUIMessageStreamResponse({ stream: createUIMessageStream({ execute: ({ writer }) => {
         writer.write({ type: "start", messageId: "explanation" })
         if (generations === 2) {
@@ -104,7 +106,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     const file = await successfulDownload
     assert.ok(file.suggestedFilename().includes("pagina-1-exito"))
     const downloadedHtml = await readFile(await file.path(), "utf8")
-    assert.ok(downloadedHtml.includes("<h1>Explicación</h1>"))
+    assert.ok(downloadedHtml.includes('id="graph-data"'))
     assert.ok(downloadedHtml.includes("mostrar-explicacion"))
     const assertFullpage = async () => {
       const viewport = page.viewportSize()
@@ -143,6 +145,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     assert.equal(await note.innerText().then(text => text.includes("Mi nota editada")), true)
     await note.click()
     await page.locator(".pdf-explanation-result iframe").waitFor()
+    await page.frameLocator(".pdf-explanation-result iframe").getByRole("heading", { name: graphFixture.titulo }).waitFor()
     assert.equal(generations, 1)
     await page.getByRole("button", { name: "Salir de la explicación" }).click()
     await page.reload()
@@ -190,6 +193,26 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.locator(".pdf-explanation-result iframe").waitFor()
     assert.equal(generations, 2)
     assert.equal(transcriptions, 0)
+    await page.locator('.pdf-explanation-result input[type="file"]').setInputFiles('tests/fixtures/avl-import.html')
+    const imported = page.frameLocator('.pdf-explanation-result iframe')
+    await imported.locator('#step-title').waitFor()
+    await imported.locator('#next-btn').click()
+    await imported.locator('#next-btn').click()
+    assert.equal(await imported.locator('#concept-svg').isVisible(), false)
+    assert.equal(await imported.locator('#rotation-svg').isVisible(), true)
+    const exportDownload = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Exportar HTML', exact: true }).click()
+    const exportFile = await exportDownload
+    const exported = await readFile(await exportFile.path(), 'utf8')
+    assert.ok(exported.includes('data-pdf-imported-tailwind'))
+    assert.ok(exported.includes('data-pdf-slide-deck'))
+    assert.ok(!exported.includes('src="https://cdn.tailwindcss.com"'))
+    await page.getByRole('button', { name: 'Recargar HTML', exact: true }).click()
+    await imported.locator('#step-title').filter({ hasText: '1/8' }).waitFor()
+    await page.getByRole('button', { name: 'Salir de la explicación' }).click()
+    await page.locator('.pdf-explanation-text').filter({ hasText: 'Explicalo' }).click()
+    await imported.locator('#step-title').waitFor()
+    assert.equal(generations, 2)
     await page.getByRole("button", { name: "Salir de la explicación" }).click()
     const lastNote = page.locator(".pdf-explanation-text").last()
     const lastBox = await lastNote.boundingBox()

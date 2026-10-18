@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Balanceo del ABB - Visualización Interactiva</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            overflow: hidden;
+            user-select: none;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* Transiciones suaves para nodos, aristas y anotaciones */
+        .node-group {
+            transition: transform 0.85s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s ease;
+        }
+        .edge-line {
+            transition: all 0.85s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .annotation {
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .pulse-ring {
+            animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.18); opacity: 0.3; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .dash-flow {
+            stroke-dasharray: 8 6;
+            animation: dash 1.2s linear infinite;
+        }
+        @keyframes dash {
+            to { stroke-dashoffset: -28; }
+        }
+        .callout-box {
+            backdrop-filter: blur(8px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between items-center p-4 md:p-6">
+
+    <!-- Barra Superior Mínima -->
+    <header class="w-full max-w-6xl flex justify-between items-center z-20 px-4 py-2 bg-slate-900/80 border border-slate-800 rounded-2xl">
+        <div class="flex items-center gap-3">
+            <span class="px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-lg font-bold text-sm tracking-wide">
+                Balanceo del ABB / AVL
+            </span>
+            <h1 id="step-title" class="text-base md:text-lg font-bold text-slate-200 truncate">
+                1. Altura vs. Eficiencia
+            </h1>
+        </div>
+        <div class="flex items-center gap-2 text-xs text-slate-400">
+            <span class="hidden sm:inline">Usa el teclado:</span>
+            <kbd class="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-200 font-semibold shadow-inner">←</kbd>
+            <kbd class="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-200 font-semibold shadow-inner">→</kbd>
+        </div>
+    </header>
+
+    <!-- Lienzo Gráfico Central -->
+    <main class="relative w-full max-w-6xl flex-1 my-3 bg-slate-900/50 border border-slate-800/80 rounded-3xl overflow-hidden flex items-center justify-center shadow-2xl">
+        
+        <!-- Cuadrícula sutil de fondo -->
+        <div class="absolute inset-0 opacity-15 pointer-events-none" 
+             style="background-image: radial-gradient(#475569 1px, transparent 1px); background-size: 28px 28px;">
+        </div>
+
+        <!-- Escenario 1 y 2: Concepto de Altura y Regla AVL (SVG dedicado) -->
+        <svg id="concept-svg" viewBox="0 0 1000 560" class="w-full h-full max-h-full transition-opacity duration-500">
+            <defs>
+                <marker id="arrow-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#22d3ee" />
+                </marker>
+                <marker id="arrow-red" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#f87171" />
+                </marker>
+                <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#4ade80" />
+                </marker>
+                <marker id="arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24" />
+                </marker>
+            </defs>
+
+            <!-- CONTENIDO DINÁMICO DE PASO 1 Y 2 SE INYECTA AQUÍ -->
+            <g id="concept-layer"></g>
+        </svg>
+
+        <!-- Escenario 3 a 8: Simulador Animado de Rotaciones (Nodos A, B, C, D, E) -->
+        <svg id="rotation-svg" viewBox="0 0 1000 560" class="w-full h-full max-h-full hidden">
+            <defs>
+                <marker id="rot-arrow-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#06b6d4" />
+                </marker>
+                <marker id="rot-arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
+                </marker>
+                <marker id="rot-arrow-emerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981" />
+                </marker>
+            </defs>
+
+            <!-- Guías de nivel de altura -->
+            <g id="height-guides" class="opacity-30">
+                <line x1="120" y1="130" x2="880" y2="130" stroke="#334155" stroke-dasharray="4 4" stroke-width="1.5"/>
+                <text x="95" y="135" fill="#94a3b8" font-size="12" class="mono">Nivel 0</text>
+                
+                <line x1="120" y1="245" x2="880" y2="245" stroke="#334155" stroke-dasharray="4 4" stroke-width="1.5"/>
+                <text x="95" y="250" fill="#94a3b8" font-size="12" class="mono">Nivel 1</text>
+                
+                <line x1="120" y1="360" x2="880" y2="360" stroke="#334155" stroke-dasharray="4 4" stroke-width="1.5"/>
+                <text x="95" y="365" fill="#94a3b8" font-size="12" class="mono">Nivel 2</text>
+
+                <line x1="120" y1="455" x2="880" y2="455" stroke="#334155" stroke-dasharray="4 4" stroke-width="1.5"/>
+                <text x="95" y="460" fill="#94a3b8" font-size="12" class="mono">Nivel 3</text>
+            </g>
+
+            <!-- Capa de Aristas del Árbol -->
+            <g id="edges-layer">
+                <line id="edge-DA" class="edge-line" x1="500" y1="130" x2="360" y2="245" stroke="#94a3b8" stroke-width="4" />
+                <line id="edge-DE" class="edge-line" x1="500" y1="130" x2="640" y2="245" stroke="#94a3b8" stroke-width="4" />
+                <line id="edge-AB" class="edge-line" x1="360" y1="245" x2="260" y2="360" stroke="#94a3b8" stroke-width="4" />
+                <!-- Arista especial cambiante (A-C pasa a D-C) -->
+                <line id="edge-C"  class="edge-line" x1="360" y1="245" x2="450" y2="360" stroke="#94a3b8" stroke-width="4" />
+            </g>
+
+            <!-- Capa de Flechas de Rotación y Apuntes Gráficos -->
+            <g id="overlays-layer"></g>
+
+            <!-- Capa de Nodos (D, A, B, C, E) -->
+            <g id="nodes-layer">
+                <!-- Nodo D -->
+                <g id="node-D" class="node-group" transform="translate(500, 130)">
+                    <circle id="ring-D" r="36" fill="none" stroke="#ef4444" stroke-width="3" class="opacity-0 pulse-ring"/>
+                    <circle id="circle-D" r="28" fill="#1e293b" stroke="#e2e8f0" stroke-width="3.5"/>
+                    <text text-anchor="middle" dy="8" fill="#ffffff" font-size="24" font-weight="800" font-style="italic">D</text>
+                    <!-- Badge de factor de balanceo -->
+                    <g id="badge-D" transform="translate(32, -26)" class="opacity-0 transition-opacity duration-300">
+                        <rect x="-24" y="-14" width="48" height="24" rx="6" fill="#ef4444" />
+                        <text id="badge-D-text" text-anchor="middle" dy="3" fill="#fff" font-size="13" font-weight="700" class="mono">+2</text>
+                    </g>
+                </g>
+
+                <!-- Nodo A -->
+                <g id="node-A" class="node-group" transform="translate(360, 245)">
+                    <circle id="ring-A" r="36" fill="none" stroke="#22d3ee" stroke-width="3" class="opacity-0 pulse-ring"/>
+                    <circle id="circle-A" r="28" fill="#1e293b" stroke="#e2e8f0" stroke-width="3.5"/>
+                    <text text-anchor="middle" dy="8" fill="#ffffff" font-size="24" font-weight="800" font-style="italic">A</text>
+                    <g id="badge-A" transform="translate(-34, -26)" class="opacity-0 transition-opacity duration-300">
+                        <rect x="-24" y="-14" width="48" height="24" rx="6" fill="#10b981" />
+                        <text id="badge-A-text" text-anchor="middle" dy="3" fill="#fff" font-size="13" font-weight="700" class="mono">+1</text>
+                    </g>
+                </g>
+
+                <!-- Nodo B + Subárbol Triángulo Verde -->
+                <g id="node-B" class="node-group" transform="translate(260, 360)">
+                    <polygon points="0,22 -42,88 42,88" fill="#10b981" fill-opacity="0.12" stroke="#22c55e" stroke-width="3" stroke-dasharray="8 6"/>
+                    <circle id="circle-B" r="25" fill="#1e293b" stroke="#cbd5e1" stroke-width="3"/>
+                    <text text-anchor="middle" dy="8" fill="#ffffff" font-size="22" font-weight="800" font-style="italic">B</text>
+                </g>
+
+                <!-- Nodo C + Subárbol Triángulo Verde -->
+                <g id="node-C" class="node-group" transform="translate(450, 360)">
+                    <polygon id="poly-C" points="0,22 -42,88 42,88" fill="#10b981" fill-opacity="0.12" stroke="#22c55e" stroke-width="3" stroke-dasharray="8 6"/>
+                    <circle id="ring-C" r="34" fill="none" stroke="#f59e0b" stroke-width="3" class="opacity-0 pulse-ring"/>
+                    <circle id="circle-C" r="25" fill="#1e293b" stroke="#cbd5e1" stroke-width="3"/>
+                    <text text-anchor="middle" dy="8" fill="#ffffff" font-size="22" font-weight="800" font-style="italic">C</text>
+                </g>
+
+                <!-- Nodo E + Subárbol Triángulo Verde -->
+                <g id="node-E" class="node-group" transform="translate(640, 245)">
+                    <polygon points="0,22 -42,88 42,88" fill="#10b981" fill-opacity="0.12" stroke="#22c55e" stroke-width="3" stroke-dasharray="8 6"/>
+                    <circle id="circle-E" r="25" fill="#1e293b" stroke="#cbd5e1" stroke-width="3"/>
+                    <text text-anchor="middle" dy="8" fill="#ffffff" font-size="22" font-weight="800" font-style="italic">E</text>
+                </g>
+            </g>
+        </svg>
+
+        <!-- Botón flotante para alternar rotación en el último paso -->
+        <div id="interactive-toggle" class="hidden absolute bottom-5 left-1/2 -translate-x-1/2 z-30">
+            <button onclick="toggleInteractiveRotation()" class="px-6 py-3 bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-extrabold rounded-full shadow-lg shadow-cyan-500/25 flex items-center gap-3 transition-transform active:scale-95">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                <span id="toggle-btn-text">Ejecutar Right Rotation ↻</span>
+            </button>
+        </div>
+
+    </main>
+
+    <!-- Controles de Diapositiva estilo PowerPoint -->
+    <footer class="w-full max-w-6xl flex justify-between items-center z-20 px-4 py-2 bg-slate-900/80 border border-slate-800 rounded-2xl">
+        <button id="prev-btn" onclick="changeStep(-1)" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:pointer-events-none text-slate-200 font-semibold flex items-center gap-2 transition">
+            <span>←</span> <span class="hidden sm:inline">Anterior</span>
+        </button>
+
+        <!-- Puntos de progreso -->
+        <div id="progress-dots" class="flex items-center gap-2"></div>
+
+        <button id="next-btn" onclick="changeStep(1)" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:pointer-events-none text-slate-950 font-bold flex items-center gap-2 transition shadow-lg shadow-emerald-500/20">
+            <span class="hidden sm:inline">Siguiente</span> <span>→</span>
+        </button>
+    </footer>
+
+    <script>
+        let currentStep = 0;
+        const totalSteps = 8;
+        let interactiveStateRight = true; // Para el paso 8
+
+        const stepTitles = [
+            "1/8 • ¿Por qué importa el Balanceo en un ABB?",
+            "2/8 • La Regla del Árbol AVL: Diferencia máxima de ±1",
+            "3/8 • Detectando el Desbalanceo (Lado Izquierdo Pesado)",
+            "4/8 • Idea de 'Right Rotation' (Rotación a la Derecha)",
+            "5/8 • El truco clave: ¿Adónde va el subárbol C?",
+            "6/8 • Resultado de 'Right Rotation': ¡Árbol Balanceado!",
+            "7/8 • Proceso Inverso: 'Left Rotation' (Rotación a la Izquierda)",
+            "8/8 • Ciclo Completo Interactivo (Haz clic o presiona Espacio)"
+        ];
+
+        // Inicializar indicadores de progreso
+        function initDots() {
+            const container = document.getElementById('progress-dots');
+            container.innerHTML = '';
+            for (let i = 0; i < totalSteps; i++) {
+                const dot = document.createElement('button');
+                dot.onclick = () => goToStep(i);
+                dot.className = `h-2.5 rounded-full transition-all duration-300 ${
+                    i === currentStep ? 'w-8 bg-emerald-400' : 'w-2.5 bg-slate-700 hover:bg-slate-500'
+                }`;
+                container.appendChild(dot);
+            }
+        }
+
+        function changeStep(delta) {
+            const next = currentStep + delta;
+            if (next >= 0 && next < totalSteps) {
+                goToStep(next);
+            }
+        }
+
+        function goToStep(index) {
+            currentStep = index;
+            document.getElementById('step-title').textContent = stepTitles[currentStep];
+            document.getElementById('prev-btn').disabled = currentStep === 0;
+            document.getElementById('next-btn').disabled = currentStep === totalSteps - 1;
+            initDots();
+            renderStep(currentStep);
+        }
+
+        // Control por teclado (Flechas Derecha / Izquierda y Espacio)
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                changeStep(1);
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                changeStep(-1);
+            } else if (e.key === ' ' && currentStep === 7) {
+                e.preventDefault();
+                toggleInteractiveRotation();
+            }
+        });
+
+        // Función auxiliar para posicionar un nodo y actualizar las coordenadas de sus aristas
+        function setTreePositions(coords, cParent = 'A') {
+            // coords = { D:[x,y], A:[x,y], B:[x,y], C:[x,y], E:[x,y] }
+            for (const [node, [x, y]] of Object.entries(coords)) {
+                document.getElementById(`node-${node}`).setAttribute('transform', `translate(${x}, ${y})`);
+            }
+
+            // Actualizar líneas
+            const [dx, dy] = coords.D;
+            const [ax, ay] = coords.A;
+            const [bx, by] = coords.B;
+            const [cx, cy] = coords.C;
+            const [ex, ey] = coords.E;
+
+            const setLine = (id, x1, y1, x2, y2, color = '#94a3b8', dash = '') => {
+                const el = document.getElementById(id);
+                el.setAttribute('x1', x1);
+                el.setAttribute('y1', y1);
+                el.setAttribute('x2', x2);
+                el.setAttribute('y2', y2);
+                el.setAttribute('stroke', color);
+                el.setAttribute('stroke-dasharray', dash);
+            };
+
+            setLine('edge-DA', dx, dy, ax, ay);
+            setLine('edge-DE', dx, dy, ex, ey);
+            setLine('edge-AB', ax, ay, bx, by);
+
+            if (cParent === 'A') {
+                setLine('edge-C', ax, ay, cx, cy);
+            } else if (cParent === 'D') {
+                setLine('edge-C', dx, dy, cx, cy);
+            } else if (cParent === 'moving-to-D') {
+                setLine('edge-C', dx, dy, cx, cy, '#f59e0b', '8 6');
+            } else if (cParent === 'moving-to-A') {
+                setLine('edge-C', ax, ay, cx, cy, '#f59e0b', '8 6');
+            }
+        }
+
+        function resetNodeStyles() {
+            ['D', 'A', 'B', 'C', 'E'].forEach(n => {
+                const c = document.getElementById(`circle-${n}`);
+                if (c) {
+                    c.setAttribute('stroke', n === 'D' || n === 'A' ? '#e2e8f0' : '#cbd5e1');
+                    c.setAttribute('fill', '#1e293b');
+                }
+            });
+            ['ring-D', 'ring-A', 'ring-C'].forEach(id => {
+                document.getElementById(id).classList.add('opacity-0');
+            });
+            ['badge-D', 'badge-A'].forEach(id => {
+                document.getElementById(id).classList.add('opacity-0');
+            });
+            document.getElementById('poly-C').setAttribute('stroke', '#22c55e');
+            document.getElementById('poly-C').setAttribute('fill', '#10b981');
+        }
+
+        // Coordenadas base de los dos estados de la imagen
+        const STATE_LEFT = {
+            D: [530, 130],
+            A: [370, 245],
+            E: [670, 245],
+            B: [260, 360],
+            C: [470, 360]
+        };
+
+        const STATE_RIGHT = {
+            A: [470, 130],
+            B: [330, 245],
+            D: [630, 245],
+            C: [530, 360],
+            E: [740, 360]
+        };
+
+        function renderStep(step) {
+            const conceptSvg = document.getElementById('concept-svg');
+            const rotationSvg = document.getElementById('rotation-svg');
+            const conceptLayer = document.getElementById('concept-layer');
+            const overlaysLayer = document.getElementById('overlays-layer');
+            const toggleContainer = document.getElementById('interactive-toggle');
+
+            toggleContainer.classList.add('hidden');
+            overlaysLayer.innerHTML = '';
+            resetNodeStyles();
+
+            // PASO 1: Comparación Desbalanceado vs Balanceado (log n)
+            if (step === 0) {
+                conceptSvg.classList.remove('hidden');
+                rotationSvg.classList.add('hidden');
+                conceptLayer.innerHTML = `
+                    <!-- Panel Izquierdo: Desbalanceado -->
+                    <rect x="60" y="50" width="400" height="460" rx="24" fill="#1e293b" fill-opacity="0.5" stroke="#ef4444" stroke-opacity="0.4" stroke-width="2"/>
+                    <text x="260" y="95" text-anchor="middle" fill="#f87171" font-size="20" font-weight="800">❌ ABB Desbalanceado</text>
+
+                    <!-- Cadena degenerada -->
+                    <line x1="340" y1="145" x2="290" y2="215" stroke="#ef4444" stroke-width="3.5"/>
+                    <line x1="290" y1="215" x2="240" y2="285" stroke="#ef4444" stroke-width="3.5"/>
+                    <line x1="240" y1="285" x2="190" y2="355" stroke="#ef4444" stroke-width="3.5"/>
+                    <line x1="190" y1="355" x2="140" y2="425" stroke="#ef4444" stroke-width="3.5"/>
+
+                    <circle cx="340" cy="145" r="20" fill="#0f172a" stroke="#f87171" stroke-width="3"/><text x="340" y="151" text-anchor="middle" fill="#fff" font-weight="bold">5</text>
+                    <circle cx="290" cy="215" r="20" fill="#0f172a" stroke="#f87171" stroke-width="3"/><text x="290" y="221" text-anchor="middle" fill="#fff" font-weight="bold">4</text>
+                    <circle cx="240" cy="285" r="20" fill="#0f172a" stroke="#f87171" stroke-width="3"/><text x="240" y="291" text-anchor="middle" fill="#fff" font-weight="bold">3</text>
+                    <circle cx="190" cy="355" r="20" fill="#0f172a" stroke="#f87171" stroke-width="3"/><text x="190" y="361" text-anchor="middle" fill="#fff" font-weight="bold">2</text>
+                    <circle cx="140" cy="425" r="20" fill="#0f172a" stroke="#f87171" stroke-width="3"/><text x="140" y="431" text-anchor="middle" fill="#fff" font-weight="bold">1</text>
+
+                    <!-- Cota de altura n -->
+                    <line x1="410" y1="145" x2="410" y2="425" stroke="#f87171" stroke-width="2.5" marker-start="url(#arrow-red)" marker-end="url(#arrow-red)"/>
+                    <rect x="285" y="265" width="155" height="58" rx="10" fill="#450a0a" stroke="#ef4444" stroke-width="1.5"/>
+                    <text x="362" y="290" text-anchor="middle" fill="#fca5a5" font-size="14" font-weight="bold">Altura desviada</text>
+                    <text x="362" y="312" text-anchor="middle" fill="#f87171" font-size="15" font-weight="800" class="mono">h ≈ n (Lento)</text>
+
+                    <!-- Panel Derecho: Balanceado -->
+                    <rect x="540" y="50" width="400" height="460" rx="24" fill="#1e293b" fill-opacity="0.5" stroke="#10b981" stroke-opacity="0.4" stroke-width="2"/>
+                    <text x="740" y="95" text-anchor="middle" fill="#4ade80" font-size="20" font-weight="800">✅ ABB Balanceado</text>
+
+                    <!-- Árbol equilibrado -->
+                    <line x1="740" y1="160" x2="650" y2="250" stroke="#10b981" stroke-width="3.5"/>
+                    <line x1="740" y1="160" x2="830" y2="250" stroke="#10b981" stroke-width="3.5"/>
+                    <line x1="650" y1="250" x2="600" y2="340" stroke="#10b981" stroke-width="3.5"/>
+                    <line x1="830" y1="250" x2="880" y2="340" stroke="#10b981" stroke-width="3.5"/>
+
+                    <circle cx="740" cy="160" r="22" fill="#0f172a" stroke="#4ade80" stroke-width="3"/><text x="740" y="166" text-anchor="middle" fill="#fff" font-weight="bold">3</text>
+                    <circle cx="650" cy="250" r="22" fill="#0f172a" stroke="#4ade80" stroke-width="3"/><text x="650" y="256" text-anchor="middle" fill="#fff" font-weight="bold">2</text>
+                    <circle cx="830" cy="250" r="22" fill="#0f172a" stroke="#4ade80" stroke-width="3"/><text x="830" y="256" text-anchor="middle" fill="#fff" font-weight="bold">4</text>
+                    <circle cx="600" cy="340" r="22" fill="#0f172a" stroke="#4ade80" stroke-width="3"/><text x="600" y="346" text-anchor="middle" fill="#fff" font-weight="bold">1</text>
+                    <circle cx="880" cy="340" r="22" fill="#0f172a" stroke="#4ade80" stroke-width="3"/><text x="880" y="346" text-anchor="middle" fill="#fff" font-weight="bold">5</text>
+
+                    <!-- Cota de altura log n -->
+                    <line x1="918" y1="160" x2="918" y2="340" stroke="#4ade80" stroke-width="2.5" marker-start="url(#arrow-green)" marker-end="url(#arrow-green)"/>
+                    <rect x="640" y="400" width="210" height="64" rx="12" fill="#064e3b" stroke="#10b981" stroke-width="1.5"/>
+                    <text x="745" y="426" text-anchor="middle" fill="#a7f3d0" font-size="14" font-weight="bold">Altura mínima ideal</text>
+                    <text x="745" y="450" text-anchor="middle" fill="#4ade80" font-size="16" font-weight="800" class="mono">h ∝ log n (Rápido)</text>
+                `;
+                return;
+            }
+
+            // PASO 2: Regla del Árbol AVL (+1, 0, -1)
+            if (step === 1) {
+                conceptSvg.classList.remove('hidden');
+                rotationSvg.classList.add('hidden');
+                conceptLayer.innerHTML = `
+                    <!-- Nodo Raíz genérico -->
+                    <line x1="500" y1="140" x2="340" y2="260" stroke="#94a3b8" stroke-width="4"/>
+                    <line x1="500" y1="140" x2="660" y2="260" stroke="#94a3b8" stroke-width="4"/>
+
+                    <circle cx="500" cy="140" r="34" fill="#1e293b" stroke="#38bdf8" stroke-width="4"/>
+                    <text x="500" y="147" text-anchor="middle" fill="#fff" font-size="18" font-weight="800">Nodo</text>
+
+                    <!-- Subárbol Izquierdo -->
+                    <polygon points="340,250 250,430 430,430" fill="#10b981" fill-opacity="0.15" stroke="#22c55e" stroke-width="3" stroke-dasharray="10 6"/>
+                    <text x="340" y="365" text-anchor="middle" fill="#4ade80" font-size="18" font-weight="bold">Subárbol Izq</text>
+                    <text x="340" y="395" text-anchor="middle" fill="#86efac" font-size="16" class="mono">Altura = h_izq</text>
+
+                    <!-- Subárbol Derecho -->
+                    <polygon points="660,250 580,390 740,390" fill="#10b981" fill-opacity="0.15" stroke="#22c55e" stroke-width="3" stroke-dasharray="10 6"/>
+                    <text x="660" y="345" text-anchor="middle" fill="#4ade80" font-size="18" font-weight="bold">Subárbol Der</text>
+                    <text x="660" y="372" text-anchor="middle" fill="#86efac" font-size="16" class="mono">Altura = h_der</text>
+
+                    <!-- Comparador visual de alturas -->
+                    <line x1="435" y1="390" x2="575" y2="390" stroke="#cbd5e1" stroke-dasharray="4 4" stroke-width="2"/>
+                    <line x1="435" y1="430" x2="510" y2="430" stroke="#cbd5e1" stroke-dasharray="4 4" stroke-width="2"/>
+                    <line x1="485" y1="390" x2="485" y2="430" stroke="#fbbf24" stroke-width="3"/>
+
+                    <!-- Apunte sobre el gráfico -->
+                    <rect x="290" y="30" width="420" height="68" rx="14" fill="#0f172a" stroke="#38bdf8" stroke-width="2"/>
+                    <text x="500" y="58" text-anchor="middle" fill="#38bdf8" font-size="16" font-weight="800">REGLA AVL EN CADA NODO:</text>
+                    <text x="500" y="82" text-anchor="middle" fill="#f8fafc" font-size="16" font-weight="700" class="mono">h_izq - h_der  ∈  { -1, 0, +1 }</text>
+
+                    <!-- Insignias inferiores -->
+                    <g transform="translate(240, 475)">
+                        <rect x="0" y="0" width="230" height="48" rx="12" fill="#064e3b" stroke="#10b981" stroke-width="2"/>
+                        <text x="115" y="30" text-anchor="middle" fill="#4ade80" font-size="16" font-weight="800">✅ -1, 0, +1 → Balanceado</text>
+                    </g>
+                    <g transform="translate(530, 475)">
+                        <rect x="0" y="0" width="250" height="48" rx="12" fill="#450a0a" stroke="#ef4444" stroke-width="2"/>
+                        <text x="125" y="30" text-anchor="middle" fill="#f87171" font-size="16" font-weight="800">⚠️ ±2 → ¡Rotar para arreglar!</text>
+                    </g>
+                `;
+                return;
+            }
+
+            // Del Paso 3 al 8 usamos el SVG animado de Rotaciones
+            conceptSvg.classList.add('hidden');
+            rotationSvg.classList.remove('hidden');
+
+            // PASO 3: Árbol inicial desbalanceado a la izquierda en D
+            if (step === 2) {
+                setTreePositions(STATE_LEFT, 'A');
+                document.getElementById('ring-D').classList.remove('opacity-0');
+                document.getElementById('circle-D').setAttribute('stroke', '#ef4444');
+                document.getElementById('badge-D').classList.remove('opacity-0');
+                document.getElementById('badge-D-text').textContent = '+2';
+                document.getElementById('badge-D').querySelector('rect').setAttribute('fill', '#ef4444');
+
+                overlaysLayer.innerHTML = `
+                    <!-- Apunte sobre D -->
+                    <g class="annotation">
+                        <rect x="595" y="65" width="310" height="68" rx="12" fill="#450a0a" stroke="#ef4444" stroke-width="2"/>
+                        <text x="750" y="92" text-anchor="middle" fill="#fca5a5" font-size="15" font-weight="800">⚠️ Desbalanceo en D (+2)</text>
+                        <text x="750" y="116" text-anchor="middle" fill="#fecaca" font-size="13" class="mono">Rama Izq (niv 3) vs Der (niv 2)</text>
+                        <path d="M 595 100 L 565 118" stroke="#ef4444" stroke-width="2.5" marker-end="url(#rot-arrow-amber)"/>
+                    </g>
+
+                    <!-- Indicador de peso a la izquierda -->
+                    <g class="annotation">
+                        <rect x="60" y="215" width="230" height="58" rx="12" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/>
+                        <text x="175" y="240" text-anchor="middle" fill="#38bdf8" font-size="14" font-weight="800">Lado izquierdo muy profundo</text>
+                        <text x="175" y="260" text-anchor="middle" fill="#cbd5e1" font-size="13">B y C cuelgan un nivel más abajo</text>
+                    </g>
+                `;
+            }
+
+            // PASO 4: Preparando Right Rotation (A sube, D baja a la derecha)
+            else if (step === 3) {
+                setTreePositions(STATE_LEFT, 'A');
+                document.getElementById('ring-A').classList.remove('opacity-0');
+                document.getElementById('circle-A').setAttribute('stroke', '#22d3ee');
+                document.getElementById('circle-D').setAttribute('stroke', '#f87171');
+
+                overlaysLayer.innerHTML = `
+                    <!-- Título de operación estilo diapositiva original -->
+                    <text x="500" y="52" text-anchor="middle" fill="#ef4444" font-size="28" font-weight="800" font-style="italic">right rotation</text>
+
+                    <!-- Flecha curva: A sube hacia D -->
+                    <path d="M 340 215 Q 370 110 485 115" fill="none" stroke="#06b6d4" stroke-width="5" class="dash-flow" marker-end="url(#rot-arrow-cyan)"/>
+                    <rect x="210" y="105" width="175" height="44" rx="10" fill="#083344" stroke="#06b6d4" stroke-width="2"/>
+                    <text x="297" y="132" text-anchor="middle" fill="#67e8f9" font-size="15" font-weight="800">1º: 'A' sube a la raíz</text>
+
+                    <!-- Flecha curva: D baja a la derecha -->
+                    <path d="M 565 135 Q 655 150 645 215" fill="none" stroke="#06b6d4" stroke-width="5" class="dash-flow" marker-end="url(#rot-arrow-cyan)"/>
+                    <rect x="655" y="130" width="245" height="44" rx="10" fill="#083344" stroke="#06b6d4" stroke-width="2"/>
+                    <text x="777" y="157" text-anchor="middle" fill="#67e8f9" font-size="15" font-weight="800">2º: 'D' baja a la derecha de A</text>
+                `;
+            }
+
+            // PASO 5: El movimiento crítico del subárbol C (pasa de A a D)
+            else if (step === 4) {
+                // Posición intermedia durante la rotación
+                const MID_STATE = {
+                    A: [430, 165],
+                    D: [585, 205],
+                    B: [295, 290],
+                    C: [500, 360],
+                    E: [715, 315]
+                };
+                setTreePositions(MID_STATE, 'moving-to-D');
+
+                document.getElementById('ring-C').classList.remove('opacity-0');
+                document.getElementById('circle-C').setAttribute('stroke', '#f59e0b');
+                document.getElementById('poly-C').setAttribute('stroke', '#f59e0b');
+
+                overlaysLayer.innerHTML = `
+                    <!-- Enlace antiguo de A a C desvaneciéndose -->
+                    <line x1="430" y1="165" x2="500" y2="360" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="4 6" opacity="0.5"/>
+                    <text x="435" y="275" fill="#f87171" font-size="14" font-weight="bold">✂ Se suelta de A</text>
+
+                    <!-- Explicación del subárbol C -->
+                    <rect x="310" y="468" width="380" height="72" rx="14" fill="#451a03" stroke="#f59e0b" stroke-width="2"/>
+                    <text x="500" y="495" text-anchor="middle" fill="#fcd34d" font-size="15" font-weight="800">💡 ¿Qué pasa con C? (Valores entre A y D)</text>
+                    <text x="500" y="520" text-anchor="middle" fill="#fef3c7" font-size="14">Como D queda libre a su izquierda, ¡C se conecta a D!</text>
+
+                    <!-- Flecha apuntando al nuevo enlace D-C -->
+                    <rect x="570" y="265" width="215" height="38" rx="8" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/>
+                    <text x="677" y="289" text-anchor="middle" fill="#fbbf24" font-size="13" font-weight="bold">← Nuevo hijo izq de D</text>
+                `;
+            }
+
+            // PASO 6: Resultado de Right Rotation (Árbol Balanceado con A en la raíz)
+            else if (step === 5) {
+                setTreePositions(STATE_RIGHT, 'D');
+
+                document.getElementById('circle-A').setAttribute('stroke', '#10b981');
+                document.getElementById('circle-D').setAttribute('stroke', '#10b981');
+                document.getElementById('badge-A').classList.remove('opacity-0');
+                document.getElementById('badge-A-text').textContent = '-1';
+
+                overlaysLayer.innerHTML = `
+                    <rect x="330" y="32" width="340" height="52" rx="14" fill="#064e3b" stroke="#10b981" stroke-width="2"/>
+                    <text x="500" y="64" text-anchor="middle" fill="#4ade80" font-size="18" font-weight="800">✅ ¡Right Rotation Completada!</text>
+
+                    <!-- Comentario sobre B -->
+                    <rect x="70" y="220" width="195" height="54" rx="10" fill="#1e293b" stroke="#10b981" stroke-width="1.5"/>
+                    <text x="167" y="244" text-anchor="middle" fill="#86efac" font-size="13" font-weight="bold">B subió 1 nivel</text>
+                    <text x="167" y="263" text-anchor="middle" fill="#cbd5e1" font-size="12">(Con todo su subárbol)</text>
+
+                    <!-- Comentario sobre D, C, E -->
+                    <rect x="690" y="190" width="235" height="60" rx="10" fill="#1e293b" stroke="#10b981" stroke-width="1.5"/>
+                    <text x="807" y="215" text-anchor="middle" fill="#86efac" font-size="13" font-weight="bold">D ahora tiene a C y E</text>
+                    <text x="807" y="236" text-anchor="middle" fill="#cbd5e1" font-size="12">Diferencia de altura ≤ 1</text>
+                `;
+            }
+
+            // PASO 7: Proceso Inverso: Left Rotation (Rotación a la izquierda)
+            else if (step === 6) {
+                setTreePositions(STATE_RIGHT, 'D');
+                document.getElementById('ring-D').classList.remove('opacity-0');
+                document.getElementById('circle-D').setAttribute('stroke', '#22d3ee');
+
+                overlaysLayer.innerHTML = `
+                    <!-- Título inferior como en la imagen original -->
+                    <text x="500" y="515" text-anchor="middle" fill="#ef4444" font-size="28" font-weight="800" font-style="italic">left rotation</text>
+
+                    <!-- Flecha curva: D sube a la raíz -->
+                    <path d="M 650 210 Q 620 110 515 115" fill="none" stroke="#06b6d4" stroke-width="5" class="dash-flow" marker-end="url(#rot-arrow-cyan)"/>
+                    <rect x="625" y="105" width="225" height="44" rx="10" fill="#083344" stroke="#06b6d4" stroke-width="2"/>
+                    <text x="737" y="132" text-anchor="middle" fill="#67e8f9" font-size="15" font-weight="800">1º: 'D' sube a la raíz</text>
+
+                    <!-- Flecha curva: A baja a la izquierda -->
+                    <path d="M 435 135 Q 350 155 360 215" fill="none" stroke="#06b6d4" stroke-width="5" class="dash-flow" marker-end="url(#rot-arrow-cyan)"/>
+                    <rect x="130" y="125" width="235" height="44" rx="10" fill="#083344" stroke="#06b6d4" stroke-width="2"/>
+                    <text x="247" y="152" text-anchor="middle" fill="#67e8f9" font-size="15" font-weight="800">2º: 'A' baja a la izq de D</text>
+
+                    <!-- C regresa a A -->
+                    <path d="M 500 350 Q 430 330 410 275" fill="none" stroke="#f59e0b" stroke-width="3.5" stroke-dasharray="6 4" marker-end="url(#rot-arrow-amber)"/>
+                    <rect x="335" y="460" width="330" height="36" rx="8" fill="#451a03" stroke="#f59e0b" stroke-width="1.5"/>
+                    <text x="500" y="483" text-anchor="middle" fill="#fcd34d" font-size="13" font-weight="bold">3º: 'C' vuelve a ser hijo derecho de A</text>
+                `;
+            }
+
+            // PASO 8: Modo Interactivo Libre (Alternar entre Right y Left Rotation en vivo)
+            else if (step === 7) {
+                toggleContainer.classList.remove('hidden');
+                interactiveStateRight = false; // Empezamos en el estado izquierdo (Raíz D) para rotar
+                updateInteractiveView();
+            }
+        }
+
+        function toggleInteractiveRotation() {
+            interactiveStateRight = !interactiveStateRight;
+            updateInteractiveView();
+        }
+
+        function updateInteractiveView() {
+            const overlaysLayer = document.getElementById('overlays-layer');
+            const btnText = document.getElementById('toggle-btn-text');
+
+            if (!interactiveStateRight) {
+                // Estado Izquierdo (Raíz D)
+                setTreePositions(STATE_LEFT, 'A');
+                btnText.textContent = 'Ejecutar Right Rotation ↻';
+                overlaysLayer.innerHTML = `
+                    <text x="500" y="55" text-anchor="middle" fill="#ef4444" font-size="26" font-weight="800" font-style="italic">Estado 1: Raíz D (Pesado a la Izq)</text>
+                    <path d="M 380 80 L 420 55" stroke="#06b6d4" stroke-width="6" marker-end="url(#rot-arrow-cyan)"/>
+                    <path d="M 580 55 L 620 80" stroke="#06b6d4" stroke-width="6" marker-end="url(#rot-arrow-cyan)"/>
+                    <rect x="670" y="340" width="250" height="60" rx="12" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+                    <text x="795" y="366" text-anchor="middle" fill="#38bdf8" font-size="14" font-weight="bold">Orden In-Order intacto:</text>
+                    <text x="795" y="388" text-anchor="middle" fill="#f8fafc" font-size="15" font-weight="800" class="mono">B &lt; A &lt; C &lt; D &lt; E</text>
+                `;
+            } else {
+                // Estado Derecho (Raíz A)
+                setTreePositions(STATE_RIGHT, 'D');
+                btnText.textContent = 'Ejecutar Left Rotation ↺';
+                overlaysLayer.innerHTML = `
+                    <text x="500" y="55" text-anchor="middle" fill="#10b981" font-size="26" font-weight="800" font-style="italic">Estado 2: Raíz A (Rotado a la Derecha)</text>
+                    <rect x="80" y="340" width="250" height="60" rx="12" fill="#1e293b" stroke="#10b981" stroke-width="1.5"/>
+                    <text x="205" y="366" text-anchor="middle" fill="#4ade80" font-size="14" font-weight="bold">¡Mismo Orden In-Order!</text>
+                    <text x="205" y="388" text-anchor="middle" fill="#f8fafc" font-size="15" font-weight="800" class="mono">B &lt; A &lt; C &lt; D &lt; E</text>
+                `;
+            }
+        }
+
+        // Iniciar presentación en la diapositiva 1
+        window.onload = () => {
+            goToStep(0);
+        };
+    </script>
+</body>
+</html>

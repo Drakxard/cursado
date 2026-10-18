@@ -448,6 +448,82 @@ Recommended Cloudflare R2 CORS configuration for operational hardening:
 - Allowed headers: `Content-Type`, `x-amz-meta-*`
 - Expose headers: `ETag`
 
+## Explicaciones visuales: `pantilla1_grafos`
+
+La estrella de PDF.js en Estudio admite presentaciones gráficas generadas como JSON.
+El servidor valida los datos y compila un HTML con motor, estilos y recursos locales:
+el modelo no genera código. Las explicaciones mixtas siguen usando la lección version 2.
+La selección del formato es automática según el contenido; también podés pedir
+`Usá pantilla1_grafos` en la pregunta o la instrucción final de la estrella.
+
+```json
+{
+  "plantilla": "pantilla1_grafos",
+  "titulo": "Una raíz y su hijo",
+  "elementos_iniciales": [
+    { "id": "A", "tipo": "nodo", "etiqueta": "A" },
+    { "id": "B", "tipo": "subarbol", "etiqueta": "B" }
+  ],
+  "diapositivas": [{
+    "paso": 1,
+    "posiciones": {
+      "A": { "fila": 1, "columna": 5, "estado": "destacado" },
+      "B": { "fila": 3, "columna": 3, "estado": "normal" }
+    },
+    "aristas": ["A -> B"],
+    "comentarios": [{
+      "anclado_a": "A", "posicion": "arriba-derecha",
+      "color": "azul", "texto": "A es la raíz"
+    }]
+  }]
+}
+```
+
+El modelo usa una grilla de 10 columnas × 6 filas, con enteros desde 1.
+El servidor convierte cada celda a `x = 50 + (columna - 1) × 100` e
+`y = 50 + (fila - 1) × 78` en un escenario lógico de 1000 × 560.
+Los márgenes reservan espacio para los círculos y triángulos de subárbol.
+Se rechazan celdas repetidas y figuras superpuestas; debajo de un subárbol
+debe quedar una fila libre en su columna. Los errores usan el mismo intento
+de corrección del modelo. Esto valida la geometría de los pasos, sin garantizar
+ausencia de cruces durante las transiciones ni exactitud académica.
+Cada paso debe posicionar todos los elementos, con IDs estables y pasos consecutivos
+desde 1 (máximo 12 pasos y 40 elementos). Estados: `normal`, `alerta`, `exito`,
+`destacado`, `atenuado`; las aristas pueden ser strings `"A -> B"` o bien objetos
+`{desde,hacia,estilo}` con estilos `solido`, `animado_verde`, `animado_amarillo`;
+comentarios: `rojo`, `verde`, `amarillo`, `azul`.
+Los comentarios usan `posicion`: `arriba-derecha`, `arriba-izquierda`,
+`abajo-derecha`, `abajo-izquierda`, `arriba`, `abajo`, `derecha` o `izquierda`.
+El modelo no calcula píxeles ni offsets; el motor mide los comentarios,
+los ancla a las posiciones interpoladas y ajusta los comentarios a los límites
+y los muestra debajo si se superponen o la pantalla es pequeña. En móvil el
+escenario permite desplazamiento horizontal para conservar la legibilidad.
+
+Anterior, siguiente, flechas, indicadores de paso y repetir permiten recorrer
+la presentación sin avance automático. El HTML guardado puede reabrirse desde
+la nota del PDF o exportarse sin conexión. Se respeta movimiento reducido.
+
+Azure usa internamente un sobre `{ "lesson": ... }` y posiciones como array de
+`{id,fila,columna,estado}` para su esquema estricto; el servidor lo convierte al contrato
+público anterior. Gateway genera directamente ese contrato. Los errores de datos
+permiten un intento de corrección. La validación comprueba estructura y referencias;
+Los formatos anteriores con `x/y` y `offset_x/offset_y` siguen siendo aceptados
+y los HTML ya guardados conservan su motor. Las generaciones nuevas usan grilla
+y posiciones relativas en ambos proveedores. El contenido académico sigue requiriendo revisión, especialmente alturas y balance
+cuando los subárboles están resumidos.
+
+Pruebas: `npm run test:explanations` y `npm run typecheck`. El caso AVL de referencia
+está en `tests/helpers/explanation-graphs-fixture.mts`.
+
+Al importar HTML que usa `cdn.tailwindcss.com`, el visor compila las utilidades
+localmente y las guarda como CSS dentro del documento. Así las clases `hidden`,
+la distribución y los estilos funcionan dentro del sandbox y al exportar sin red.
+Las fuentes de Google se reemplazan por las alternativas locales del documento.
+Las presentaciones con `h-screen`, `flex-col`, cabecera, SVG central y pie se ajustan
+al ancho y alto disponibles; las páginas HTML comunes conservan su desplazamiento.
+Las notas antiguas con Tailwind externo también se adaptan al abrirse. El compilador
+se carga solo cuando hace falta y se genera con `npm run build:pdf-explanation-ui`.
+
 ## Learn More
 
 To learn more, take a look at the following resources:

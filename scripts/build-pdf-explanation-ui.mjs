@@ -10,3 +10,16 @@ await build({
   minify: true,
   legalComments: "eof",
 })
+
+// Load the compiler only when opening/importing a CDN-based presentation.
+await build({
+  entryPoints: ["lib/client/pdf-explanation-import.ts"],
+  outfile: "public/pdfjs/web/viewer-explanation-import.js",
+  bundle: true,
+  platform: "browser",
+  format: "esm",
+  target: "es2022",
+  loader: { ".css": "text" },
+  minify: true,
+  legalComments: "eof",
+})

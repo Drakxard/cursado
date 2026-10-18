@@ -1,8 +1,10 @@
 import { createUIMessageStream, createUIMessageStreamResponse, streamText, Output, zodSchema, type LanguageModel } from "ai"
 import { explanationPrompt } from "../pdf-explanation.ts"
 import { explanationFailure } from "../pdf-explanation-errors.ts"
-import { structuredLessonSchema, STRUCTURED_EXPLANATION_INSTRUCTIONS, StructuredLessonError } from "../pdf-explanation-structured.ts"
+import { STRUCTURED_EXPLANATION_INSTRUCTIONS, StructuredLessonError } from "../pdf-explanation-structured.ts"
 import { structuredLessonHtml } from "./pdf-explanation-renderer.ts"
+import { GRAPH_PRESENTATION_INSTRUCTIONS } from "../pdf-explanation-graphs.ts"
+import { explanationFormatSchema, azureExplanationFormatSchema, decodeAzureExplanation } from "../pdf-explanation-formats.ts"
 
 export function explanationStream(model: LanguageModel, question: string, transcription: string,
   options: { instructions?: string; fallbackModels?: string[]; maxOutputTokens?: number; reasoning?: "none" | "low"; image?: string; provider?: "azure" | "gateway" } = {}) {
@@ -14,9 +16,11 @@ export function explanationStream(model: LanguageModel, question: string, transc
           type: "data-explanation-debug", data: { version: "verlo-debug-v1", stage, elapsedMs: Date.now() - started, ...details },
         })
         const status = (text: string) => writer.write({ type: "data-explanation-status", data: { text } })
-        diagnostic("modelo-principal", { model: typeof model === "object" ? model.modelId : model, format: "lesson-v2" })
-        const schema = await zodSchema(structuredLessonSchema).jsonSchema
-        const system = STRUCTURED_EXPLANATION_INSTRUCTIONS + (options.provider === "azure" ? "" : `\nJSON Schema:\n${JSON.stringify(schema)}`)
+        diagnostic("modelo-principal", { model: typeof model === "object" ? model.modelId : model, format: "lesson-v2|pantilla1_grafos" })
+        const schema = await zodSchema(explanationFormatSchema).jsonSchema
+        const system = STRUCTURED_EXPLANATION_INSTRUCTIONS + "\nComo alternativa visual al formato version 2:\n" + GRAPH_PRESENTATION_INSTRUCTIONS + (options.provider === "azure"
+          ? '\nEn el transporte Azure envolvé la respuesta en {"lesson":...}. Para pantilla1_grafos, posiciones es un array de {id,fila,columna,estado}; la aplicación lo convierte al mapa por ID.'
+          : `\nJSON Schema:\n${JSON.stringify(schema)}`)
         let correction = ""
         for (let attempt = 0; attempt < 2; attempt++) {
           status(attempt ? "Corrigiendo la estructura de la explicación…" : "Preparando los pasos y diagramas…")
@@ -30,7 +34,7 @@ export function explanationStream(model: LanguageModel, question: string, transc
                 { type: "text" as const, text: prompt },
                 { type: "file" as const, data: options.image, mediaType: options.image.slice(5, options.image.indexOf(";")) },
               ] }] } : { prompt }),
-              ...(options.provider === "azure" ? { output: Output.object({ schema: structuredLessonSchema, name: "explanation_lesson" }) } : {}),
+              ...(options.provider === "azure" ? { output: Output.object({ schema: azureExplanationFormatSchema, name: "explanation_lesson" }) } : {}),
               reasoning: options.reasoning ?? "none",
               maxOutputTokens: options.maxOutputTokens ?? (options.provider === "azure" ? 12_000 : 8_192),
               ...(options.provider === "azure"
@@ -58,6 +62,10 @@ export function explanationStream(model: LanguageModel, question: string, transc
             let lesson: unknown
             try { lesson = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")) }
             catch { throw new StructuredLessonError("La respuesta contiene JSON incompleto o inválido.") }
+            if (options.provider === "azure") {
+              try { lesson = decodeAzureExplanation(lesson) }
+              catch (error) { throw new StructuredLessonError(error instanceof Error ? error.message : "Formato Azure inválido.") }
+            }
             status("Validando los diagramas y preparando la explicación…")
             const html = structuredLessonHtml(lesson)
             diagnostic("leccion-validada", { attempt: attempt + 1, htmlBytes: new TextEncoder().encode(html).length })

@@ -9,6 +9,7 @@ import { DefaultChatTransport, readUIMessageStream } from "ai"
 import { lessonHtml } from "../lib/pdf-explanation-lesson.ts"
 import { structuredFixture } from "./helpers/explanation-lesson-fixture.mts"
 import { STRUCTURED_EXPLANATION_INSTRUCTIONS } from "../lib/pdf-explanation-structured.ts"
+import { gridGraphFixture } from "./helpers/explanation-graphs-fixture.mts"
 
 function textModel(text: string, reason: "stop" | "length" = "stop") {
   return new MockLanguageModelV4({ doStream: async () => ({ stream: simulateReadableStream({ chunks: [
@@ -22,6 +23,25 @@ function textModel(text: string, reason: "stop" | "length" = "stop") {
     } },
   ] as LanguageModelV4StreamPart[] }) }) })
 }
+
+test("graph JSON is delivered by Gateway and strict Azure, with one validation correction", async () => {
+  const wire = { lesson: { ...gridGraphFixture, diapositivas: gridGraphFixture.diapositivas.map(s => ({ ...s,
+    posiciones: Object.entries(s.posiciones).map(([id, position]) => ({ id, ...position })),
+  })) } }
+  for (const provider of ["gateway", "azure"] as const) {
+    const valid = provider === "azure" ? wire : gridGraphFixture
+    const invalid = structuredClone(valid)
+    if ("lesson" in invalid) invalid.lesson.diapositivas[0].comentarios[0].anclado_a = "missing"
+    else invalid.diapositivas[0].comentarios[0].anclado_a = "missing"
+    const badModel = textModel(JSON.stringify(invalid)), goodModel = textModel(JSON.stringify(valid))
+    let calls = 0
+    const model = new MockLanguageModelV4({ doStream: async options => calls++ === 0 ? badModel.doStream(options) : goodModel.doStream(options) })
+    const chunks = await parts(explanationStream(model, "Explicá la rotación", "Árbol del apunte", { provider }))
+    assert.equal(calls, 2)
+    assert.ok(chunks.some(part => part.data?.stage === "error-validacion-leccion"))
+    assert.ok(chunks.find(part => part.type === "data-explanation")?.data.html.includes('id="graph-data"'))
+  }
+})
 async function parts(response: Response) {
   return (await response.text()).split("\n").filter(line => line.startsWith("data: ") && line !== "data: [DONE]").map(line => JSON.parse(line.slice(6)))
 }
@@ -33,7 +53,8 @@ test("Azure requests strict structured output and preserves region, transcriptio
   assert.ok(chunks.some(part => part.type === "data-explanation"))
   const request = model.doStreamCalls[0]
   assert.equal(request.prompt[0].role, "system")
-  assert.equal(request.prompt[0].content, STRUCTURED_EXPLANATION_INSTRUCTIONS)
+  assert.ok(String(request.prompt[0].content).startsWith(STRUCTURED_EXPLANATION_INSTRUCTIONS))
+  assert.ok(String(request.prompt[0].content).includes("pantilla1_grafos"))
   const content = request.prompt.find(message => message.role === "user")!.content
   assert.ok(Array.isArray(content))
   assert.equal(content[0].type, "text")

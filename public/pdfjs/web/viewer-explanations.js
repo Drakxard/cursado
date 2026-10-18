@@ -257,7 +257,15 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     // CSP is inserted before all generated content, including malformed/missing <head>.
     const csp = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'">';
     const escapeBridge = `<script>addEventListener('keydown',e=>{if(e.ctrlKey&&!e.altKey&&!e.shiftKey&&e.key.toLowerCase()==='q'){e.preventDefault();parent.postMessage({type:'cursado-return-home'},'*')}if(e.key==='Escape')parent.postMessage({type:'pdf-explanation-escape'},'*')});<\/script>`;
-    iframe.srcdoc = csp + escapeBridge + entry.html;
+    const loadHtml = async () => {
+      let html = entry.html;
+      if (/cdn\.tailwindcss\.com/.test(html)) {
+        const { preparePdfExplanationHtml } = await import("./viewer-explanation-import.js");
+        html = await preparePdfExplanationHtml(html);
+      }
+      if (modal === view) iframe.srcdoc = csp + escapeBridge + html;
+    };
+    loadHtml().catch(report);
     view.panel.append(iframe);
     const header = view.panel.querySelector("header");
     const icon = (symbol, label, action) => {
@@ -274,8 +282,8 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       if (!file) return;
       const state = documentState;
       try {
-        const html = await file.text();
-        if (!/<html[\s>]/i.test(html) || !/<\/html\s*>/i.test(html)) throw new Error("Eleg? un documento HTML completo.");
+        const { preparePdfExplanationHtml } = await import("./viewer-explanation-import.js");
+        const html = await preparePdfExplanationHtml(await file.text());
         if (documentState !== state || modal !== view) return;
         const previous = entry.html;
         entry.html = html;
@@ -287,7 +295,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       } catch (error) { report(error); }
       finally { picker.value = ""; }
     });
-    const reload = icon("\u21bb", "Recargar HTML", () => { iframe.srcdoc = csp + escapeBridge + entry.html; });
+    const reload = icon("\u21bb", "Recargar HTML", () => { loadHtml().catch(report); });
     const upload = icon("\u2191", "Importar HTML", () => picker.click());
     const download = icon("\u2193", "Exportar HTML", () => {
       const url = URL.createObjectURL(new Blob([entry.html], { type: "text/html;charset=utf-8" }));
