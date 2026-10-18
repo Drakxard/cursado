@@ -21,7 +21,7 @@ test.beforeEach(async({page})=>{
   await page.route('**/biblioteca/pizarra?**',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><button id="escape">Cerrar con Escape</button><script>
     const p=new URLSearchParams(location.search),session=p.get('session'),boardId=p.get('boardId'),reader=p.get('mode')==='reader';
     addEventListener('message',e=>{if(e.source!==parent||e.origin!==location.origin||e.data.session!==session||e.data.boardId!==boardId)return;
-      if(e.data.type==='board-library:init')document.body.dataset.initialized='yes';
+      if(e.data.type==='board-library:init'){document.body.dataset.initialized='yes';if(reader)parent.postMessage({type:'board-library:reader-rendered',session,boardId},location.origin);}
       if(e.data.type==='board-library:escape-reader')parent.postMessage({type:'board-library:reader-closed',session,boardId},location.origin);
     });
     addEventListener('keydown',e=>{if(e.key==='Escape')parent.postMessage({type:reader?'board-library:reader-closed':'board-library:escape',session,boardId},location.origin)});
@@ -37,7 +37,7 @@ test('PDF shortcuts persist, move, undo, duplicate and delete without importing 
   expect((await saved(page)).shapes[0]).toMatchObject({visualType:'pdf-shortcut',label:'Guía',pdfReference:reference})
   expect((await saved(page)).media).toEqual([])
   await page.mouse.move(270,326);await page.mouse.down();await page.mouse.move(350,366,{steps:8});await page.mouse.up()
-  await expect(page.locator('.board-pdf-reader')).toHaveCount(0)
+  await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
   await expect.poll(async()=>(await saved(page)).shapes[0].x).toBe(300)
   await page.keyboard.press('Control+z')
   await expect.poll(async()=>(await saved(page)).shapes[0].x).toBe(220)
@@ -65,6 +65,9 @@ test('Escape closes menus before changing tools, closes the split and returns fr
   const library=page.frameLocator('iframe[title="Biblioteca de Estudio"]')
   await expect(library.locator('body')).toHaveAttribute('data-initialized','yes')
   const before=await saved(page)
+  await expect(page.locator('.board-pdf-reader[aria-hidden="true"] iframe')).toHaveCount(1)
+  await expect(page.frameLocator('iframe[title="Lector de PDF de la pizarra"]').locator('body')).toHaveAttribute('data-initialized','yes')
+  await page.frameLocator('iframe[title="Lector de PDF de la pizarra"]').locator('body').evaluate(body=>body.dataset.preloaded='yes')
   await page.mouse.click(270,326)
   const reader=page.frameLocator('iframe[title="Lector de PDF de la pizarra"]')
   await expect(reader.locator('body')).toHaveAttribute('data-initialized','yes')
@@ -74,11 +77,16 @@ test('Escape closes menus before changing tools, closes the split and returns fr
   })
   await reader.locator('body').evaluate(()=>parent.postMessage({type:'board-library:reader-closed',session:'wrong',boardId:new URLSearchParams(location.search).get('boardId')},location.origin))
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
-  await expect(page.locator('.board-pdf-reader')).toHaveCount(1)
-  const bounds=await page.locator('.board-pdf-reader').boundingBox()
+  await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
+  const bounds=await page.locator('.board-pdf-reader[aria-hidden="false"]').boundingBox()
   expect(bounds.width).toBe(1366)
   await reader.locator('button').focus();await page.keyboard.press('Escape')
-  await expect(page.locator('.board-pdf-reader')).toHaveCount(0)
+  await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
+  await expect(reader.locator('body')).toHaveAttribute('data-preloaded','yes')
+  await page.mouse.click(270,326)
+  await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
+  await expect(reader.locator('body')).toHaveAttribute('data-preloaded','yes')
+  await reader.locator('button').focus();await page.keyboard.press('Escape')
   await expect(page.locator('.app')).toHaveAttribute('data-library-split','true')
   expect((await saved(page)).camera).toMatchObject({x:before.camera.x,y:before.camera.y,zoom:before.camera.zoom})
   await library.locator('button').focus();await page.keyboard.press('Escape')

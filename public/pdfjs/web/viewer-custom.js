@@ -4710,6 +4710,7 @@
 
     const { eventBus } = app;
     eventBus.on("pagerendered", () => {
+      postToParent({ type: "viewerPageRendered" });
       refreshLayers();
       applyEnhancedPdfReadability();
       refreshSyncButtons();

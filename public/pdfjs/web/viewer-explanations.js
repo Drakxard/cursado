@@ -169,7 +169,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
           const response = await fetch("/api/subject-voice/pdf-extraction/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: dialog.querySelector("input").value.trim() }) });
           const result = await response.json();
           if (!response.ok || !result.token) throw new Error(result.error || "No se pudo guardar la clave.");
-          await write(state.root, "User.Datalab", { version: 1, token: result.token });
+          await write(state.root, "User.Datalab", JSON.stringify({ version: 1, token: result.token }));
+          const saved = await read(state.root, "User.Datalab");
+          if (saved?.token !== result.token) throw new Error("No se pudo verificar el guardado de la clave.");
           dialog.querySelector("input").value = "";
           finish();
         } catch (error) { dialog.querySelector('[role="alert"]').textContent = error.message; }

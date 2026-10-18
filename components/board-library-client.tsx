@@ -24,6 +24,7 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
   useEffect(()=>{
     if(!session || !boardId || window.parent === window) {setError('Abrí la biblioteca desde una pizarra.');return}
     const receive = (event:MessageEvent) => {
+      if(event.origin===location.origin && event.source===viewerHost.current?.querySelector('iframe')?.contentWindow && event.data?.type==='viewerPageRendered') {send('board-library:reader-rendered');return}
       if(event.origin!==location.origin || event.source!==parent || event.data?.session!==session || event.data?.boardId!==boardId) return
       if(event.data.type==='board-library:init') {
         if(event.data.rootHandle?.kind==='directory') {setReadyWorkspaceHandle(event.data.rootHandle);setProvidedRoot(event.data.rootHandle)}

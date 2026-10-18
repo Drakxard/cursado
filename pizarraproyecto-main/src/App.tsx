@@ -753,7 +753,6 @@ function InlineTableEditor({ table, camera, anchorRef, onChange, onCellChange, o
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const materialLibrary = useBoardLibrary(getActiveBoardId())
   const pdfPointer = useRef<{pointerId:number;id:string;x:number;y:number;moved:boolean;transform:Transform}|null>(null)
   const sceneRef = useRef<HTMLDivElement>(null)
   const contentCanvasesRef = useRef(new Map<number,HTMLCanvasElement>())
@@ -772,6 +771,7 @@ function App() {
   const textsRef = useRef<Rotatable<TextItem>[]>([])
   const mediaRef = useRef<Rotatable<MediaItem>[]>([])
   const shapesRef = useRef<ShapeItem[]>([])
+  const materialLibrary = useBoardLibrary(getActiveBoardId(), () => shapesRef.current.flatMap(shape => shape.pdfReference ? [shape.pdfReference] : []))
   const tablesRef = useRef<SheetItem[]>([])
   const graphsRef = useRef<Rotatable<BoardGraphItem>[]>([])
   const [graphs, setGraphs] = useState<Rotatable<BoardGraphItem>[]>([])
