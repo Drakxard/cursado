@@ -19,15 +19,6 @@ async function setup(t) {
   const errors=[]
   context.on('page',page=>page.on('pageerror',error=>{errors.push(error.message);console.error('Excepción de navegador:',error.stack)}))
   await context.addInitScript(()=>{try{localStorage.setItem('inscreen.config-skipped.v1','1')}catch{}})
-  await context.addInitScript(()=>{
-    for(const method of ['text','arrayBuffer']) {
-      const original=Blob.prototype[method]
-      Blob.prototype[method]=function(...args){
-        const call=new Error(`Reading ${this.name||'blob'} via ${method} at ${location.href}`)
-        return original.apply(this,args).catch(error=>{error.stack=call.stack+'\n'+error.message;throw error})
-      }
-    }
-  })
   await context.route('**/pizarra/api/**',route=>route.fulfill({status:401,json:{}}))
   const page=await context.newPage()
   await page.goto(origin)
@@ -75,7 +66,19 @@ async function topicScene(page) {
   })
 }
 test('topic boards use the floating arrow, retain Escape, split with real Study and persist PDF shortcuts without importing pages', {timeout:150000}, async t=>{
-  const {page,errors}=await setup(t)
+  const {page,context,errors}=await setup(t)
+  // Reproduce an atomic save invalidating the embedded library's first snapshot.
+  await context.addInitScript(()=>{
+    const original=Blob.prototype.text
+    window.invalidatedWorkspaceSnapshots=0
+    Blob.prototype.text=function(...args){
+      if(this.name==='workspace-state.json'&&!window.invalidatedWorkspaceSnapshots){
+        window.invalidatedWorkspaceSnapshots++
+        return Promise.reject(new DOMException('Snapshot replaced by another frame', 'NotReadableError'))
+      }
+      return original.apply(this,args)
+    }
+  })
   const board=await openTopic(page)
   await expect(page.getByRole('button',{name:'Volver a Temas',exact:true})).toHaveText('←')
   assert.equal(await page.getByText('Volver · Esc',{exact:true}).count(),0)
@@ -91,6 +94,7 @@ test('topic boards use the floating arrow, retain Escape, split with real Study 
   await library.getByRole('button',{name:/Cálculo 3/}).click({timeout:30000})
   const material=library.getByText('Guía de integrales.PDF',{exact:true}).first().locator('xpath=ancestor::div[@draggable="true"][1]')
   await material.waitFor({timeout:20000})
+  assert.ok((await Promise.all(page.frames().map(frame=>frame.evaluate(()=>window.invalidatedWorkspaceSnapshots||0)))).some(count=>count>0))
   const data=await material.evaluate(element=>{
     const data=new DataTransfer();element.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:data}))
     return data.getData('application/x-cursado-board-pdf')

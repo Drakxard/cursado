@@ -1,6 +1,7 @@
 "use client"
 
 import { isNativeReadOnly, nativeFileUrl, readOnlyError } from './native-workspace.ts'
+import { readWorkspaceFileText } from './workspace-file-read.ts'
 
 import type {
   CronogramaRecord,
@@ -835,8 +836,7 @@ async function readJsonFile<T>(pathSegments: string[], fallback: T): Promise<T> 
 
   try {
     const fileHandle = await getFileHandleBySegments(rootHandle, pathSegments, false)
-    const file = await fileHandle.getFile()
-    const text = await file.text()
+    const text = await readWorkspaceFileText(fileHandle)
     if (!text.trim()) return fallback
     return JSON.parse(text) as T
   } catch (error) {
