@@ -5,7 +5,8 @@ export async function readWorkspaceFileText(handle: Pick<FileSystemFileHandle, '
     try {
       return await (await handle.getFile()).text()
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'NotReadableError') || attempt >= 2) throw error
+      // Folder handles can arrive from a sibling frame with another DOMException realm.
+      if ((error as { name?: string } | null)?.name !== 'NotReadableError' || attempt >= 2) throw error
     }
   }
 }
