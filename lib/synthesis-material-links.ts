@@ -122,3 +122,19 @@ export function reconcileSynthesisMaterials(workspace: SynthesisWorkspaceV2, con
   }
   return normalizeSynthesisWorkspace(next)
 }
+
+/** A source PDF survives removing or emptying its heading in the editor. */
+export function restoreSynthesisPdfHeadings(previous: SynthesisWorkspaceV2, document: TiptapJSON) {
+  const next = structuredClone(document)
+  const blocks = next.content ??= []
+  for (const link of Object.values(previous.sources?.materials ?? {})) {
+    if (link.dismissed) continue
+    const oldIndex = previous.document.content?.findIndex((block) => block.attrs?.synthesisId === link.nodeId) ?? -1
+    const old = previous.document.content?.[oldIndex]
+    if (!old) continue
+    const heading = blocks.find((block) => block.attrs?.synthesisId === link.nodeId)
+    if (!heading) blocks.splice(Math.min(oldIndex, blocks.length), 0, structuredClone(old))
+    else if (!plainText(heading).trim()) heading.content = [{ type: "text", text: link.autoTitle || plainText(old) }]
+  }
+  return next
+}

@@ -73,6 +73,7 @@ import { useWindowSize } from "@/hooks/use-window-size"
 import { useCursorVisibility } from "@/hooks/use-cursor-visibility"
 
 // --- Components ---
+import { FileText } from "lucide-react"
 import { ThemeToggle } from "@/components/tiptap-templates/simple/theme-toggle"
 import { FontSizeMenu } from "@/components/tiptap-templates/simple/font-size-menu"
 import { TableMenu } from "@/components/tiptap-templates/simple/table-menu"
@@ -103,6 +104,7 @@ const MainToolbarContent = ({
   fontSize,
   onFontSizeChange,
   toolbarAction,
+  relatedPdfHref,
 }: {
   onHighlighterClick: () => void
   onLinkClick: () => void
@@ -113,6 +115,7 @@ const MainToolbarContent = ({
   fontSize: number
   onFontSizeChange?: (size: number) => void
   toolbarAction?: React.ReactNode
+  relatedPdfHref?: string
 }) => {
   return (
     <>
@@ -182,6 +185,12 @@ const MainToolbarContent = ({
           data-active-state={isSearchAndReplaceOpen ? "on" : "off"}
           onClick={onSearchAndReplaceClick}
         />
+        {relatedPdfHref ? <a
+          href={relatedPdfHref} target="_blank" rel="noopener noreferrer"
+          className="tiptap-button" data-style="ghost"
+          aria-label="Abrir PDF relacionado en una nueva pestaña"
+          title="Abrir PDF relacionado en una nueva pestaña"
+        ><FileText className="tiptap-button-icon" /></a> : null}
         <ThemeToggle />
       </ToolbarGroup>
     </>
@@ -227,6 +236,7 @@ export function SimpleEditor({
   fontSize,
   onFontSizeChange,
   toolbarAction,
+  relatedPdfHref,
 }: {
   content: TiptapJSON
   editable?: boolean
@@ -237,6 +247,7 @@ export function SimpleEditor({
   fontSize?: number
   onFontSizeChange?: (size: number) => void
   toolbarAction?: React.ReactNode
+  relatedPdfHref?: string
 }) {
   const isMobile = useIsBreakpoint()
   const { height } = useWindowSize()
@@ -314,6 +325,17 @@ export function SimpleEditor({
   editorRef.current = editor
 
   useEffect(() => {
+    if (!editor) return
+    // Run after the editor mounts so its scroll container is already laid out.
+    const frame = requestAnimationFrame(() => {
+      if (editor.isDestroyed) return
+      if (editable) editor.commands.focus("end")
+      else editor.chain().setTextSelection(editor.state.doc.content.size).scrollIntoView().run()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [editor, editable])
+
+  useEffect(() => {
     onFlushReady?.(changes.flush)
     const flush = () => changes.flush()
     const visibility = () => { if (document.visibilityState === "hidden") flush() }
@@ -389,6 +411,7 @@ export function SimpleEditor({
               fontSize={normalizeSynthesisEditorFontSize(fontSize)}
               onFontSizeChange={onFontSizeChange}
               toolbarAction={toolbarAction}
+              relatedPdfHref={relatedPdfHref}
             />
           ) : (
             <MobileToolbarContent

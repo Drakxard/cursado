@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { createEmptySynthesisWorkspace, deriveSynthesisNodes, normalizeSynthesisWorkspace, repairSynthesisLayout, type SynthesisWorkspaceV2 } from "../lib/synthesis-workspace.ts"
-import { hasSynthesisMaterialDevelopment, reconcileSynthesisMaterials, recordSynthesisRemovals, removeSynthesisMaterial, removeSynthesisNode, renameSynthesisMaterial } from "../lib/synthesis-material-links.ts"
+import { restoreSynthesisPdfHeadings, hasSynthesisMaterialDevelopment, reconcileSynthesisMaterials, recordSynthesisRemovals, removeSynthesisMaterial, removeSynthesisNode, renameSynthesisMaterial } from "../lib/synthesis-material-links.ts"
 import { folderFixture } from "./helpers/synthesis-folder-fixture.mts"
 import { synthesisFolderPath } from "../lib/client/synthesis-folder-store.ts"
 
@@ -191,4 +191,21 @@ test("migra delimitadores PDF antiguos a H1 conservando asociación y desarrollo
   assert.equal(node.parentId, migrated.sources!.containers[1].nodeId)
   assert.equal(node.body[0].content![0].text, "Notas")
   assert.deepEqual(reload(migrated), migrated)
+})
+
+
+test("vaciar o borrar un H1 de PDF conserva el titulo y su vinculo", () => {
+  const workspace = initial()
+  const id = workspace.sources!.materials[1].nodeId
+  for (const remove of [false, true]) {
+    const document = structuredClone(workspace.document)
+    if (remove) document.content = document.content!.filter((block) => block.attrs?.synthesisId !== id)
+    else document.content!.find((block) => block.attrs?.synthesisId === id)!.content = []
+    const restored = recordSynthesisRemovals(workspace, restoreSynthesisPdfHeadings(workspace, document))
+    assert.equal(deriveSynthesisNodes(restored.document).find((node) => node.id === id)?.name, "Tema 1")
+    assert.equal(restored.sources!.materials[1].dismissed, false)
+  }
+  const edited = structuredClone(workspace.document)
+  edited.content!.find((block) => block.attrs?.synthesisId === id)!.content = [{ type: "text", text: "Nuevo nombre" }]
+  assert.equal(deriveSynthesisNodes(restoreSynthesisPdfHeadings(workspace, edited)).find((node) => node.id === id)?.name, "Nuevo nombre")
 })

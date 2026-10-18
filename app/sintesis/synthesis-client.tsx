@@ -3,7 +3,7 @@
 import { isNativeReadOnly } from '@/lib/native-workspace'
 
 import dynamic from "next/dynamic"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { registerHomeSave } from "@/lib/client/home-navigation"
 import { ArrowLeft, Download, Eye, LoaderCircle, Mic, MicOff, Pencil, Trash2 } from "lucide-react"
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { fetchSubjectMaterialContainers } from "@/lib/material-containers-client"
 import { requireOkJson } from "@/lib/client/api"
 import type { SubjectDayMaterial } from "@/lib/study-types"
-import { reconcileSynthesisMaterials, recordSynthesisRemovals, removeSynthesisNode } from "@/lib/synthesis-material-links"
+import { restoreSynthesisPdfHeadings, reconcileSynthesisMaterials, recordSynthesisRemovals, removeSynthesisNode } from "@/lib/synthesis-material-links"
 import { readMaterialSynthesis, SYNTHESIS_MATERIALS_CHANGED_EVENT } from "@/lib/client/synthesis-materials"
 import backgroundImage from "../../sintesis/sintesis-fondo.jpg"
 import { buildSynthesisLocalStorageKey, buildSynthesisReturnTokenStorageKey, type SynthesisContext } from "@/lib/synthesis-context"
@@ -52,6 +52,9 @@ function readLocalWorkspace(key: string) {
 
 export function SynthesisClient({ context, legacyReturnToken }: { context: SynthesisContext; legacyReturnToken: string }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const requestedMaterialId = searchParams.get("materialId")
+  const openedMaterialRef = useRef<string | null>(null)
   const storageKey = buildSynthesisLocalStorageKey(SYNTHESIS_WORKSPACE_STORAGE_KEY, context)
   const pendingKey = buildSynthesisLocalStorageKey(SYNTHESIS_WORKSPACE_PENDING_KEY, context)
   const returnTokenKey = buildSynthesisReturnTokenStorageKey(context)
@@ -89,6 +92,19 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
   }
   const autosave = useMemo(() => createAsyncLocalAutosave(async () => {
     const snapshot = structuredClone(workspaceRef.current)
+    for (const [materialId, link] of Object.entries(snapshot.sources?.materials ?? {})) {
+      if (link.dismissed) continue
+      const node = deriveSynthesisNodes(snapshot.document).find((node) => node.id === link.nodeId)
+      const title = node?.name.trim()
+      if (!title || title === link.autoTitle) continue
+      const fileName = /\.pdf$/i.test(title) ? title : `${title}.pdf`
+      await requireOkJson(await fetch(`/api/subject-day-materials/${materialId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName }),
+      }), "No se pudo actualizar el nombre del PDF.")
+      link.autoTitle = title
+      const currentLink = workspaceRef.current.sources?.materials[materialId]
+      if (currentLink) currentLink.autoTitle = title
+    }
     const folder = await getSynthesisFolderStore()
     await folder.save(context, snapshot)
     // Emergency drafts are staged synchronously; refresh the auxiliary cache
@@ -250,10 +266,11 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
       subjectId: context.subjectId,
       weekNumber: String(context.weekNumber),
     })
+    if (requestedMaterialId) canonicalParams.set("materialId", requestedMaterialId)
     if (window.location.search !== `?${canonicalParams.toString()}`) {
       router.replace(`/sintesis?${canonicalParams.toString()}`)
     }
-  }, [context.subjectId, context.weekNumber, legacyReturnToken, returnTokenKey, router])
+  }, [context.subjectId, context.weekNumber, legacyReturnToken, returnTokenKey, router, requestedMaterialId])
 
   useEffect(() => {
     const persistBeforeLeaving = (event: BeforeUnloadEvent) => {
@@ -314,6 +331,28 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
     window.history.pushState({ synthesisEditor: true }, ""); editorHistoryRef.current = true
   }, [currentParentId, loadState])
 
+  useEffect(() => {
+    if (!requestedMaterialId || openedMaterialRef.current === requestedMaterialId || loadState !== "ready") return
+    const link = workspace.sources?.materials[requestedMaterialId]
+    if (!link || link.dismissed || !nodes.some((node) => node.id === link.nodeId)) return
+    openedMaterialRef.current = requestedMaterialId
+    setCurrentParentId(link.nodeId)
+    openEditor(link.nodeId)
+  }, [requestedMaterialId, loadState, workspace, nodes, openEditor])
+
+  const relatedPdfId = useMemo(() => {
+    if (!editorSession?.nodeId) return null
+    let nodeId: string | null = editorSession.nodeId
+    const visited = new Set<string>()
+    while (nodeId && !visited.has(nodeId)) {
+      visited.add(nodeId)
+      const material = Object.entries(workspace.sources?.materials ?? {}).find(([, link]) => !link.dismissed && link.nodeId === nodeId)
+      if (material) return material[0]
+      nodeId = nodes.find((node) => node.id === nodeId)?.parentId ?? null
+    }
+    return null
+  }, [editorSession?.nodeId, workspace.sources, nodes])
+
   const updateEditorDocument = useCallback((documentInput: TiptapJSON) => {
     if (isNativeReadOnly()) return
     const session = editorSession
@@ -329,7 +368,7 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
     for (const id of previousImageIds) if (!nextImageIds.has(id)) removedImageIdsRef.current.add(id)
     for (const id of nextImageIds) removedImageIdsRef.current.delete(id)
     const editedNodeId = findEditedSynthesisNode(workspaceRef.current.document, completeDocument, session.nodeId)
-    const next = recordSynthesisRemovals(workspaceRef.current, completeDocument)
+    const next = recordSynthesisRemovals(workspaceRef.current, restoreSynthesisPdfHeadings(workspaceRef.current, completeDocument))
     if (editedNodeId) next.lastEditedNodeId = editedNodeId
     workspaceRef.current = next
     setWorkspace(next)
@@ -471,6 +510,7 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
     </Dialog>
     {message ? <div className={styles.notice}>{message}<button onClick={() => setMessage("")} aria-label="Cerrar aviso">×</button></div> : null}
     <SimpleEditor key={editorSession.key} content={editorSession.document} editable={!isNativeReadOnly()} onChange={updateEditorDocument} onError={setMessage}
+      relatedPdfHref={relatedPdfId ? `/practice/viewer?materialId=${encodeURIComponent(relatedPdfId)}` : undefined}
       onPendingChange={autosave.markDirty} onFlushReady={onEditorFlushReady}
       toolbarAction={<button type="button" className={styles.exportSvgButton} onClick={() => { void downloadSvg() }} disabled={exportingSvg} aria-busy={exportingSvg} aria-label={exportingSvg ? "Exportando página como SVG…" : "Exportar página como SVG"} title={exportingSvg ? "Exportando página como SVG…" : "Exportar página como SVG"}>{exportingSvg ? <LoaderCircle className={styles.spinner} aria-hidden="true" /> : <Download aria-hidden="true" />}</button>}
       fontSize={workspace.editorFontSize} onFontSizeChange={(editorFontSize) => {
