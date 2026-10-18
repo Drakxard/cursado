@@ -40,7 +40,16 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     return dir.getFileHandle(parts.at(-1), { create });
   }
   async function read(root, path) {
-    try { return JSON.parse(await (await (await fileHandle(root, path)).getFile()).text()); }
+    try {
+      const text = await (await (await fileHandle(root, path)).getFile()).text();
+      try { return JSON.parse(text); }
+      catch {
+        // A failed older write can leave an empty credential file. Preserve it
+        // and request a new key; OCR caches can be regenerated from the PDF.
+        if (path === "User.Datalab" || path.startsWith("manifests/subject-voice/pdf/")) return null;
+        throw new Error(`No se pudo leer ${path}: contiene JSON incompleto o dañado. Se conserva el archivo original.`);
+      }
+    }
     catch (error) { if (error.name === "NotFoundError") return null; throw error; }
   }
   async function write(root, path, text) {
@@ -137,7 +146,10 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       const init = { method: "POST", body: form, signal: AbortSignal.timeout(65_000),
         headers: saved?.token ? { "x-datalab-config-token": saved.token } : {} };
       const response = await servicesFetch("/api/inscreen/datalab-transcribe", init);
-      payload = await response.json();
+      const responseText = await response.text();
+      try { payload = JSON.parse(responseText); }
+      catch { throw new Error(`No se pudo transcribir la página: Datalab respondió HTTP ${response.status} con ${responseText.trim() ? "un formato inesperado" : "una respuesta vacía"}. Reintentá la transcripción.`); }
+      if (!payload || typeof payload !== "object") throw new Error(`No se pudo transcribir la página: respuesta inválida (HTTP ${response.status}).`);
       if (!response.ok && /Clave de Datalab|semilla|INSCREEN_CONFIG_SEED/i.test(payload.error || "")) {
         await configureDatalab(state);
         continue;

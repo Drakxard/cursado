@@ -28,3 +28,28 @@ test("PDF viewer saves the encrypted Datalab configuration as JSON and verifies 
   assert.deepEqual(JSON.parse(contents), { version: 1, token: "encrypted-token" })
   await assert.rejects(save(async () => {}, async () => ({ token: "other" }), { root: {} }, { token: "encrypted-token" }), /verificar/)
 })
+
+test("PDF viewer recovers truncated Datalab credentials and OCR cache without overwriting files", async () => {
+  const source = await readFile(new URL("../public/pdfjs/web/viewer-explanations.js", import.meta.url), "utf8")
+  const body = source.match(/  async function read\(root, path\) \{([\s\S]*?)\n  \}/)[1]
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const read = new AsyncFunction("fileHandle", "root", "path", body)
+  for (const text of ["", '{"token":', "null", '{"token":"encrypted"}']) {
+    const fileHandle = async () => ({ getFile: async () => ({ text: async () => text }) })
+    for (const path of ["User.Datalab", "manifests/subject-voice/pdf/hash/extraction.json"]) {
+      assert.deepEqual(await read(fileHandle, {}, path), text.includes('"encrypted"') ? { token: "encrypted" } : null)
+    }
+    if (!text || text.endsWith(":")) await assert.rejects(read(fileHandle, {}, "explanations.json"), /explanations.json/)
+  }
+})
+
+test("PDF transcription reports empty or invalid server responses with their HTTP status", async () => {
+  const source = await readFile(new URL("../public/pdfjs/web/viewer-explanations.js", import.meta.url), "utf8")
+  const body = source.match(/      const responseText = await response.text\(\);([\s\S]*?)(?=      if \(!response.ok)/)[0]
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const parse = new AsyncFunction("response", `let payload;\n${body}\nreturn payload;`)
+  for (const text of ["", "<html>Unavailable</html>", "null"]) {
+    await assert.rejects(parse(new Response(text, { status: 502 })), /HTTP 502/)
+  }
+  assert.deepEqual(await parse(Response.json({ markdown: "Page" })), { markdown: "Page" })
+})
