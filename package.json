@@ -22,7 +22,7 @@
     "diagnose:jev": "node scripts/diagnose-jev.mjs",
     "quality": "npm run typecheck && npm test && npm run build",
     "build:pizarra": "node scripts/build-pizarra.mjs",
-    "test:integration": "node --test tests/cursado.browser.mjs",
+    "test:integration": "node --test tests/cursado.browser.mjs tests/board-library.browser.mjs",
     "test:services": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/services.browser.mjs",
     "cloudflare:check": "npx --yes wrangler@4.151.0 deploy --dry-run --config cloudflare/wrangler.jsonc",
     "cloudflare:deploy": "npx --yes wrangler@4.151.0 deploy --config cloudflare/wrangler.jsonc"

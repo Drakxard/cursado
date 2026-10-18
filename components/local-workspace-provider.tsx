@@ -999,3 +999,8 @@ export function useLocalWorkspace() {
 export function NativeWorkspaceProvider({ rootHandle, children }: { rootHandle: FileSystemDirectoryHandle; children: React.ReactNode }) {
   return <LocalWorkspaceContext.Provider value={{ isReady: true, rootHandle, permissionState: "granted", reselectWorkspace: async () => {} }}>{children}</LocalWorkspaceContext.Provider>
 }
+
+// An embedded library uses the folder explicitly supplied by its owning board.
+export function EmbeddedWorkspaceProvider({rootHandle,children}:{rootHandle:FileSystemDirectoryHandle;children:React.ReactNode}) {
+  return <NativeWorkspaceProvider rootHandle={rootHandle}><LocalFetchInterceptor />{children}</NativeWorkspaceProvider>
+}

@@ -158,6 +158,7 @@ function buildViewerSrc({
   mode,
   returnToken,
   presentationTagIds,
+  boardReader,
 }: {
   material?: MaterialContext
   draftContext?: DraftViewerContext
@@ -166,6 +167,7 @@ function buildViewerSrc({
   mode?: "inline" | "standalone"
   returnToken?: string
   presentationTagIds?: number[]
+  boardReader?: boolean
 }) {
   const params = new URLSearchParams()
 
@@ -210,6 +212,7 @@ function buildViewerSrc({
   }
 
   params.set("viewerMode", mode === "inline" ? "inline" : "standalone")
+  if(boardReader)params.set('boardReader','1')
 
   if (returnToken) {
     params.set("returnToken", returnToken)
@@ -287,6 +290,7 @@ function EditablePracticeViewerClient({
   subjectActivationDate,
   subjectTargetWeekday,
   presentationTagIds = EMPTY_PRESENTATION_TAG_IDS,
+  boardReader = false,
 }: {
   material?: MaterialContext
   draftContext?: DraftViewerContext
@@ -297,6 +301,7 @@ function EditablePracticeViewerClient({
   subjectActivationDate?: string
   subjectTargetWeekday?: number
   presentationTagIds?: number[]
+  boardReader?: boolean
 }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -339,8 +344,9 @@ function EditablePracticeViewerClient({
         mode,
         returnToken: resolvedMaterial?.returnToken || draftContext?.returnToken || returnToken,
         presentationTagIds,
+        boardReader,
       }),
-    [draftContext, isLocalMode, materialId, mode, presentationTagIds, resolvedMaterial, returnToken]
+    [draftContext, isLocalMode, materialId, mode, presentationTagIds, resolvedMaterial, returnToken, boardReader]
   )
   const viewerIdentity = useMemo(() => {
     if (draftContext) return `draft:${draftContext.subjectId}:${draftContext.sessionDate}`

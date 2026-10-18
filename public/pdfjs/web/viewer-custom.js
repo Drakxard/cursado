@@ -155,6 +155,7 @@
       workspaceFileId: String(params.get("workspaceFileId") || "").trim(),
       fragmentRegion: String(params.get("fragmentRegion") || ""),
       viewerMode: String(params.get("viewerMode") || "standalone").trim() === "inline" ? "inline" : "standalone",
+      boardReader: params.get("boardReader") === "1",
       returnToken: String(params.get("returnToken") || "").trim(),
       presentationTagIds: Array.from(new Set(
         String(params.get("presentationTagIds") || "")
@@ -2393,6 +2394,12 @@
       return;
     }
 
+    if (state.query?.boardReader) {
+      if (document.fullscreenElement) return;
+      event?.preventDefault?.();
+      void navigateBackToApp();
+      return;
+    }
     // Escape belongs to PDF.js (notably to leave presentation/fullscreen mode).
     // Closing the viewer is an explicit navigation action, never an Escape side effect.
     event?.preventDefault?.();

@@ -10,8 +10,9 @@ export function AppProviders({ children, localMode }: { children: React.ReactNod
   const pathname = usePathname()
   // The launcher never prompts for a study folder or starts its services.
   if (pathname === '/' || pathname === '/biblioteca/publicador') return <>{pathname === '/' && <WorkspaceLibraryPublisher />}{children}</>
-  return <LocalWorkspaceProvider enabled={localMode}>
-    <WorkspaceLibraryPublisher />
+  const embeddedBoardLibrary = pathname === '/biblioteca/pizarra'
+  return <LocalWorkspaceProvider enabled={localMode && !embeddedBoardLibrary}>
+    {!embeddedBoardLibrary && <WorkspaceLibraryPublisher />}
     <ThemeProvider attribute="data-theme" defaultTheme="daylight" enableSystem={false} disableTransitionOnChange>
       {children}
       <Toaster />

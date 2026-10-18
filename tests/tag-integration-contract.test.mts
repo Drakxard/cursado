@@ -77,7 +77,7 @@ test("el visor PDF.js captura y persiste varias regiones por tag", () => {
   assert.doesNotMatch(viewer, /RegionPresentationClient/)
 })
 
-test("Escape sale de presentacion sin cerrar el visor PDF.js", () => {
+test("Escape mantiene el visor normal y solo vuelve a la pizarra en modo boardReader sin ventanas pendientes", () => {
   const pdfJs = source("public/pdfjs/web/viewer-custom.js")
   const escapeHandler = pdfJs.match(
     /function handleViewerEscape\(event\) \{([\s\S]*?)\r?\n  \}\r?\n\r?\n  function showLoadingOverlay/
@@ -85,7 +85,18 @@ test("Escape sale de presentacion sin cerrar el visor PDF.js", () => {
 
   assert.ok(escapeHandler, "debe existir el manejador de Escape del visor")
   assert.match(escapeHandler, /event\?\.preventDefault\?\.\(\)/)
-  assert.doesNotMatch(escapeHandler, /navigateBackToApp|viewerRequestClose|location\.assign/)
+  let closed=0,cancelled=0
+  const state:{query:{boardReader:boolean};selectionMode?:boolean}={query:{boardReader:false}}
+  const document={fullscreenElement:null as object|null}
+  const run=new Function('state','document','deselectEditorTool','navigateBackToApp','leaveSelectionMode','event',escapeHandler)
+  const escape=()=>run(state,document,()=>{},()=>{closed++},()=>{cancelled++},{preventDefault(){}})
+  escape();assert.equal(closed,0)
+  state.query.boardReader=true
+  escape();assert.equal(closed,1)
+  state.selectionMode=true
+  escape();assert.equal(cancelled,1);assert.equal(closed,1)
+  state.selectionMode=false;document.fullscreenElement={}
+  escape();assert.equal(closed,1)
 })
 
 test("el visor exporta rangos inclusivos copiando paginas PDF sin rasterizarlas", () => {

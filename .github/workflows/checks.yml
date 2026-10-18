@@ -64,7 +64,7 @@ jobs:
           curl --silent --fail http://localhost:3000/ > /dev/null
           npm run test:integration
       - name: Actualizaciones y copias sin conexión de Pizarra
-        run: npm run test:browser -- tests/browser/offline-study.spec.mjs tests/browser/app-update.spec.mjs
+        run: npm run test:browser -- tests/browser/offline-study.spec.mjs tests/browser/app-update.spec.mjs tests/browser/pdf-shortcuts.spec.mjs
         working-directory: pizarraproyecto-main
       - name: Guardar capturas y diagnósticos
         if: always()

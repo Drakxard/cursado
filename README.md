@@ -1,5 +1,18 @@
 # cursado
 
+En las pizarras, **+ → Biblioteca → Abrir mitad y mitad** muestra Estudio a la
+derecha. Arrastrar sus PDF al lienzo crea accesos con el nombre sin `.pdf`, sin
+copiar archivos ni convertir páginas en imágenes. Un clic abre el lector a
+pantalla completa; arrastrar mueve el acceso. Escape vuelve a la misma pizarra
+y conserva la materia abierta. Otro Escape cierra la biblioteca dividida.
+**+ → PDF** conserva la importación de páginas al lienzo.
+
+Las pizarras de **Importantes → Temas** se cierran con la flecha **←** de la
+esquina, después de guardar. Escape cancela primero las ediciones o ventanas
+abiertas y, en el lienzo sin selección, activa **Seleccionar**. No cierra la
+pizarra de Temas. Los accesos se guardan junto a las figuras y requieren acceso
+a su material original; eliminar un acceso no elimina el PDF.
+
 La biblioteca personal para InScreen permite publicar materiales y pizarras
 privadas en R2 y leerlos sin conexión desde Android. Ejecuta los componentes
 originales de Inicio, Estudio y Pizarra, con actualización de interfaz desde la

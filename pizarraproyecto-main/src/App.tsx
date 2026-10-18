@@ -1,5 +1,7 @@
 import { PIZARRA_API_ROOT } from './backend'
 import { beforeHome } from './homeNavigation'
+import { BOARD_PDF_MIME, parseBoardPdfDrag } from '../../lib/board-library-contract'
+import { useBoardLibrary } from './BoardLibraryPanels'
 import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace } from './topicWorkspace'
 import { mergeBoard } from './storage/merge'
 import { applyScenePatch } from './storage/livePatch'
@@ -751,6 +753,8 @@ function InlineTableEditor({ table, camera, anchorRef, onChange, onCellChange, o
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const materialLibrary = useBoardLibrary(getActiveBoardId())
+  const pdfPointer = useRef<{pointerId:number;id:string;x:number;y:number;moved:boolean;transform:Transform}|null>(null)
   const sceneRef = useRef<HTMLDivElement>(null)
   const contentCanvasesRef = useRef(new Map<number,HTMLCanvasElement>())
   const navigationPointerRef = useRef<number|null>(null)
@@ -995,7 +999,7 @@ function App() {
   const [controlNavigation,setControlNavigation]=useState(false)
   const [selectionError,setSelectionError]=useState('')
   const [imageCrop,setImageCrop]=useState<{boardId:string;itemId:string;assetId:string;blob:Blob;name:string}|null>(null)
-  const [openMenu, setOpenMenu] = useState<'add' | 'pen' | 'text' | 'ai' | 'shapes' | 'academic' | 'calendar' | null>(null)
+  const [openMenu, setOpenMenu] = useState<'add' | 'library' | 'pen' | 'text' | 'ai' | 'shapes' | 'academic' | 'calendar' | null>(null)
   const [visualEditor,setVisualEditor] = useState<string|null>(null)
   const [printPreview,setPrintPreview]=useState<PrintPreview|null>(null)
   const printRequestRef=useRef(0)
@@ -2420,8 +2424,10 @@ function App() {
       redraw()
     }
     window.addEventListener('resize', resize)
+    const observer = new ResizeObserver(resize)
+    if(canvasRef.current)observer.observe(canvasRef.current)
     resize()
-    return () => window.removeEventListener('resize', resize)
+    return () => {observer.disconnect();window.removeEventListener('resize', resize)}
   }, [])
 
   function findText(point: Point): TextItem | null {
@@ -2489,7 +2495,7 @@ function App() {
     if(shape.rotation) point=rotateAround(point,{x:x+w/2,y:y+h/2},-shape.rotation)
     const tolerance=radius+shape.strokeWidth/2
     if(point.x<x-tolerance||point.x>x+w+tolerance||point.y<y-tolerance||point.y>y+h+tolerance)return false
-    if(shape.visualType==='sticky' || shape.visualType==='symbol')return true
+    if(shape.visualType==='sticky' || shape.visualType==='symbol' || shape.visualType==='pdf-shortcut')return true
     const seg=(x1:number,y1:number,x2:number,y2:number)=>distanceToSegment(point,{x:x1,y:y1},{x:x2,y:y2})<=tolerance
     if(kind==='line'||kind==='arrow'||kind==='double-arrow'){
       const leftY=shape.reverse?y:y+h,rightY=shape.reverse?y+h:y
@@ -2852,6 +2858,17 @@ function App() {
 
   function pointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
     if(contextMenu) setContextMenu(null)
+    if(loadedRef.current && !nativeBoardMode() && !selectionPicking && tool!=='eraser' && e.button===0 && !e.ctrlKey && !e.metaKey) {
+      const hit = hitSelectionAt(toWorld(e.clientX,e.clientY))
+      const shortcut = hit?.kind==='shape' ? shapesRef.current.find(shape=>shape.id===hit.id&&shape.visualType==='pdf-shortcut') : null
+      if(shortcut?.pdfReference) {
+        e.preventDefault();finishPendingPen();if(editingRef.current)commitText()
+        setTool('select');selectElement({kind:'shape',id:shortcut.id})
+        pdfPointer.current={pointerId:e.pointerId,id:shortcut.id,x:e.clientX,y:e.clientY,moved:false,
+          transform:{mode:'move',start:toWorld(e.clientX,e.clientY),bounds:groupBounds()!,initial:snapshot(),group:[...groupRef.current]}}
+        e.currentTarget.setPointerCapture(e.pointerId);return
+      }
+    }
     if(!nativeBoardMode() && beginCartesianResize(e))return
     if (e.pointerType === 'touch' && !selectionPicking) {
       e.preventDefault()
@@ -2983,6 +3000,15 @@ function App() {
   }
 
   function pointerMove(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const pdf = pdfPointer.current
+    if(pdf?.pointerId===e.pointerId) {
+      e.preventDefault()
+      if(Math.hypot(e.clientX-pdf.x,e.clientY-pdf.y)>5 || pdf.moved) {
+        if(!pdf.moved)rememberChange()
+        pdf.moved=true;transformSelection(pdf.transform,toWorld(e.clientX,e.clientY))
+      }
+      return
+    }
     if(cartesianDragRef.current&&e.pointerId===pointerRef.current){e.preventDefault();sendCursorPosition(e.clientX,e.clientY);moveCartesianResize(toWorld(e.clientX,e.clientY));return}
     if(e.pointerType==='mouse'&&pointerRef.current===null&&canvasRef.current){
       const tip=tool==='select'&&!selectionPicking&&selectedCartesian()?cartesianTipAt(toWorld(e.clientX,e.clientY),14/cameraRef.current.zoom):null
@@ -3098,6 +3124,14 @@ function App() {
   }
 
   function pointerUp(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const pdf = pdfPointer.current
+    if(pdf?.pointerId===e.pointerId) {
+      pdfPointer.current=null
+      if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId)
+      if(pdf.moved)scheduleSave()
+      else {const reference=shapesRef.current.find(shape=>shape.id===pdf.id)?.pdfReference;if(reference)materialLibrary.openReader(reference)}
+      return
+    }
     if(cartesianDragRef.current&&e.pointerId===pointerRef.current){moveCartesianResize(toWorld(e.clientX,e.clientY));finishCartesianResize();return}
     if (endTouchPointer(e)) return
     if (e.pointerId !== pointerRef.current) return
@@ -3156,6 +3190,10 @@ function App() {
   }
 
   function pointerCancel(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if(pdfPointer.current?.pointerId===e.pointerId) {
+      if(pdfPointer.current.moved)scheduleSave()
+      pdfPointer.current=null;return
+    }
     if(cartesianDragRef.current&&e.pointerId===pointerRef.current){finishCartesianResize(true);return}
     if (endTouchPointer(e)) return
     if (e.pointerId !== pointerRef.current) return
@@ -4028,6 +4066,7 @@ function App() {
   }
 
   function onFileDragOver(e: ReactDragEvent<HTMLDivElement>) {
+    if(e.dataTransfer.types.includes(BOARD_PDF_MIME)) {e.preventDefault();e.dataTransfer.dropEffect='copy';return}
     if (e.dataTransfer.types.includes('application/x-pizarra-graph')) {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'copy'
@@ -4049,6 +4088,17 @@ function App() {
 
   function onFileDrop(e: ReactDragEvent<HTMLDivElement>) {
     if (nativeBoardMode()) { e.preventDefault(); return }
+    if(e.dataTransfer.types.includes(BOARD_PDF_MIME)) {
+      e.preventDefault();e.stopPropagation()
+      const reference=parseBoardPdfDrag(e.dataTransfer.getData(BOARD_PDF_MIME))
+      if(!reference || !loadedRef.current || libraryOpen)return
+      const point=toWorld(e.clientX,e.clientY),label=reference.fileName.replace(/\.pdf$/i,'')
+      rememberChange()
+      const id=createId()
+      shapesRef.current.push({id,kind:'rounded',visualType:'pdf-shortcut',pdfReference:reference,label,
+        x:point.x,y:point.y,width:Math.max(180,Math.min(420,label.length*9+28)),height:54,color:'#2563eb',strokeWidth:1.5})
+      setTool('select');selectElement({kind:'shape',id});redraw();scheduleSave();return
+    }
     const graphData = e.dataTransfer.getData('application/x-pizarra-graph')
     if (graphData) {
       e.preventDefault();e.stopPropagation()
@@ -4503,11 +4553,28 @@ function App() {
   // Atajos de pizarra: no interceptar la edición de texto ni ventanas emergentes.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if(e.defaultPrevented)return
       if (nativeBoardMode() && !((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f")) return
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&!libraryOpen){e.preventDefault();setBoardSearchOpen(true);return}
-      if(e.key==='Escape'){finishCartesianResize(true);setBoardSearchOpen(false);setContextMenu(null);setTreePanel(null);setSelectionPicking(false)}
+      if(e.key==='Escape' && !e.repeat) {
+        if(editingRef.current || imageCrop || studyAssistant || importStatus || recognizing)return
+        e.preventDefault()
+        if(cartesianDragRef.current){finishCartesianResize(true);return}
+        if(boardSearchOpen){setBoardSearchOpen(false);return}
+        if(contextMenu){setContextMenu(null);return}
+        if(treePanel){setTreePanel(null);return}
+        if(selectionPicking){setSelectionPicking(false);return}
+        if(selectionError){setSelectionError('');return}
+        if(openMenu){setOpenMenu(null);return}
+        if(libraryOpen){if(loadedRef.current)setLibraryOpen(false);return}
+        if(materialLibrary.reader){materialLibrary.closeReader();return}
+        if(materialLibrary.splitOpen){materialLibrary.setSplitOpen(false);return}
+        if(groupRef.current.length)selectElement(null)
+        else selectTool('select')
+        redraw();return
+      }
       if (editingRef.current || imageCrop || studyAssistant || treePanel || libraryOpen || selectionError || handwrittenEvent || handwrittenError || openMenu || importStatus || recognizing) return
       if (!loadedRef.current || e.altKey || e.repeat) return
       const key = e.key.toLowerCase()
@@ -4536,7 +4603,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [imageCrop, studyAssistant, libraryOpen, treePanel, selectionError, handwrittenEvent, handwrittenError, openMenu, importStatus, recognizing])
+  }, [imageCrop, studyAssistant, libraryOpen, treePanel, selectionError, handwrittenEvent, handwrittenError, openMenu, importStatus, recognizing, boardSearchOpen, contextMenu, materialLibrary.reader, materialLibrary.splitOpen])
 
   const cam = cameraRef.current
   const editorX = editing ? editing.x * cam.zoom + cam.x : 0
@@ -4572,7 +4639,8 @@ function App() {
     : []
   const selectedDayLabel = selectedCalendarDate ? (() => { const [y,m,d] = selectedCalendarDate.split('-').map(Number); return `${d} de ${new Intl.DateTimeFormat('es-AR', { month: 'long' }).format(new Date(y,m-1,d))}` })() : ''
   return (
-    <div className="app" data-theme={theme} data-tool={tool} data-control-navigation={controlNavigation}
+    <div className="app" data-theme={theme} data-tool={tool} data-control-navigation={controlNavigation} data-library-split={materialLibrary.splitOpen}
+      style={materialLibrary.splitOpen ? {right:'50%'} : undefined}
       onPointerDownCapture={captureScenePointerDown} onPointerMoveCapture={captureScenePointerMove}
       onPointerUpCapture={captureScenePointerUp} onPointerCancelCapture={captureScenePointerCancel}
       onLostPointerCapture={captureScenePointerCancel}
@@ -4593,7 +4661,8 @@ function App() {
         {following&&<button type="button" className="live-follow-stop" onClick={stopFollowing}>Dejar de seguir</button>}
         {!liveConnected&&<span className="live-presence-empty" title="Reconectando">…</span>}
       </aside>}
-      <canvas ref={canvasRef} onPointerDown={tabletPointerDown} onPointerMove={tabletPointerMove}
+      {materialLibrary.panels}
+      <canvas tabIndex={-1} ref={canvasRef} onPointerDown={tabletPointerDown} onPointerMove={tabletPointerMove}
         onPointerLeave={e => {
           // No ocultar los controles cuando el puntero pasa del canvas a un botón +.
           const next = e.relatedTarget
@@ -5032,12 +5101,16 @@ function App() {
           {openMenu === 'add' && <div className="toolbar-popover add-popover">
             <button onClick={() => { setOpenMenu(null); imageInputRef.current?.click() }}>▧ Imagen / SVG</button>
             <button onClick={() => { setOpenMenu(null); pdfInputRef.current?.click() }}>▤ PDF</button>
+            <button onClick={() => setOpenMenu('library')}>▥ Biblioteca</button>
             <button onClick={() => { setOpenMenu(null); excelInputRef.current?.click() }}>▦ Excel / CSV</button>
             <button onClick={() => { setOpenMenu(null); setVideoError(''); setVideoDialogOpen(true) }}>▶ Video de YouTube</button>
           </div>}
         </div>
         <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg" multiple hidden onChange={onImages} />
         <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={onPDF} />
+        {openMenu==='library'&&<div className="toolbar-popover" role="dialog" aria-label="Biblioteca de PDF">
+          <button onClick={()=>{setOpenMenu(null);materialLibrary.setSplitOpen(true)}}>Abrir mitad y mitad</button>
+        </div>}
         <input ref={excelInputRef} type="file" accept=".xlsx,.xlsm,.csv" multiple hidden onChange={onExcelFiles} />
         <span className="separator" />
         <div className="toolbar-history">

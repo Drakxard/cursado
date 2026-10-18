@@ -7,6 +7,14 @@ export function paintShape(ctx: CanvasRenderingContext2D, shape: ShapeItem, reso
       const center = {x:x+w/2,y:y+h/2}
       ctx.translate(center.x,center.y);ctx.rotate(shape.rotation);ctx.translate(-center.x,-center.y)
     }
+    if(shape.visualType==='pdf-shortcut') {
+      ctx.fillStyle=dark?'#1e293b':'#eff6ff';ctx.strokeStyle=dark?'#93c5fd':'#2563eb';ctx.lineWidth=1.5
+      ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(12,h/4));ctx.fill();ctx.stroke()
+      ctx.fillStyle=dark?'#dbeafe':'#1e40af';ctx.font=`${Math.min(18,h*.35)}px system-ui`;ctx.textBaseline='middle'
+      let label=shape.label??'PDF'
+      while(label.length>1&&ctx.measureText(label).width>w-28)label=label.slice(0,-2)+'…'
+      ctx.fillText(label,x+14,y+h/2);ctx.restore();return
+    }
     if(paintVisual(ctx,shape,resolve,color,dark)){ctx.restore();return}
     ctx.strokeStyle = color
     ctx.lineWidth = Math.max(shape.strokeWidth, minimumWidth)

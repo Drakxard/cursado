@@ -1259,9 +1259,11 @@ function buildSynthesisSubjectSummary(subjectId: string, weekNumber: number, sta
 export function SubjectWheel({
   authSession,
   initialSearchParams,
+  boardLibrary = false,
 }: {
   authSession: AuthSession
   initialSearchParams?: SubjectWheelSearchParams
+  boardLibrary?: boolean
 }) {
   const router = useRouter()
   const localWorkspace = useLocalWorkspace()
@@ -6956,7 +6958,11 @@ export function SubjectWheel({
                     event.preventDefault()
                     return
                   }
-                  event.dataTransfer.effectAllowed = "move"
+                  event.dataTransfer.effectAllowed = boardLibrary ? "copy" : "move"
+                  if (boardLibrary && /\.pdf$/i.test(material.file_name)) event.dataTransfer.setData("application/x-cursado-board-pdf", JSON.stringify({
+                    materialId:material.id, subjectId:material.subject_id, fileName:material.file_name,
+                    workspaceFileId:material.drive_file_id?.startsWith('workspace://') ? material.drive_file_id : null,
+                  }))
                   event.dataTransfer.setData("application/x-study-material-id", String(material.id))
                   event.dataTransfer.setData("text/plain", material.file_name)
                 }}

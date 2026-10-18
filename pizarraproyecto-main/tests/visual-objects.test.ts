@@ -14,6 +14,14 @@ function connection(a:ShapeItem,b:ShapeItem):ShapeItem {
 const resolver=(items:ShapeItem[]):ResolveObject=>(ref:ObjectRef)=>items.find(item=>item.id===ref.id)??null
 
 describe('visual objects in the existing board model',()=>{
+  it('preserves PDF references through concurrent board merges and deletions',()=>{
+    const shortcut:ShapeItem={id:'pdf-one',kind:'rounded',visualType:'pdf-shortcut',x:10,y:20,width:240,height:54,color:'#2563eb',strokeWidth:1.5,
+      label:'Guía',pdfReference:{materialId:41,subjectId:'calculo3',fileName:'Guía.pdf',workspaceFileId:'workspace://teoria/calculo3/guia.pdf'}}
+    const base={shapes:[shortcut],camera:{x:0,y:0,zoom:1}},local={...base,shapes:[{...shortcut,x:100}]},remote={...base,shapes:[{...shortcut,label:'Guía renombrada'}]}
+    const merged=mergeBoard(base,local,remote)
+    expect(merged.shapes[0]).toMatchObject({x:100,label:'Guía renombrada',pdfReference:shortcut.pdfReference})
+    expect(mergeBoard(base,{...base,shapes:[]},remote).shapes).toEqual([])
+  })
   it('keeps connectors on the boundary when targets move, resize and rotate',()=>{
     const a=node('a'),b=node('b',300),c=connection(a,b)
     expect(connectorEndpoints(c,resolver([a,b]))).toEqual({start:{x:100,y:40},end:{x:300,y:40}})

@@ -23,9 +23,12 @@ const DynamicSubjectWheel = dynamic(
 export function SubjectWheelLoader({
   authSession,
   initialSearchParams,
+  boardLibrary = false,
 }: {
   authSession: AuthSession
   initialSearchParams?: SubjectWheelSearchParams
+  boardLibrary?: boolean
 }) {
-  return <StudyImportantTasks><DynamicSubjectWheel authSession={authSession} initialSearchParams={initialSearchParams} /></StudyImportantTasks>
+  const wheel = <DynamicSubjectWheel authSession={authSession} initialSearchParams={initialSearchParams} boardLibrary={boardLibrary} />
+  return boardLibrary ? wheel : <StudyImportantTasks>{wheel}</StudyImportantTasks>
 }
