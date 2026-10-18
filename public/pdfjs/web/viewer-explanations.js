@@ -17,6 +17,12 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   let documentState = null, loading = null, modal = null, restoring = false;
   let saving = Promise.resolve();
   const editors = new Map();
+  const notePreview = text => {
+    const full = text.replace(/\s+/g, " ").trim();
+    const words = full.split(" ").slice(0, 8).join(" ");
+    const short = Array.from(words).slice(0, 60).join("").trimEnd();
+    return short + (short === full ? "" : "…");
+  };
   const preparedPages = new WeakMap();
   const star = document.createElement("button");
   star.id = "pdfExplanationButton";
@@ -355,7 +361,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     editor.editorDiv.addEventListener("blur", () => {
       setTimeout(() => { if (editing && !editor.editorDiv.contains(document.activeElement)) editor.commit(); }, 0);
     });
-    div.title = "Clic para ver; mantener presionado para editar; arrastrar para mover";
+    div.title = `${entry.question}\n\nClic para ver; mantener presionado para editar; arrastrar para mover`;
     div.addEventListener("pointerdown", event => {
       if (editing || event.button !== 0 || event.target.closest(".editToolbar, .resizers")) return;
       event.preventDefault();
@@ -723,7 +729,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         debug.stage = "guardar-html-y-nota";
         const pdfPage = await state.pdf.getPage(page);
         const [x1, y1, x2, y2] = pdfPage.view;
-        const annotation = { annotationType: 3, pageIndex: page - 1, rect: [x1 + 24, y2 - 80, Math.min(x2 - 24, x1 + 320), y2 - 40], rotation: 0, color: [126, 70, 190], fontSize: 12, value: `★ ${question}` };
+        const annotation = { annotationType: 3, pageIndex: page - 1, rect: [x1 + 24, y2 - 80, Math.min(x2 - 24, x1 + 320), y2 - 40], rotation: 0, color: [126, 70, 190], fontSize: 12, value: `★ ${notePreview(question)}` };
         const entry = { id: crypto.randomUUID(), question, html, annotation };
         if (state.root) await write(state.root, `manifests/pdf-explanations/${state.key}/${entry.id}.html`, entry.html);
         state.data.entries.push(entry);

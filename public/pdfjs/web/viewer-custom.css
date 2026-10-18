@@ -49,6 +49,11 @@
 .annotationEditorLayer .pdf-explanation-text { pointer-events: auto !important; cursor: grab !important; touch-action: none; }
 .annotationEditorLayer .pdf-explanation-text:active { cursor: grabbing !important; }
 .annotationEditorLayer .pdf-explanation-text .internal { pointer-events: none !important; }
+/* Keep saved long prompts compact too, without altering their text or edit mode. */
+.annotationEditorLayer .pdf-explanation-text:not([data-explanation-editing]) { max-width:min(34ch,60vw)!important; }
+.annotationEditorLayer .pdf-explanation-text:not([data-explanation-editing]) .internal { max-width:100%;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis; }
+.annotationEditorLayer .pdf-explanation-text:not([data-explanation-editing]) .internal>div { display:inline; }
+.annotationEditorLayer .pdf-explanation-text:not([data-explanation-editing]) .internal br { display:none; }
 .pdfjs-custom-toast-stack {
   position: fixed;
   right: 20px;

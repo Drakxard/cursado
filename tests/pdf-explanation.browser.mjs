@@ -20,6 +20,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
   const promptConfig = await explanationSystemConfig('azure')
+  const question = '¿Qué representa la derivada y cómo se interpreta su cambio en un ejemplo del apunte?'
   const customSystem = composeExplanationSystem(promptConfig.systemPromptBase, 'HTML interactivo paso a paso') + '\n\nExplicá con ejemplos de la materia.\n'
   let generations = 0, transcriptions = 0, modelsConfigured = false
   const errors = []
@@ -34,7 +35,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
       assert.equal(body.systemPrompt, customSystem)
       assert.equal(body.model, "gpt-5-mini")
       assert.equal(body.transcription, "Una derivada mide el cambio de la función.")
-      assert.equal(body.question, generations === 0 ? "¿Qué representa la derivada?" : "Explicalo")
+      assert.equal(body.question, generations === 0 ? question : "Explicalo")
       if (generations === 0) assert.match(body.image, /^data:image\/jpeg;base64,/)
       else assert.equal(body.image, undefined)
       generations++
@@ -112,7 +113,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.getByRole('button', { name: 'Prompt de sistema y preferencias', exact: true }).click()
     await systemPreview.fill(customSystem)
     await page.locator('.pdf-explanation-preferences').getByRole('button', { name: 'Guardar', exact: true }).click()
-    await page.locator("#pdf-explanation-question").fill("¿Qué representa la derivada?")
+    await page.locator("#pdf-explanation-question").fill(question)
     await page.locator("#pdf-explanation-question").press("Shift+Enter")
     assert.equal(generations, 0)
     const canvasBox = await page.locator('.page .canvasWrapper canvas').boundingBox()
@@ -152,6 +153,8 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.locator(".pdf-explanation-overlay").waitFor({ state: "detached" })
     const note = page.locator(".pdf-explanation-text")
     await note.waitFor()
+    assert.match(await note.innerText(), /★ ¿Qué representa la derivada y cómo se interpreta…/)
+    assert.ok((await note.getAttribute('title')).includes(question))
     const before = await note.boundingBox()
     await page.mouse.move(before.x + 20, before.y + 10)
     await page.mouse.down()
