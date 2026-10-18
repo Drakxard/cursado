@@ -131,18 +131,53 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     single.addPage(copied);
     const form = new FormData();
     form.set("file", new File([await single.save()], `pagina-${page}.pdf`, { type: "application/pdf" }));
-    const init = { method: "POST", body: form, signal: AbortSignal.timeout(65_000) };
-    let response;
-    try { response = await inscreenApiFetch("/api/inscreen/marker-transcribe", init); }
-    catch (error) {
-      if (error.name !== "InscreenConfigurationUnavailable") throw error;
-      response = await fetch("/api/inscreen/marker-transcribe", init);
+    let payload;
+    for (;;) {
+      const saved = state.root ? await read(state.root, "User.Datalab") : null;
+      const init = { method: "POST", body: form, signal: AbortSignal.timeout(65_000),
+        headers: saved?.token ? { "x-datalab-config-token": saved.token } : {} };
+      const response = await servicesFetch("/api/inscreen/datalab-transcribe", init);
+      payload = await response.json();
+      if (!response.ok && /Clave de Datalab|semilla|INSCREEN_CONFIG_SEED/i.test(payload.error || "")) {
+        await configureDatalab(state);
+        continue;
+      }
+      if (!response.ok || !payload.markdown?.trim()) throw new Error(payload.error || "Datalab devolvió una página vacía.");
+      break;
     }
-    const payload = await response.json();
-    if (!response.ok || !payload.markdown?.trim()) throw new Error(payload.error || "Datalab devolviÃ³ una pÃ¡gina vacÃ­a.");
     state.data.transcriptions[key] = payload.markdown;
     await persist(state); // Keep the transcription even if generation fails.
     return payload.markdown;
+  }
+  let datalabConfiguration = null;
+  function configureDatalab(state) {
+    if (datalabConfiguration) return datalabConfiguration;
+    datalabConfiguration = new Promise((resolve, reject) => {
+      const dialog = document.createElement("dialog");
+      dialog.setAttribute("aria-label", "Agregar API de Datalab");
+      dialog.style.cssText = "width:min(320px,calc(100vw - 48px));padding:20px;border:1px solid #8886;border-radius:14px;background:Canvas;color:CanvasText;box-shadow:0 12px 48px #0004";
+      dialog.innerHTML = `<form style="display:grid;gap:12px;font:14px system-ui"><strong>Agregar API de Datalab</strong><label>API key<input aria-label="API key" type="password" autocomplete="off" required style="display:block;box-sizing:border-box;width:100%;margin-top:6px;padding:8px;border:1px solid #888;border-radius:6px"></label><small>Copiala de <a href="https://www.datalab.to/app/keys" target="_blank" rel="noopener noreferrer">Datalab</a>. Se guarda cifrada.</small><span role="alert"></span><div style="display:flex;justify-content:flex-end;gap:8px"><button type="button">Ahora no</button><button type="submit">Guardar y reintentar</button></div></form>`;
+      const finish = error => { dialog.close(); dialog.remove(); error ? reject(error) : resolve(); };
+      dialog.addEventListener("cancel", event => { event.preventDefault(); finish(new Error("Agregá la clave de Datalab para continuar.")); });
+      dialog.querySelector('[type="button"]').onclick = () => finish(new Error("Agregá la clave de Datalab para continuar."));
+      dialog.querySelector("form").onsubmit = async event => {
+        event.preventDefault();
+        const submit = dialog.querySelector('[type="submit"]');
+        submit.disabled = true;
+        try {
+          if (!state.root) throw new Error("Seleccioná tu carpeta de trabajo para guardar la clave.");
+          const response = await fetch("/api/subject-voice/pdf-extraction/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: dialog.querySelector("input").value.trim() }) });
+          const result = await response.json();
+          if (!response.ok || !result.token) throw new Error(result.error || "No se pudo guardar la clave.");
+          await write(state.root, "User.Datalab", { version: 1, token: result.token });
+          dialog.querySelector("input").value = "";
+          finish();
+        } catch (error) { dialog.querySelector('[role="alert"]').textContent = error.message; }
+        finally { submit.disabled = false; }
+      };
+      document.body.append(dialog); dialog.showModal();
+    }).finally(() => { datalabConfiguration = null; });
+    return datalabConfiguration;
   }
   function preparePage(pdf, page) {
     if (!pdf) return Promise.reject(new Error("EsperÃ¡ a que termine de cargar el PDF."));
@@ -667,6 +702,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     if (!menu.contains(event.target) && !star.contains(event.target)) { menu.hidden = true; star.setAttribute("aria-expanded", "false"); }
   });
   document.addEventListener("keydown", event => {
+    if (document.querySelector('dialog[open][aria-label="Agregar API de Datalab"]')) return;
     if (event.key === "Escape" && (modal || !menu.hidden)) {
       event.preventDefault(); event.stopImmediatePropagation(); close(); menu.hidden = true; star.setAttribute("aria-expanded", "false");
     }

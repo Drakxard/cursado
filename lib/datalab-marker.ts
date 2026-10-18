@@ -9,6 +9,7 @@ type DatalabResponse = {
   error?: string | null
   request_check_url?: string
   status?: string
+  result_url?: string
   markdown?: string | null
 }
 
@@ -17,7 +18,7 @@ type FetchLike = typeof fetch
 export class DatalabMarkerError extends Error {}
 
 export function getDatalabMarkerApiKey(env: NodeJS.ProcessEnv = process.env) {
-  return String(getInscreenRuntimeSecret("MARKER_API") || env.datalab || env.MARKER_API || env.marker_api || "").trim()
+  return String(getInscreenRuntimeSecret("datalab") || env.datalab || env.DATALAB_API_KEY || getInscreenRuntimeSecret("MARKER_API") || env.MARKER_API || env.marker_api || "").trim()
 }
 
 function asResponse(value: unknown): DatalabResponse {
@@ -40,7 +41,7 @@ export async function convertFileWithDatalabMarker(params: {
   maxPollAttempts?: number
 }) {
   const apiKey = String(params.apiKey ?? getDatalabMarkerApiKey()).trim()
-  if (!apiKey) throw new DatalabMarkerError("MARKER_API no esta configurada.")
+  if (!apiKey) throw new DatalabMarkerError("Clave de Datalab no disponible. Agregala para leer el PDF.")
 
   const form = new FormData()
   form.append("file", params.file, params.file.name || "pagina.pdf")
@@ -57,7 +58,7 @@ export async function convertFileWithDatalabMarker(params: {
   })
   const submission = await readJson(submitted)
   if (!submitted.ok || !submission.success || !submission.request_check_url) {
-    throw new DatalabMarkerError(submission.error || "Datalab no pudo iniciar la conversion.")
+    throw new DatalabMarkerError(([401, 403].includes(submitted.status) ? "Clave de Datalab inválida. Volvé a cargarla." : submission.error || "Datalab no pudo iniciar la conversion."))
   }
 
   const checkUrl = new URL(submission.request_check_url)
@@ -73,12 +74,19 @@ export async function convertFileWithDatalabMarker(params: {
   for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
     await wait(POLL_INTERVAL_MS)
     const checked = await fetchImpl(checkUrl, { headers: { "X-API-Key": apiKey } })
-    const result = await readJson(checked)
+    let result = await readJson(checked)
     if (!checked.ok) throw new DatalabMarkerError(result.error || "No se pudo consultar la conversion en Datalab.")
     if (result.status === "failed" || result.success === false) {
       throw new DatalabMarkerError(result.error || "Datalab no pudo convertir la pagina.")
     }
     if (result.status === "complete") {
+      if (result.result_url) {
+        const download = new URL(result.result_url)
+        if (download.protocol !== "https:" || download.username || download.password) throw new DatalabMarkerError("Datalab devolvió una descarga inválida.")
+        const response = await fetchImpl(download)
+        if (!response.ok) throw new DatalabMarkerError("No se pudo descargar el resultado de Datalab.")
+        result = { ...result, ...await readJson(response) }
+      }
       const markdown = String(result.markdown || "").trim()
       if (!markdown) throw new DatalabMarkerError("Datalab no devolvio texto para la pagina.")
       return markdown

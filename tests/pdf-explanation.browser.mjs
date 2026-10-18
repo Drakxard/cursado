@@ -45,7 +45,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
       } }) })
       return route.fulfill({ body: await response.text(), headers: Object.fromEntries(response.headers) })
     }
-    if (url.pathname.includes("marker-transcribe")) { transcriptions++; return route.fulfill({ status: 500 }) }
+    if (url.pathname.includes("datalab-transcribe")) { transcriptions++; return route.fulfill({ status: 500 }) }
     if (url.pathname === "/sample.pdf") return route.fulfill({ body: Buffer.from(bytes), contentType: "application/pdf" })
     try {
       const file = `public${decodeURIComponent(url.pathname)}`
@@ -252,7 +252,7 @@ test("star starts Datalab before confirmation; Enter waits for that job and retr
   const pending = new Promise(resolve => { release = resolve })
   await page.route("https://prepare.test/**", async route => {
     const url = new URL(route.request().url())
-    if (url.pathname === "/api/inscreen/marker-transcribe") {
+    if (url.pathname === "/api/inscreen/datalab-transcribe") {
       transcriptions++
       await pending
       return route.fulfill({ json: { markdown: "Transcripción de la página actual." } })
@@ -288,7 +288,7 @@ test("star starts Datalab before confirmation; Enter waits for that job and retr
     await page.goto("https://prepare.test/pdfjs/web/viewer.html?file=%2Fsample.pdf")
     await page.waitForFunction(() => window.PDFViewerApplication?.pdfViewer?.getPageView(0)?.annotationEditorLayer?.annotationEditorLayer, null, { timeout: 20_000 })
     await page.evaluate(() => window.initPdfExplanations({ app: window.PDFViewerApplication, query: {}, ensureWorkspaceRootHandle: async () => null, inscreenApiFetch: fetch, showToast: () => {} }))
-    const transcriptionRequest = page.waitForRequest("**/api/inscreen/marker-transcribe")
+    const transcriptionRequest = page.waitForRequest("**/api/inscreen/datalab-transcribe")
     await page.locator("#pdfExplanationButton").click()
     await transcriptionRequest
     assert.equal(transcriptions, 1)
