@@ -22,6 +22,8 @@ export const graphPresentationSchema = z.object({
   }).strict()).min(1).max(40),
   diapositivas: z.array(z.object({
     paso: z.number().int().min(1).max(12),
+    titulo: z.string().trim().min(1).max(120).nullish(),
+    objetivo: z.string().trim().min(1).max(300).nullish(),
     posiciones: z.record(id, z.union([gridPositionSchema, pixelPositionSchema])),
     aristas: z.array(z.union([edgeSchema, topologyEdgeSchema])).max(100),
     comentarios: z.array(z.union([relativeCommentSchema, offsetCommentSchema])).max(12),
@@ -84,6 +86,8 @@ export function resolveGraphPresentation(input: unknown): ResolvedGraphPresentat
 }
 
 export const GRAPH_PRESENTATION_INSTRUCTIONS = `Para explicar árboles, grafos o sus transformaciones, preferí plantilla "pantilla1_grafos": titulo, elementos_iniciales [{id,tipo:"nodo"|"subarbol",etiqueta}] y diapositivas [{paso,posiciones,aristas,comentarios}].
+Cada diapositiva debe incluir titulo (la idea de ese paso) y objetivo (una frase que explique qué observar y por qué). Distribuí una transformación compleja en unos 6–9 pasos cuando el material lo justifique: contexto, regla, diagnóstico, protagonistas, movimiento, reconexión y comprobación. No reduzcas una rotación completa a un salto antes/después. Cada paso enseña una sola idea; algunos conservan posiciones y cambian el foco para preparar el movimiento. No agregues pasos vacíos para cumplir una cantidad.
+Antes de mover, señalá los dos protagonistas; después mostrales su nueva posición y explicá el cambio de padre del elemento intermedio en otro paso. En árboles, conservá la geometría izquierda/derecha de cada hijo y la topología del apunte. Los subárboles se representan como subarbol, no como cadenas de nodos inventadas. Una flecha sobre una arista expresa una relación, no el recorrido de una rotación. No afirmes que una rotación balancea un AVL sin conocer las alturas y el caso que lo justifica. Si las etiquetas no son claves ordenables, no las compares alfabéticamente para demostrar el orden ABB.
 Representá conceptos, procesos, redes y dependencias con las mismas herramientas: el formato no está limitado a árboles. En elementos_iniciales usá datos:[{etiqueta,valor}] para mostrar hasta cuatro atributos del nodo (por ejemplo costo, estado, cantidad, clave o prioridad); ambos campos son texto. datos:[] si no hacen falta. Cada posición también admite datos para mostrar valores que cambian en ese paso; null conserva los datos base. Los IDs son internos: los comentarios deben referirse a las etiquetas y valores visibles.
 Cada paso incluye posiciones de TODOS los elementos, con IDs estables: {fila,columna,estado}. Grilla de 10 columnas y 6 filas, índices enteros desde 1. Nunca calcules píxeles ni offsets. No ocupes una misma celda con dos elementos; debajo de un subarbol dejá una fila libre en su columna, porque su triángulo ocupa espacio. Estados: normal, alerta, exito, destacado, atenuado.
 Aristas: strings como "A -> B" para conexiones sólidas; para destacar usá {desde,hacia,estilo:"solido"|"animado_verde"|"animado_amarillo"}. Solo declarás topología y estilo; el motor calcula las líneas. Comentarios: {anclado_a,posicion,color:"rojo"|"verde"|"amarillo"|"azul",texto}; posicion puede ser arriba-derecha, arriba-izquierda, abajo-derecha, abajo-izquierda, arriba, abajo, derecha o izquierda. Pasos consecutivos desde 1, máximo 12; usá arrays vacíos cuando corresponda.

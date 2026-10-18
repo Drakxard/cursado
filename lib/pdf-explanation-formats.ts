@@ -11,6 +11,8 @@ const azureEdge = graphEdgeSchema.extend({ etiqueta: z.string().trim().max(80).n
 const azureGraphSchema = graphGenerationSchema.extend({
   elementos_iniciales: z.array(graphGenerationSchema.shape.elementos_iniciales.element.extend({ datos: graphNodeDataSchema.nullable() })).min(1).max(40),
   diapositivas: z.array(slide.extend({
+    titulo: z.string().trim().min(1).max(120),
+    objetivo: z.string().trim().min(1).max(300),
     posiciones: z.array(gridPositionSchema.extend({ id: positionId, datos: graphNodeDataSchema.nullable() })).min(1).max(40),
     aristas: z.array(z.union([azureEdge, topologyEdgeSchema])).max(100),
   })).min(1).max(12),

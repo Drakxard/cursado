@@ -26,9 +26,11 @@ test("system instructions scope both formats and provide valid examples for each
       assert.ok(azureExplanationFormatSchema.safeParse(JSON.parse(graphJson)).success)
       assert.ok(azureExplanationFormatSchema.safeParse(JSON.parse(processJson)).success)
     }
-    assert.equal(graph.diapositivas.length, 2)
-    assert.equal(graph.diapositivas[1].aristas[1].desde, "D")
-    assert.equal(graph.diapositivas[1].aristas[1].hacia, "C")
+    assert.equal(graph.diapositivas.length, 5)
+    assert.ok(graph.diapositivas.every(slide => slide.titulo && slide.objetivo))
+    assert.deepEqual(graph.diapositivas[0].aristas, graph.diapositivas[1].aristas, 'prepare the movement before changing topology')
+    assert.equal(graph.diapositivas[2].aristas[1].desde, "D")
+    assert.equal(graph.diapositivas[2].aristas[1].hacia, "C")
     assert.equal(resolveStructuredLesson(decode(mixedJson)).version, 2)
     if (provider === "azure") {
       assert.ok(config.outputSchema)

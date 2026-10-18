@@ -8,6 +8,32 @@ import { chromium } from "@playwright/test"
 import { structuredLessonHtml } from "../lib/server/pdf-explanation-renderer.ts"
 import { graphFixture, gridGraphFixture } from "./helpers/explanation-graphs-fixture.mts"
 import { generalGraphFixture } from './helpers/explanation-general-graphs-fixture.mts'
+import { avlTeachingFixture } from './helpers/explanation-avl-teaching-fixture.mts'
+
+test('teaching sequence explains each change beside its anchor and preserves the subtree order', async () => {
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ viewport: { width: 1366, height: 900 }, reducedMotion: 'reduce' })
+  try {
+    await page.setContent(structuredLessonHtml(avlTeachingFixture))
+    for (let i = 0; i < 8; i++) {
+      await page.getByRole('button', { name: `Ir al paso ${i+1}`, exact: true }).click()
+      assert.equal(await page.locator('#step-title').textContent(), avlTeachingFixture.diapositivas[i].titulo)
+      assert.equal(await page.locator('#step-objective').textContent(), avlTeachingFixture.diapositivas[i].objetivo)
+      assert.equal(await page.locator('#stage .callout').count(), 1)
+      assert.equal(await page.locator('.comment-leader').count(), 1)
+      if (i === 5) {
+        assert.equal(await page.locator('[data-edge-id="A:C"]').isVisible(), false)
+        assert.equal(await page.locator('[data-edge-id="D:C"]').isVisible(), true)
+        await page.screenshot({ path: 'test-results/avl-teaching-desktop.png', fullPage: true })
+      }
+    }
+    await page.setViewportSize({ width: 390, height: 800 })
+    await page.waitForFunction(() => document.querySelectorAll('#notes .callout').length === 1)
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    assert.equal(await page.evaluate(() => document.querySelector('nav')!.getBoundingClientRect().top >= document.querySelector('#notes')!.getBoundingClientRect().bottom), true, 'controls do not cover the explanation on mobile')
+    await page.screenshot({ path: 'test-results/avl-teaching-mobile.png', fullPage: true })
+  } finally { await browser.close() }
+})
 
 test('general graph cards support different topics, complete labels, per-step values, cycles and mobile offline', async () => {
   const browser = await chromium.launch({ headless: true })
@@ -18,6 +44,7 @@ test('general graph cards support different topics, complete labels, per-step va
   try {
     await page.context().setOffline(true)
     for (const topic of ['process', 'network', 'dependencies'] as const) {
+      await page.setViewportSize({ width: 1366, height: 768 })
       const fixture = generalGraphFixture(topic)
       if (topic === 'dependencies') {
         fixture.elementos_iniciales[0].etiqueta = 'Etiqueta larga sin recortar: ' + 'abcdefghij'.repeat(9)
@@ -32,7 +59,8 @@ test('general graph cards support different topics, complete labels, per-step va
       assert.ok((await page.locator('[data-edge-id="A:B"]').getAttribute('d'))!.includes(' Q '))
       assert.ok((await page.locator('[data-edge-id="B:A"]').getAttribute('d'))!.includes(' Q '))
       assert.ok((await page.locator('[data-edge-id="B:B"]').getAttribute('d'))!.includes(' C '))
-      assert.equal(await page.locator('#notes .callout').count(), 1)
+      assert.equal(await page.locator('.callout').count(), 1)
+      assert.equal(await page.locator('#stage .callout').count(), 1, 'card comments stay beside their anchor on desktop')
       for (const [width, height] of [[1366,768],[1280,480],[390,667]]) {
         await page.setViewportSize({ width, height })
         for (let step = 1; step <= 3; step++) {
@@ -140,6 +168,7 @@ test("graph transitions keep edge endpoints attached and cancel stale animations
     await page.setContent(structuredLessonHtml(gridGraphFixture))
     await page.keyboard.press("ArrowRight")
     await page.waitForFunction(() => document.querySelector('[data-node-id="A"]')?.getAttribute('transform') !== 'translate(250 206)')
+    assert.ok(await page.locator('.motion-guide').count() > 0)
     const geometry = await page.evaluate(() => {
       const node = document.querySelector<SVGGElement>('[data-node-id="A"]')!
       const p = node.transform.baseVal.consolidate()!.matrix
@@ -152,6 +181,7 @@ test("graph transitions keep edge endpoints attached and cancel stale animations
     await page.keyboard.press("ArrowRight")
     await page.getByRole("button", { name: "Repetir", exact: true }).click()
     await page.waitForFunction(() => document.querySelector('[data-node-id="A"]')?.getAttribute('transform') === 'translate(450 50)')
+    assert.equal(await page.locator('.motion-guide').count(), 0)
     assert.equal(await page.locator('#counter').textContent(), "Paso 2 de 2")
     await page.keyboard.press("ArrowLeft")
     await page.waitForFunction(() => document.querySelector('[data-node-id="A"]')?.getAttribute('transform') === 'translate(250 206)')

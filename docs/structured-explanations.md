@@ -59,9 +59,21 @@ La estrella usa estas mejoras en su flujo habitual, sin un selector por tema:
 - Nodos, conexiones y etiquetas comparten la misma animación. Las aristas que
   se agregan o retiran aparecen y desaparecen gradualmente. Repetir y navegar
   rápidamente cancela la animación anterior antes de iniciar la siguiente.
-- Los comentarios de las tarjetas se ubican en un panel separado, evitando
-  cubrir nodos. Los escenarios grandes permiten desplazamiento para conservar
-  la legibilidad en pantallas pequeñas.
+- Cada diapositiva puede incluir `titulo` y `objetivo`: una idea y una frase
+  que orienta la observación. Los HTML anteriores siguen siendo compatibles.
+- Los comentarios buscan espacio junto al nodo y se conectan con una línea,
+  también cuando hay tarjetas o etiquetas en aristas. Se prueban ocho posiciones;
+  si no hay espacio, o en móvil, pasan debajo del escenario. Los escenarios
+  grandes permiten desplazamiento para conservar la legibilidad.
+- Al mover nodos aparecen marcas de origen y trayectorias temporales, que se
+  retiran al terminar. Se respeta la preferencia de movimiento reducido.
+- Las instrucciones y el ejemplo de generación separan preparación, movimiento,
+  reconexión y comprobación. Esta guía mejora la secuencia solicitada; no garantiza
+  que toda respuesta del modelo sea correcta pedagógicamente.
+
+Para abrir un ejemplo revisado de ocho páginas de ABB/AVL sin llamar al modelo:
+`node --experimental-strip-types scripts/preview-avl-teaching.mts`.
+Genera `avl-explicado.html`; admite una ruta de salida como primer argumento.
 
 Para probar tras desplegar, generar una explicación nueva desde la estrella:
 los HTML guardados conservan el motor que tenían al crearse. Si hay un system
