@@ -4,7 +4,7 @@ import preflight from "tailwindcss/preflight.css"
 
 const slideStyles = `
 html:has(body[data-pdf-slide-deck]){height:100%;width:100%;overflow:hidden}
-body[data-pdf-slide-deck]{box-sizing:border-box!important;margin:0!important;width:100%!important;height:100%!important;min-height:0!important;display:grid!important;grid-template-rows:auto minmax(0,1fr) auto;gap:8px;padding:clamp(6px,1.5vmin,20px)!important;overflow:hidden!important}
+body[data-pdf-slide-deck]{box-sizing:border-box!important;margin:0!important;width:100%!important;height:100%!important;min-height:0!important;display:grid!important;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;gap:8px;padding:clamp(6px,1.5vmin,20px)!important;overflow:hidden!important}
 body[data-pdf-slide-deck]>header,body[data-pdf-slide-deck]>footer{min-width:0;max-width:100%;width:100%;margin:0 auto;flex-wrap:wrap;gap:8px;padding:8px!important}
 body[data-pdf-slide-deck]>header>div{min-width:0;max-width:100%}
 body[data-pdf-slide-deck]>header>div:first-child{flex:1}
@@ -41,9 +41,8 @@ export async function preparePdfExplanationHtml(html: string): Promise<string> {
   if (doc.body.classList.contains("h-screen") && doc.body.classList.contains("flex-col") &&
       doc.querySelector("body > header") && doc.querySelector("body > main > svg[viewBox]") && doc.querySelector("body > footer")) {
     doc.body.dataset.pdfSlideDeck = ""
-    if (!doc.getElementById("pdf-slide-fit")) {
-      const fit = doc.createElement("style"); fit.id = "pdf-slide-fit"; fit.textContent = slideStyles; doc.head.append(fit)
-    }
+    const fit = doc.getElementById("pdf-slide-fit") ?? doc.createElement("style")
+    fit.id = "pdf-slide-fit"; fit.textContent = slideStyles; doc.head.append(fit)
   }
   return '<!doctype html>\n' + doc.documentElement.outerHTML
 }

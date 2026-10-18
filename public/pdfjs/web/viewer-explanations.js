@@ -261,7 +261,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     const escapeBridge = `<script>addEventListener('keydown',e=>{if(e.ctrlKey&&!e.altKey&&!e.shiftKey&&e.key.toLowerCase()==='q'){e.preventDefault();parent.postMessage({type:'cursado-return-home'},'*')}if(e.key==='Escape')parent.postMessage({type:'pdf-explanation-escape'},'*')});<\/script>`;
     const loadHtml = async () => {
       let html = entry.html;
-      if (/cdn\.tailwindcss\.com/.test(html)) {
+      if (/cdn\.tailwindcss\.com|data-pdf-slide-deck/.test(html)) {
         const { preparePdfExplanationHtml } = await import("./viewer-explanation-import.js");
         html = await preparePdfExplanationHtml(html);
       }

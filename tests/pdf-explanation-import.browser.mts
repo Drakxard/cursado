@@ -42,12 +42,15 @@ test("imported AVL compiles Tailwind offline and fits the PDF iframe at differen
         const footer = document.querySelector('footer')!.getBoundingClientRect()
         const main = document.querySelector('main')!.getBoundingClientRect()
         const svg = document.getElementById('rotation-svg')!.getBoundingClientRect()
+        const bodyStyle = getComputedStyle(document.body)
+        const availableWidth = innerWidth - parseFloat(bodyStyle.paddingLeft) - parseFloat(bodyStyle.paddingRight)
         return { fitsWidth: document.documentElement.scrollWidth <= innerWidth,
+          fillsWidth: Math.abs(main.width - availableWidth) <= 1,
           fitsHeight: document.documentElement.scrollHeight <= innerHeight,
           footerVisible: footer.bottom <= innerHeight && footer.top >= 0,
           svgFits: svg.top >= main.top && svg.bottom <= main.bottom + 1 && svg.right <= main.right + 1 }
       })
-      assert.deepEqual(bounds, { fitsWidth: true, fitsHeight: true, footerVisible: true, svgFits: true }, `${width}x${height}`)
+      assert.deepEqual(bounds, { fitsWidth: true, fillsWidth: true, fitsHeight: true, footerVisible: true, svgFits: true }, `${width}x${height}`)
     }
     await frame.locator('#next-btn').click()
     assert.ok((await frame.locator('#step-title').textContent())?.includes('7/8'))
