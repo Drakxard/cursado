@@ -757,6 +757,7 @@ function InlineTableEditor({ table, camera, anchorRef, onChange, onCellChange, o
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pdfPointer = useRef<{pointerId:number;id:string;x:number;y:number;moved:boolean;transform:Transform}|null>(null)
+  const nativePdfTap = useRef<{pointerId:number;id:string;x:number;y:number} | null>(null)
   const sceneRef = useRef<HTMLDivElement>(null)
   const contentCanvasesRef = useRef(new Map<number,HTMLCanvasElement>())
   const navigationPointerRef = useRef<number|null>(null)
@@ -2094,6 +2095,8 @@ function App() {
   function scheduleSave() {
     setBoardSearchRevision(value=>value+1)
 
+    if (nativeBoardMode()) return
+
     if (!loadedRef.current) return
     dirtyRef.current = true
     if (syncConflictRef.current) { setSaveStatus('error'); return }
@@ -2911,6 +2914,14 @@ function App() {
   },[])
 
   function pointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if (nativeBoardMode() && loadedRef.current) {
+      if (touchPointersRef.current.size || pointerRef.current !== null) nativePdfTap.current = null
+      else if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+        const hit = hitSelectionAt(toWorld(e.clientX, e.clientY))
+        const shortcut = hit?.kind === 'shape' ? shapesRef.current.find(shape => shape.id === hit.id && shape.visualType === 'pdf-shortcut') : null
+        nativePdfTap.current = shortcut?.pdfReference ? {pointerId:e.pointerId,id:shortcut.id,x:e.clientX,y:e.clientY} : null
+      }
+    }
     if(contextMenu) setContextMenu(null)
     if(loadedRef.current && !nativeBoardMode() && !selectionPicking && tool!=='eraser' && e.button===0 && !e.ctrlKey && !e.metaKey) {
       const hit = hitSelectionAt(toWorld(e.clientX,e.clientY))
@@ -3055,6 +3066,8 @@ function App() {
   }
 
   function pointerMove(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const tap = nativePdfTap.current
+    if (tap?.pointerId === e.pointerId && Math.hypot(e.clientX-tap.x,e.clientY-tap.y) > 8) nativePdfTap.current = null
     const pdf = pdfPointer.current
     if(pdf?.pointerId===e.pointerId) {
       e.preventDefault()
@@ -3179,6 +3192,14 @@ function App() {
   }
 
   function pointerUp(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const tap = nativePdfTap.current
+    if (tap?.pointerId === e.pointerId) {
+      nativePdfTap.current = null
+      if (Math.hypot(e.clientX-tap.x,e.clientY-tap.y) <= 8) {
+        const reference = shapesRef.current.find(shape => shape.id === tap.id)?.pdfReference
+        if (reference) materialLibrary.openReader(reference)
+      }
+    }
     const pdf = pdfPointer.current
     if(pdf?.pointerId===e.pointerId) {
       pdfPointer.current=null
@@ -3245,6 +3266,7 @@ function App() {
   }
 
   function pointerCancel(e: ReactPointerEvent<HTMLCanvasElement>) {
+    nativePdfTap.current = null
     if(pdfPointer.current?.pointerId===e.pointerId) {
       if(pdfPointer.current.moved)scheduleSave()
       pdfPointer.current=null;return

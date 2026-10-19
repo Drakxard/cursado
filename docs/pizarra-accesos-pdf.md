@@ -1,5 +1,12 @@
 # Accesos a PDF en la pizarra
 
+En InScreen, un toque sobre el acceso o su icono fijado abre el lector PDF nativo.
+Arrastrar y usar dos dedos sigue desplazando o ampliando la pizarra, sin mover
+elementos ni abrir un PDF accidentalmente. Se vuelve con el botón o gesto de
+Android, conservando la pantalla de origen. Si no se puede abrir el archivo,
+aparece un mensaje con una opción para reintentar. No se precargan lectores web
+en el modo de consulta de Android.
+
 Al seleccionar un único acceso a PDF aparece una chincheta junto al elemento.
 Activarla agrega ese acceso a la barra lateral. Volver a activarla lo desfija.
 La selección de varios elementos no muestra esta acción.

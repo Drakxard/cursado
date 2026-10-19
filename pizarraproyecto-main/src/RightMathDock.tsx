@@ -3,6 +3,7 @@ import { LuLayers } from 'react-icons/lu'
 import MatrixCalculator from './components/MatrixCalculator'
 import FlashcardPanel from './components/FlashcardPanel'
 import { PinnedPdfButton } from './components/PdfPin'
+import { nativeBoardMode } from './nativeWorkspace'
 import type { Flashcard } from './study/flashcards'
 import type { MatrixCells } from './study/matrices'
 import type { ReactNode, CSSProperties, DragEvent as ReactDragEvent } from 'react'
@@ -131,7 +132,7 @@ export default function RightMathDock({getSelection,addGraphToBoard,getSelectedM
     event.dataTransfer.setData('text/plain','Gráfico interactivo')
   }
   return <>
-    <nav className="math-dock" aria-label="Herramientas matemáticas">
+    <nav className="math-dock" data-native-pdfs={nativeBoardMode() && pinnedPdfs.length > 0 || undefined} aria-label="Herramientas matemáticas">
       <button type="button" aria-label="Calculadora científica" title="Calculadora científica" className={mode==='calculator'?'math-dock-active':''}
         onClick={()=>{onOpenPanel();setMode(m=>m==='calculator'?'closed':'calculator')}}><BsCalculator size={20}/></button>
       <button type="button" aria-label="Graficar funciones" title="Graficar funciones" className={mode==='graph'?'math-dock-active':''}

@@ -24,7 +24,7 @@ async function swipe(page, startX, endX, y = 450) {
     await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
   } finally { await client.detach() }
 }
-async function setup(browser, {legacy = false} = {}) {
+async function setup(browser, {legacy = false, pdfShortcut = false} = {}) {
   const root=path.resolve(process.env.INSCREEN_NATIVE_WEB_ASSETS || 'public/native-web')
   const packageManifest=JSON.parse(await readFile(path.join(root,'current.json'),'utf8'))
   const directory=path.join(root,'releases',packageManifest.revision)
@@ -40,6 +40,7 @@ async function setup(browser, {legacy = false} = {}) {
   add('teoria/calculo3/material.pdf',pdf(),'application/pdf')
   add('manifests/pdf-explanations/test/saved.html',Buffer.from('<p>Contenido aislado</p>'),'text/html')
   const scene={strokes:[{id:'stroke-one',points:[{x:20,y:80},{x:220,y:90}],width:4,color:'#2563eb'}],texts:[{id:'text-one',x:20,y:20,text:'Pizarra original',fontSize:22,color:'#111827'}],media:[],shapes:[],tables:[],graphs:[],camera:{x:0,y:0,zoom:1}}
+  if (pdfShortcut) scene.shapes.push({id:'pdf-shortcut-native',kind:'rounded',visualType:'pdf-shortcut',x:70,y:140,width:180,height:70,color:'#2563eb',strokeWidth:2,label:'Material original',pdfPinned:true,pdfReference:{materialId:41,subjectId:'custom-calculo3',fileName:'Material original.pdf',workspaceFileId:'workspace://teoria/calculo3/material.pdf'}})
   add('boards/board.json',{id:'local:native-test',name:'Pizarra original',folderId:'folder-native',scene,assets:{}})
   add('boards/library.json',{version:1,folders:[{id:'folder-native',name:'Carpeta sincronizada'}],boards:[{id:'local:native-test',name:'Pizarra original',folderId:'folder-native',path:'boards/board.json'}]})
   if(legacy) files.splice(files.findIndex(file=>file.path==='boards/library.json'),1)
@@ -152,6 +153,57 @@ test('original home, study, board and PDF work with a native read-only revision 
     assert.equal(await board.locator('.board-search-dock').isVisible(),false)
     assert.equal(requests.some(url=>url.includes('/api/')),false)
     assert.equal(requests.every(url=>new URL(url).origin==='https://workspace.inscreen.local'),true)
+    assert.deepEqual(errors,[])
+    await context.close()
+  } finally {await browser.close()}
+})
+
+test('board PDF taps and pinned shortcuts use the native reader without editing or losing the board',async()=>{
+  const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})
+  try {
+    const {context,errors,requests}=await setup(browser,{pdfShortcut:true})
+    await context.addInitScript(()=>{
+      window.CursadoNative.openPdf=(id,revision,requestId)=>{
+        window.top.nativeActions.push({pdf:id,revision})
+        queueMicrotask(()=>window.top.dispatchEvent(new CustomEvent('cursado-native-pdf-result',{detail:{requestId,...(window.top.failBoardPdf?{error:'No se pudo descargar el PDF.'}:{})}})))
+      }
+    })
+    const page=await context.newPage()
+    await page.goto('https://workspace.inscreen.local/')
+    await page.getByRole('link',{name:'Abrir Pizarra'}).click()
+    const board=page.frameLocator('iframe[title="Pizarra"]')
+    await board.locator('.library-board-name').filter({hasText:'Pizarra original'}).click()
+    const pin=board.getByRole('button',{name:'Abrir PDF fijado Material original',exact:true})
+    await pin.waitFor({state:'visible'})
+    const canvas=board.locator('canvas').first()
+    const bounds=await canvas.boundingBox()
+    const x=bounds.x+150,y=bounds.y+175
+    await page.touchscreen.tap(x,y)
+    await page.waitForFunction(()=>window.nativeActions.length===1)
+    assert.deepEqual(await page.evaluate(()=>window.nativeActions),[{pdf:hash('teoria/calculo3/material.pdf'),revision:'revision-native-browser'}])
+    assert.equal(await board.getByRole('alert').count(),0)
+    assert.equal(await board.locator('.board-pdf-reader').count(),0)
+    await page.evaluate(()=>{window.nativeActions=[]})
+    // Two fingers touching a shortcut must never become a PDF tap.
+    const client=await context.newCDPSession(page)
+    await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x,y}]})
+    await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x,y},{id:2,x:x+80,y}]})
+    await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[{id:1,x,y}]})
+    await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
+    await client.detach()
+    await swipe(page,x,x+50,y)
+    assert.deepEqual(await page.evaluate(()=>window.nativeActions),[])
+    // The shortcut follows the panned camera and still opens with a single tap.
+    await page.touchscreen.tap(x+50,y)
+    await page.waitForFunction(()=>window.nativeActions.length===1)
+    await page.evaluate(()=>{window.nativeActions=[];window.failBoardPdf=true})
+    await pin.click()
+    await board.getByRole('alert').filter({hasText:'No se pudo descargar el PDF.'}).waitFor()
+    await page.evaluate(()=>{window.failBoardPdf=false})
+    await board.getByRole('button',{name:'Reintentar',exact:true}).click()
+    await page.waitForFunction(()=>window.nativeActions.length===2)
+    assert.equal(await board.getByRole('alert').count(),0)
+    assert.equal(requests.some(url=>url.includes('/biblioteca/pizarra')||url.includes('/pdfjs/')),false)
     assert.deepEqual(errors,[])
     await context.close()
   } finally {await browser.close()}
