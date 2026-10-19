@@ -93,7 +93,8 @@ export function useBoardLibrary(boardId: string, candidates: () => BoardPdfRefer
   </div>) : <>
     {splitOpen && <iframe ref={libraryFrame} className="board-material-library" title="Biblioteca de Estudio"
       src={`/biblioteca/pizarra?session=${session}&boardId=${encodeURIComponent(boardId)}`} />}
-    {[...new Map([...(reader ? [reader] : []), ...prepared].map(item => [item.materialId, item])).values()].map(reference => {
+    {/* Keep iframe DOM order stable: moving an iframe reloads its document in Chromium. */}
+    {[...new Map([...(reader ? [reader] : []), ...prepared].map(item => [item.materialId, item])).values()].sort((a,b)=>a.materialId-b.materialId).map(reference => {
       const visible = reader?.materialId === reference.materialId && ready.has(reference.materialId)
       return <div key={`${boardId}:${reference.materialId}`} className="board-pdf-reader" role={visible ? 'dialog' : undefined}
         aria-modal={visible || undefined} aria-hidden={!visible} inert={!visible} aria-label={`Leer ${reference.fileName.replace(/\.pdf$/i,'')}`}
