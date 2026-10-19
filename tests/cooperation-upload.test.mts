@@ -24,7 +24,7 @@ test('upload session forwards the Pizarra cookie and refuses rejected membership
     assert.equal((options.headers as Record<string, string>).Origin, 'https://cursado.vercel.app')
     return allowed ? Response.json({ objectKey: 'authorized/file', bucket: 'estudiodiario', exists }) : Response.json({ detail: 'Sin acceso.' }, { status: 403 })
   }
-  const request = (origin = 'https://cursado.vercel.app') => new Request('https://cursado.vercel.app/pizarra/upload-session', { method: 'POST', headers: { Origin: origin, Cookie: 'session=secret' }, body: JSON.stringify({ sphereId: 'a'.repeat(36), hash: 'b'.repeat(64), size: 9000000, mime: 'application/pdf' }) })
+  const request = (origin = 'https://cursado.vercel.app', supportsReuse = true) => new Request('https://cursado.vercel.app/pizarra/upload-session', { method: 'POST', headers: { Origin: origin, Cookie: 'session=secret' }, body: JSON.stringify({ sphereId: 'a'.repeat(36), hash: 'b'.repeat(64), size: 9000000, mime: 'application/pdf', supportsReuse }) })
   assert.equal((await POST(request('https://foreign.test'))).status, 403)
   assert.equal(calls, 0)
   assert.equal((await POST(request())).status, 403)
@@ -34,6 +34,9 @@ test('upload session forwards the Pizarra cookie and refuses rejected membership
   assert.equal((await response.json()).authorizedKey, 'authorized/file')
   exists = true
   assert.deepEqual(await (await POST(request())).json(), { exists: true })
+  const outdated = await POST(request('https://cursado.vercel.app', false))
+  assert.equal(outdated.status, 409)
+  assert.match((await outdated.json()).error, /versión anterior/)
 })
 
 test('large cooperative files go directly to R2; authorization receives metadata only', async t => {
@@ -56,6 +59,8 @@ test('large cooperative files go directly to R2; authorization receives metadata
   globalThis.fetch = async () => { calls.push({ url: 'session', options: {} }); return Response.json({ exists: true }) }
   await uploadCooperationFile('sphere', 'hash', blob, 'application/pdf', { configToken: 'sealed-personal-config', workspaceId: 'personal-workspace' })
   assert.equal(calls.length, 1)
+  globalThis.fetch = async () => Response.json({})
+  await assert.rejects(uploadCooperationFile('sphere', 'hash', blob, 'application/pdf'), /No se recibió una URL/)
   calls.length = 0
   globalThis.fetch = async () => Response.json({ detail: 'No tenés acceso.' }, { status: 403 })
   await assert.rejects(uploadCooperationFile('sphere', 'hash', blob, 'application/pdf'), /No tenés acceso/)

@@ -10,7 +10,7 @@ async function handlePOST(request: Request) {
   try {
     const text = await request.text()
     if (text.length > 4096) return Response.json({ error: 'Solicitud demasiado grande.' }, { status: 413 })
-    const { sphereId, hash, size, mime, workspaceId } = JSON.parse(text)
+    const { sphereId, hash, size, mime, workspaceId, supportsReuse } = JSON.parse(text)
     if (!/^[a-f0-9-]{36}$/.test(sphereId || '') || !/^[a-f0-9]{64}$/.test(hash || '') || !Number.isSafeInteger(size) || size < 0 || size > 100 * 1024 * 1024 || typeof mime !== 'string' || mime.length > 200) {
       return Response.json({ error: 'Archivo inválido.' }, { status: 422 })
     }
@@ -23,7 +23,11 @@ async function handlePOST(request: Request) {
     })
     const result = await authorization.json()
     if (!authorization.ok) return Response.json(result, { status: authorization.status })
-    if (result.exists) return Response.json({ exists: true }, { headers: { 'Cache-Control': 'private, no-store' } })
+    if (result.exists) {
+      // Older tabs always call fetch(uploadUrl), even when no upload is needed.
+      if (!supportsReuse && !request.headers.get('x-inscreen-config-token')) return Response.json({ error: 'Esta pestaña usa una versión anterior de Cooperativo. Cerrá las otras pestañas de Cursado y recargá con Ctrl+Shift+R.' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } })
+      return Response.json({ exists: true }, { headers: { 'Cache-Control': 'private, no-store' } })
+    }
     return Response.json(await createCooperationR2UploadSession({ objectKey: result.objectKey, bucket: result.bucket, hash, size, mime, workspaceId }), { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     console.error('Cooperation upload session failed:', error)
