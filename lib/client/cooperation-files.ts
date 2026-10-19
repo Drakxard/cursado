@@ -1,5 +1,6 @@
 'use client'
 import { safeCooperationPath, type Json } from '../cooperation-model.ts'
+import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
 
 export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
 export type MirrorFile = { key: string; value?: Json; blob?: Blob }
@@ -20,10 +21,12 @@ export async function readJson<T>(root: FileSystemDirectoryHandle, path: string,
 }
 export async function writeFile(root: FileSystemDirectoryHandle, path: string, blob: Blob) {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
-  const parts = path.split('/'), dir = await directory(root, parts.slice(0, -1), true)
-  const file = await dir.getFileHandle(parts.at(-1)!, { create: true }), writer = await file.createWritable()
-  try { await writer.write(blob); await writer.close() } catch (error) { await writer.abort().catch(() => {}); throw error }
-  if (await digest(await file.getFile()) !== await digest(blob)) throw new Error(`No se pudo verificar ${path}.`)
+  return withWorkspaceFileLock(`write:${path}`, async () => {
+    const parts = path.split('/'), dir = await directory(root, parts.slice(0, -1), true)
+    const file = await dir.getFileHandle(parts.at(-1)!, { create: true }), writer = await file.createWritable()
+    try { await writer.write(blob); await writer.close() } catch (error) { await writer.abort().catch(() => {}); throw error }
+    if (await digest(await file.getFile()) !== await digest(blob)) throw new Error(`No se pudo verificar ${path}.`)
+  })
 }
 export const writeJson = (root: FileSystemDirectoryHandle, path: string, value: unknown) => writeFile(root, path, new Blob([JSON.stringify(value)]))
 export async function removeFile(root: FileSystemDirectoryHandle, path: string) {
@@ -150,9 +153,11 @@ export async function applyMirrorFile(root: FileSystemDirectoryHandle, b: Sphere
   const mapped = value instanceof Blob ? value : mapBindingJson(value, b, true)
   if (key === 'scope/containers.json' || key === 'scope/shortcuts.json') {
     const path = key.includes('containers') ? 'manifests/material-containers.json' : 'manifests/subject-shortcuts.json'
-    const all = await readJson<Record<string, Json>>(root, path, {})
-    all[b.storageKey] = mapped as Json
-    await writeJson(root, path, all); return
+    return withWorkspaceFileLock(`manifest:${path}`, async () => {
+      const all = await readJson<Record<string, Json>>(root, path, {})
+      all[b.storageKey] = mapped as Json
+      await writeJson(root, path, all)
+    })
   }
   if (key === 'scope/tags.json') {
     const tags = mapped as { tags: Record<string, Json>[]; assignments: Record<string, Json>; regions: Record<string, Json> }

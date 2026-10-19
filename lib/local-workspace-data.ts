@@ -3,6 +3,7 @@
 import { isNativeReadOnly, nativeFileUrl, readOnlyError } from './native-workspace.ts'
 import { COOPERATIVE_TAB_ID } from './cooperation-model.ts'
 import { readWorkspaceFileText } from './workspace-file-read.ts'
+import { withWorkspaceFileLock } from './workspace-file-lock.ts'
 
 import type {
   CronogramaRecord,
@@ -854,7 +855,7 @@ async function writeJsonFile(pathSegments: string[], value: unknown) {
   if (isNativeReadOnly()) readOnlyError()
   const queueKey = pathSegments.join("/")
   const previous = jsonWriteQueues.get(queueKey) ?? Promise.resolve()
-  const write = previous.catch(() => undefined).then(async () => {
+  const write = previous.catch(() => undefined).then(() => withWorkspaceFileLock(`write:${queueKey}`, async () => {
     const rootHandle = await ensureWorkspaceRootHandle()
     const fileHandle = await getFileHandleBySegments(rootHandle, pathSegments, true)
     const writable = await fileHandle.createWritable()
@@ -866,7 +867,7 @@ async function writeJsonFile(pathSegments: string[], value: unknown) {
       await writable.abort().catch(() => {})
       throw error
     }
-  })
+  }))
   jsonWriteQueues.set(queueKey, write)
   try {
     await write
@@ -3131,24 +3132,28 @@ export async function deleteLocalSubjectCompletion(date: string, subjectId: stri
 }
 
 export async function getLocalSubjectShortcuts(subjectId: string) {
-  const shortcuts = await readShortcutsManifest()
   const storageKey = await resolveLocalSubjectStorageKey(subjectId)
-  const migrated = normalizeShortcutRecord(storageKey, shortcuts[storageKey])
-  if (!isNativeReadOnly()) {
-    shortcuts[storageKey] = migrated
-    await writeShortcutsManifest(shortcuts)
-  }
-  return { ...migrated, subjectId }
+  return withWorkspaceFileLock('manifest:manifests/subject-shortcuts.json', async () => {
+    const shortcuts = await readShortcutsManifest()
+    const migrated = normalizeShortcutRecord(storageKey, shortcuts[storageKey])
+    if (!isNativeReadOnly() && JSON.stringify(shortcuts[storageKey]) !== JSON.stringify(migrated)) {
+      shortcuts[storageKey] = migrated
+      await writeShortcutsManifest(shortcuts)
+    }
+    return { ...migrated, subjectId }
+  })
 }
 
 async function mutateLocalSubjectShortcuts(subjectId: string, mutate: (current: SubjectShortcuts) => SubjectShortcuts) {
   const storageKey = await resolveLocalSubjectStorageKey(subjectId)
-  const current = await getLocalSubjectShortcuts(storageKey)
-  const shortcuts = await readShortcutsManifest()
-  const next = mutate({ ...current, subjectId: storageKey })
-  shortcuts[storageKey] = next
-  await writeShortcutsManifest(shortcuts)
-  return { ...next, subjectId }
+  return withWorkspaceFileLock('manifest:manifests/subject-shortcuts.json', async () => {
+    const shortcuts = await readShortcutsManifest()
+    const current = normalizeShortcutRecord(storageKey, shortcuts[storageKey])
+    const next = mutate({ ...current, subjectId: storageKey })
+    shortcuts[storageKey] = next
+    await writeShortcutsManifest(shortcuts)
+    return { ...next, subjectId }
+  })
 }
 export async function createLocalSubjectShortcut(input: { subjectId: string; label: string }) {
   return mutateLocalSubjectShortcuts(input.subjectId, (current) => ({ ...current, buttons: [...current.buttons, { id: crypto.randomUUID(), label: input.label.trim(), url: null, orderIndex: current.buttons.length, sectionScoped: false, sectionUrls: {}, integrationRole: null, activeSectionKey: null }] }))
