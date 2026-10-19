@@ -64,6 +64,11 @@ test('three participants, invitations, isolation, durable operation deduplicatio
   assert.deepEqual(await (await request(c, `spheres/${sphere.id}/snapshot`)).json(), state)
   const data = new TextEncoder().encode('verified PDF bytes'), fingerprint = Buffer.from(await crypto.subtle.digest('SHA-256', data)).toString('hex')
   const url = `https://backend.test/api/cooperation/spheres/${sphere.id}/files/${fingerprint}`
+  assert.equal((await request(stranger, `spheres/${sphere.id}/files/${fingerprint}`, { size: data.length })).status, 403)
+  assert.equal((await request(a, `spheres/${sphere.id}/files/${fingerprint}`, { size: 101 * 1024 * 1024 })).status, 422)
+  const direct = await (await request(a, `spheres/${sphere.id}/files/${fingerprint}`, { size: data.length })).json()
+  assert.equal(direct.objectKey, `cursado/shared/${sphere.id}/${fingerprint}`)
+  assert.equal(direct.bucket, 'estudiodiario')
   const upload = body => backend.fetch(new Request(url, { method: 'PUT', headers: { Origin: backend.env.CURSADO_ORIGIN, Cookie: a.cookie, 'Content-Type': 'application/pdf' }, body }))
   assert.equal((await upload(new Uint8Array([1]))).status, 422)
   assert.equal((await upload(data)).status, 200)

@@ -1,4 +1,5 @@
 'use client'
+import { uploadCooperationFile } from './cooperation-upload.ts'
 import { projectSelectionTags, selectionResources, type WeekSelection } from './cooperation-selection.ts'
 import { COOPERATIVE_TAB_ID, mergeCooperation, type Json } from '../cooperation-model.ts'
 import { getReadyWorkspaceHandle, loadWorkspaceHandle, queryWorkspacePermission } from '../local-workspace-client.ts'
@@ -364,8 +365,8 @@ async function synchronizeMirror(mirror: Mirror) {
         if (!file || await digest(file) !== change.blob.hash) { mirror.outbox = undefined; await save(); return }
         await writeFile(handle, staging, file); blob = await readFile(handle, staging)
       }
-      const response = await fetch(`/pizarra/api/cooperation/spheres/${b.id}/files/${change.blob.hash}`, { method: 'PUT', headers: { 'Content-Type': change.blob.mime || 'application/octet-stream' }, body: blob })
-      if (!response.ok) throw new Error('No se pudo subir el archivo cooperativo.')
+      if (!blob) throw new Error('No se pudo leer el archivo cooperativo local.')
+      await uploadCooperationFile(b.id, change.blob.hash, blob, change.blob.mime || 'application/octet-stream')
       mirror.transfer.completed++; await save()
     }
     const wire = structuredClone(mirror.outbox) as Operation & { changes: (Operation['changes'][number] & { valueFile?: { hash: string; size: number }; baseFile?: { hash: string; size: number } })[] }
@@ -374,8 +375,7 @@ async function synchronizeMirror(mirror: Mirror) {
         const blob = new Blob([JSON.stringify(change[field])], { type: 'application/json' })
         if (blob.size <= 256 * 1024) continue
         const hash = await digest(blob)
-        const response = await fetch(`/pizarra/api/cooperation/spheres/${b.id}/files/${hash}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: blob })
-        if (!response.ok) throw new Error('No se pudo guardar el documento cooperativo grande.')
+        await uploadCooperationFile(b.id, hash, blob, 'application/json')
         change[field === 'value' ? 'valueFile' : 'baseFile'] = { hash, size: blob.size }
         delete change[field]
       }

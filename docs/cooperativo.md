@@ -40,7 +40,8 @@ descargarlas. Los cambios independientes se combinan por elemento o sección.
 - `IdentityDirectory` conserva grupos y participantes. `SharedContentRoom`
   guarda el estado confirmado en SQLite y transmite presencia, versiones,
   cursores y trazos. Los archivos verificados se guardan en R2 bajo
-  `cursado/shared/<sphereId>/` mediante multipart, hasta 100 MiB por archivo.
+  `cursado/shared/<sphereId>/`, hasta 100 MiB por archivo. Los clientes actuales
+  suben directamente a R2; los anteriores conservan el endpoint multipart.
 - Los documentos JSON grandes se transfieren como archivos verificados para
   no superar el límite de las operaciones. SQLite divide el estado en filas
   pequeñas. Las imágenes de las pizarras se transfieren fuera del JSON.
@@ -58,6 +59,31 @@ modifica producción. Las API antiguas de bibliotecas de pizarras compartidas
 permanecen separadas de la colaboración por esferas.
 
 ## Verificación
+
+### Subida directa a R2
+
+El cliente solicita una URL firmada en `POST /pizarra/upload-session`; esa ruta
+conserva el alcance de la cookie de Pizarra. El Worker comprueba la sesión y la
+pertenencia aceptada al grupo antes de devolver la clave autorizada. Vercel
+firma la subida durante 15 minutos y el navegador envía los bytes directamente
+al endpoint S3 de R2, incluyendo los documentos JSON grandes. La firma vincula
+el tamaño (hasta 100 MiB), el tipo y el checksum SHA-256. Las operaciones se
+publican después de que R2 confirme la subida.
+
+La aplicación requiere `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+y `R2_BUCKET_NAME=estudiodiario` en el servidor, además de `PIZARRA_BACKEND_URL`.
+Estas credenciales son de infraestructura; no se envían al navegador ni se
+toman del archivo personal User.Services.
+
+El bucket debe permitir `PUT` desde `https://cursado.vercel.app` con los headers
+`Content-Type` y `x-amz-checksum-sha256`. `cloudflare/cooperation-cors.json`
+contiene la regla en formato Wrangler. Al aplicarla, conservar también las
+reglas CORS existentes que usen otras funciones. Desplegar el Worker y la
+aplicación juntos; la ruta de subida completa anterior permanece compatible
+con los clientes antiguos.
+
+No se ha validado una transferencia real al bucket con las pruebas locales;
+éstas verifican autorización, firma y flujo del cliente con servicios simulados.
 
 `npm run typecheck`, `npm test`, `npm run build` y `npm run cloudflare:check`.
 La prueba de interfaz del selector es

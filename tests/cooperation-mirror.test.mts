@@ -30,6 +30,13 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   async function use(actor: any, action: () => Promise<any>) {
     ;(globalThis as any).__cooperationRoot = actor.fs.root
     globalThis.fetch = async (url, options = {}) => {
+      if (String(url) === '/pizarra/upload-session') {
+        const { sphereId, hash, size, mime } = JSON.parse(String(options.body))
+        const response = await backend.request(`/api/cooperation/spheres/${sphereId}/files/${hash}`, { cookie: actor.cookie, body: { size } })
+        if (!response.ok) return response
+        return Response.json({ uploadUrl: `https://r2.test/api/cooperation/spheres/${sphereId}/files/${hash}`, headers: { 'Content-Type': mime } })
+      }
+      if (String(url).startsWith('https://r2.test/')) url = new URL(String(url)).pathname
       const request = new Request(`https://backend.test${String(url).replace(/^\/pizarra/, '')}`, { ...options, headers: { ...options.headers as any, Cookie: actor.cookie, Origin: backend.env.CURSADO_ORIGIN } })
       if (options.method === 'PUT') {
         actor.uploads = (actor.uploads || 0) + 1

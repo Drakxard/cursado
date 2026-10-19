@@ -76,6 +76,11 @@ export async function cooperationRequest(directory,request) {
     return json(result,result.status || 200)
   }
   if(parts[2]==='files' && /^[a-f0-9]{64}$/.test(parts[3] || '')) {
+    if(request.method==='POST') {
+      const {size}=await request.json()
+      if(!Number.isSafeInteger(size) || size<0 || size>100*1024*1024)return json({detail:'Archivo inválido.'},422)
+      return json({objectKey:`${env.CONTENT_PREFIX}${sphere.id}/${parts[3]}`,bucket:'estudiodiario'})
+    }
     if(request.method==='PUT') {
       const result=await room.upload(sphere.id,request,parts[3],request.headers.get('content-type'))
       return json(result,result.status || 200)

@@ -1,0 +1,12 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["https://cursado.vercel.app"],
+        "methods": ["PUT"],
+        "headers": ["Content-Type", "x-amz-checksum-sha256"]
+      },
+      "maxAgeSeconds": 3600
+    }
+  ]
+}
