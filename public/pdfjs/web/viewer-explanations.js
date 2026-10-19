@@ -441,7 +441,8 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     }, true);
   }
   async function restore() {
-    if (!documentState || restoring || documentState.pdf !== app.pdfDocument) return;
+    if (!documentState || documentState.pdf !== app.pdfDocument) return;
+    if (restoring) { restore.pending = true; return; }
     restoring = true;
     try {
       const redraw = new Set();
@@ -487,7 +488,10 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
           keepXfaLayer: true, keepTextLayer: true, keepCanvasWrapper: true });
         app.pdfViewer.update();
       }
-    } catch (error) { report(error); } finally { restoring = false; }
+    } catch (error) { report(error); } finally {
+      restoring = false;
+      if (restore.pending) { restore.pending = false; void restore(); }
+    }
   }
   async function ask() {
     menu.hidden = true;
@@ -826,6 +830,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   });
   app.eventBus.on("pagerendered", restore);
   app.eventBus.on("annotationeditorlayerrendered", restore);
+  // The editor layer may exist before the native FreeText annotations do.
+  // Retry when those annotations are ready, including locally deleted notes.
+  app.eventBus.on("annotationlayerrendered", restore);
   app.eventBus.on("annotationeditormodechanged", restore);
   if (app.pdfDocument) load().then(restore).catch(report);
 };

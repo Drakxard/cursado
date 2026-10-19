@@ -275,7 +275,6 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.mouse.down()
     await page.mouse.move(lastBox.x + 80, lastBox.y + 48, { steps: 6 })
     await page.mouse.up()
-    console.log('Star drag selection', await lastNote.evaluate(element => ({ classes: element.className, toolbar: element.querySelector('.editToolbar')?.outerHTML, mode: window.PDFViewerApplication?.pdfViewer.annotationEditorMode })))
     await lastNote.locator('.editToolbar').waitFor({ state: 'visible' })
     assert.ok((await lastNote.getAttribute('class')).includes('selectedEditor'))
     await page.keyboard.press('Delete')
