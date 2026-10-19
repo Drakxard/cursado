@@ -6,7 +6,7 @@ import { PinnedPdfButton } from './components/PdfPin'
 import { nativeBoardMode } from './nativeWorkspace'
 import type { Flashcard } from './study/flashcards'
 import type { MatrixCells } from './study/matrices'
-import type { ReactNode, CSSProperties, DragEvent as ReactDragEvent } from 'react'
+import type { CSSProperties, DragEvent as ReactDragEvent } from 'react'
 import { calculateScientific } from './study/scientificCalculator'
 import type { AngleMode } from './study/scientificCalculator'
 import { BsCalculator } from 'react-icons/bs'
@@ -34,14 +34,13 @@ const keys=[
 const newRow=(index:number,expr=''):GraphFormula=>({id:`graph-formula-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,expr,color:palette[index%palette.length],enabled:true})
 const splitSelection=(text:string):GraphFormula[]=>text.split(/[;\n]+/).map(s=>s.trim()).filter(Boolean).map((expr,i)=>newRow(i,expr))
 
-export default function RightMathDock({getSelection,addGraphToBoard,getSelectedMatrix,addMatrixToBoard,addCardsToBoard,onOpenPanel,pinnedPdfs=[],onOpenPdf,onRevealPdf,pdfPinControl}: {
+export default function RightMathDock({getSelection,addGraphToBoard,getSelectedMatrix,addMatrixToBoard,addCardsToBoard,onOpenPanel,pinnedPdfs=[],onOpenPdf,onRevealPdf}: {
   getSelection:()=>Promise<string>;
   addGraphToBoard:(formulas:GraphFormula[],settings?:GraphSettings)=>void;
   getSelectedMatrix:()=>MatrixCells|null;
   addMatrixToBoard:(cells:MatrixCells)=>void;
   addCardsToBoard:(cards:Flashcard[],asDeck?:boolean)=>void;
   onOpenPanel:()=>void;
-  pdfPinControl?:ReactNode;
   pinnedPdfs?: {id:string;name:string}[];
   onOpenPdf?:(id:string)=>void;
   onRevealPdf?:(id:string)=>void;
@@ -139,7 +138,6 @@ export default function RightMathDock({getSelection,addGraphToBoard,getSelectedM
         onClick={()=>{onOpenPanel();setMode(m=>m==='graph'?'closed':'graph')}}><FiActivity size={20}/></button>
       <button type="button" aria-label="Tarjetas de estudio" title="Tarjetas de estudio" className={mode==='cards'?'math-dock-active':''}
         onClick={()=>{onOpenPanel();setMode(m=>m==='cards'?'closed':'cards')}}><LuLayers size={20}/></button>
-      {pdfPinControl}
       {!!pinnedPdfs.length&&<div className="math-dock-pdfs" role="group" aria-label="PDF fijados">
         {pinnedPdfs.map(pdf=><PinnedPdfButton key={pdf.id} name={pdf.name}
           onOpen={()=>{onOpenPanel();setMode('closed');onOpenPdf?.(pdf.id)}}

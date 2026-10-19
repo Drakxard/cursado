@@ -19,19 +19,22 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   Object.defineProperty(globalThis.navigator, 'onLine', { value: true, configurable: true })
   t.after(() => { globalThis.fetch = originalFetch; globalThis.window = originalWindow; globalThis.localStorage = originalStorage; globalThis.WebSocket = originalSocket })
   const actors: any[] = []
-  for (const name of ['A', 'B', 'C']) {
+  for (const name of ['A', 'B', 'C', 'D']) {
     const response = await backend.request('/api/auth/guest', { body: { name, password: 'test-only' } })
     const cookie = response.headers.get('set-cookie')!.split(';')[0]
     const fs = memoryWorkspace()
     const client = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}#${name}`)
     actors.push({ name, cookie, fs, client })
   }
-  const [a, b, c] = actors
+  const [a, b, c, d] = actors
   async function use(actor: any, action: () => Promise<any>) {
     ;(globalThis as any).__cooperationRoot = actor.fs.root
     globalThis.fetch = async (url, options = {}) => {
       const request = new Request(`https://backend.test${String(url).replace(/^\/pizarra/, '')}`, { ...options, headers: { ...options.headers as any, Cookie: actor.cookie, Origin: backend.env.CURSADO_ORIGIN } })
-      if (options.method === 'PUT') actor.uploads = (actor.uploads || 0) + 1
+      if (options.method === 'PUT') {
+        actor.uploads = (actor.uploads || 0) + 1
+        if (actor.beforeUpload) await actor.beforeUpload(String(url))
+      }
       const response = await backend.fetch(request)
       if (actor.corruptDownload && String(url).includes('/files/') && !options.method) { actor.corruptDownload = false; return new Response('corrupted bytes', { status: 200 }) }
       return response
@@ -41,6 +44,9 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   await a.fs.put('manifests/subject-catalog.json', { version: 2, subjects: { algebra: { id: 'algebra', name: 'Álgebra', storageKey: 'Algebra' } } })
   await a.fs.put('manifests/materials/Algebra/week-1.json', { version: 1, subjectId: 'Algebra', weekNumber: 1, materials: [{ id: 100, subject_id: 'Algebra', file_name: 'Uno.pdf', drive_file_id: 'workspace://teoria/Algebra/uno.pdf' }] })
   await a.fs.put('teoria/Algebra/uno.pdf', new Blob(['test pdf'], { type: 'application/pdf' }))
+  // A full subject exceeds a single 200-resource operation. Metadata must drain
+  // before the first file transfer, rather than disappearing behind that upload.
+  for (let week = 2; week <= 205; week++) await a.fs.put(`manifests/materials/Algebra/week-${week}.json`, { version: 1, subjectId: 'Algebra', weekNumber: week, materials: [] })
   await a.fs.put('teoria/Private/secret.pdf', 'private')
   await a.fs.put('User.Services', 'secret credentials')
   const image = 'data:image/png;base64,aW1hZ2U='
@@ -50,9 +56,27 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   await a.fs.put('subject-voice/images/algebra/foto.png', new Blob(['voice image'], { type: 'image/png' }))
   await a.fs.put('manifests/sintesis/algebra/semana-1/workspace.json', { version: 1, workspace: { version: 2, revision: 1, defaultScale: 1, document: { type: 'doc', content: [{ type: 'paragraph' }, { type: 'image', attrs: { src: 'synthesis-local-image:synthesis-image' } }] }, layout: {} }, r2: { etag: null, baseline: null } })
   await a.fs.put('sintesis/images/synthesis-image.png', new Blob(['synthesis image'], { type: 'image/png' }))
-  const groupId = await use(a, () => a.client.createCooperationGroup('B,C'))
+  const groupId = await use(a, () => a.client.createCooperationGroup('B,C,D'))
+  let checkedPublication = false
+  a.beforeUpload = async () => {
+    if (checkedPublication) return
+    const groups = await (await backend.request('/api/cooperation/groups', { cookie: b.cookie })).json()
+    const pendingSphere = groups.groups[0].spheres[0]
+    assert.equal(pendingSphere.ready, true)
+    const snapshot = await backend.env.CONTENT_ROOMS.getByName(pendingSphere.id).snapshot()
+    assert.ok(snapshot.resources['sphere.json'])
+    assert.ok(snapshot.resources['manifests/materials/Algebra/week-205.json'])
+    assert.equal(Object.values(snapshot.resources).some((r: any) => r.blob), false)
+    // Refreshing invitations during an active upload must not wait for that upload.
+    let timer: ReturnType<typeof setTimeout>
+    try {
+      await Promise.race([a.client.refreshCooperation(), new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Discovery blocked by upload')),1500)})])
+    } finally { clearTimeout(timer!) }
+    checkedPublication = true
+  }
   const binding = await use(a, () => a.client.shareCooperationSphere(groupId, { id: 'algebra', name: 'Álgebra', color: '#2563eb' }))
   assert.ok(binding.id)
+  assert.equal(checkedPublication, true)
   for (const actor of [b, c]) {
     await actor.fs.put('manifests/subject-catalog.json', { version: 2, subjects: { algebra: { id: 'algebra', name: 'Personal', storageKey: 'Personal' } } })
     await use(actor, () => actor.client.refreshCooperation())
@@ -62,10 +86,15 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
       await assert.rejects(use(actor, () => actor.client.acceptCooperationSphere(sphere)), /verificación/)
       assert.equal(actor.client.cooperationState().mirrors[binding.id].downloading, true)
       assert.ok(actor.client.cooperationState().mirrors[binding.id].incoming)
-      assert.equal((await actor.fs.json('manifests/subject-catalog.json')).subjects[`coop-${binding.id}`], undefined)
+      assert.equal(actor.client.cooperationState().mirrors[binding.id].metadataReady, true)
+      assert.equal((await actor.fs.json('manifests/subject-catalog.json')).subjects[`coop-${binding.id}`].name, 'Álgebra')
+      assert.ok(await actor.fs.json(`manifests/materials/Cooperativo-${binding.id}/week-1.json`))
+      const metadataPath = `manifests/materials/Cooperativo-${binding.id}/week-1.json`
+      await actor.fs.put(metadataPath, { ...await actor.fs.json(metadataPath), localNote: 'Editado durante la descarga' })
     }
     await use(actor, () => actor.client.acceptCooperationSphere(sphere))
     assert.equal(actor.client.cooperationState().mirrors[binding.id].error, undefined)
+    if (actor === b) assert.equal((await actor.fs.json(`manifests/materials/Cooperativo-${binding.id}/week-1.json`)).localNote, 'Editado durante la descarga')
     assert.equal(actor.uploads || 0, 0)
     const path = `teoria/Cooperativo-${binding.id}/uno.pdf`
     assert.equal(await actor.fs.files.get(path).text(), 'test pdf')
@@ -121,4 +150,36 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   await a.fs.put(pathA, { ...localA, materials: [{ id: 104, file_name: 'Nuevo.pdf' }] })
   await use(a, () => a.client.synchronizeCooperation()); await use(c, () => c.client.synchronizeCooperation())
   assert.ok((await c.fs.json(pathC)).materials.some(row => row.file_name === 'Nuevo.pdf'))
+  // Choosing installs preview metadata only, then selected weeks and future weeks.
+  await use(d, async () => {
+    await d.client.refreshCooperation()
+    const sphere = d.client.cooperationState().groups[0].spheres[0]
+    await d.client.acceptCooperationSphere(sphere, { choose: true })
+    assert.equal([...d.fs.files.keys()].some(path => path.endsWith('.pdf')), false)
+    assert.ok(await d.fs.json(`manifests/materials/Cooperativo-${binding.id}/week-2.json`))
+    assert.equal(d.client.cooperationState().mirrors[binding.id].selection.choosing, true)
+    await d.client.toggleCooperationWeek(binding.id, 1)
+    await d.client.finishCooperationSelection(binding.id)
+    await d.client.synchronizeCooperation()
+    assert.equal(d.client.cooperationState().mirrors[binding.id].error, undefined)
+    assert.equal(d.fs.files.has(`manifests/materials/Cooperativo-${binding.id}/week-2.json`), false)
+    assert.ok(await d.fs.json(`manifests/sintesis/coop-${binding.id}/semana-1/workspace.json`))
+    // Exclusions survive another normal reconciliation and cannot delete remote weeks.
+    await d.client.synchronizeCooperation()
+  })
+  await a.fs.put('manifests/materials/Algebra/week-206.json', { weekNumber: 206, materials: [{ id: 206, file_name: 'Futuro.pdf', drive_file_id: 'workspace://teoria/Algebra/futuro.pdf' }] })
+  await a.fs.put('teoria/Algebra/futuro.pdf', new Blob(['future PDF'], { type: 'application/pdf' }))
+  await a.fs.put('manifests/materials/Algebra/week-2.json', { weekNumber: 2, materials: [{ id: 207, file_name: 'Excluido.pdf', drive_file_id: 'workspace://teoria/Algebra/excluido.pdf' }] })
+  await a.fs.put('teoria/Algebra/excluido.pdf', new Blob(['excluded PDF'], { type: 'application/pdf' }))
+  await use(a, () => a.client.synchronizeCooperation())
+  await use(d, async () => {
+    await d.client.synchronizeCooperation()
+    assert.equal(d.client.cooperationState().mirrors[binding.id].error, undefined)
+    assert.equal(await d.fs.files.get(`teoria/Cooperativo-${binding.id}/futuro.pdf`).text(), 'future PDF')
+    assert.equal(d.fs.files.has(`teoria/Cooperativo-${binding.id}/excluido.pdf`), false)
+    assert.equal(d.fs.files.has(`manifests/materials/Cooperativo-${binding.id}/week-2.json`), false)
+  })
+  await use(a, () => a.client.synchronizeCooperation())
+  assert.equal((await a.fs.json('manifests/materials/Algebra/week-2.json')).materials[0].file_name, 'Excluido.pdf')
+
 })

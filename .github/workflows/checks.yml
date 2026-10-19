@@ -85,3 +85,49 @@ jobs:
             test-results/
             pizarraproyecto-main/test-results/
             ${{ runner.temp }}/cursado-next.log
+
+  board-cooperation:
+    name: Pizarra, API chat y cooperación semanal
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            pizarraproyecto-main/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: pizarraproyecto-main
+      - run: npx playwright install --with-deps chromium
+      - run: npm run typecheck
+      - name: Sincronización, exclusiones y ruta de API chat
+        run: node --test --experimental-strip-types tests/cooperation*.test.mts tests/board-chat.test.mts
+      - name: Invitaciones, selector semanal y overlay de chat
+        run: node --test --experimental-strip-types tests/cooperation-panel.browser.mts tests/board-api-chat.browser.mjs
+      - run: npm run build
+      - name: Pizarra y selección de semanas en la aplicación completa
+        shell: bash
+        run: |
+          node node_modules/next/dist/bin/next start > "$RUNNER_TEMP/cursado-board-cooperation.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --silent --fail http://localhost:3000/ > /dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail http://localhost:3000/ > /dev/null
+          node --test tests/cooperation-weeks.browser.mjs
+          node --test --test-name-pattern="pin follows" tests/board-library.browser.mjs
+      - name: Guardar capturas y diagnósticos de cooperación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pizarra-cooperacion-diagnosticos
+          if-no-files-found: ignore
+          path: |
+            test-results/
+            ${{ runner.temp }}/cursado-board-cooperation.log

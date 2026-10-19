@@ -4645,6 +4645,12 @@
 
     const key = event.key.toLowerCase();
 
+    if (state.query?.boardReader && key === "<" && !event.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      void navigateBackToApp();
+      return;
+    }
+
     if (!event.ctrlKey && !event.altKey && !event.metaKey && key === "escape") {
       handleViewerEscape(event);
       return;

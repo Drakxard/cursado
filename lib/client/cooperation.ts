@@ -1,15 +1,16 @@
 'use client'
+import { projectSelectionTags, selectionResources, type WeekSelection } from './cooperation-selection.ts'
 import { COOPERATIVE_TAB_ID, mergeCooperation, type Json } from '../cooperation-model.ts'
 import { getReadyWorkspaceHandle, loadWorkspaceHandle, queryWorkspacePermission } from '../local-workspace-client.ts'
 import { applyMirrorFile, digest, isFileReferenced, mapBindingJson, mapBindingText, readFile, readJson, removeFile, scanSphere, writeFile, writeJson, type SphereBinding } from './cooperation-files.ts'
 
-export type CooperativeSphere = { id: string; group_id: string; name: string; color: string; created_by: string; bytes: number }
+export type CooperativeSphere = { id: string; group_id: string; name: string; color: string; created_by: string; bytes: number; ready?: boolean }
 export type CooperativeGroup = { id: string; accepted: boolean; members: { id: string; display_name: string }[]; spheres: CooperativeSphere[] }
 export type Resource = { key: string; type: 'json' | 'blob' | 'delete'; value?: Json; blob?: { hash: string; size: number; mime: string }; deleted?: boolean; seq?: number; author?: string }
 type Snapshot = { seq: number; resources: Record<string, Resource>; conflicts: Json[] }
 type Operation = { id: string; changes: (Resource & { base?: Json; baseHash?: string })[] }
 export type PendingDeletion = { id: string; sphereId: string; key: string; selector: string[]; value?: Json; label: string; decision: 'wait' | 'keep' | 'delete'; notified?: boolean }
-type Mirror = { binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; downloading?: boolean; error?: string }
+type Mirror = { selection?: WeekSelection; binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; incomingApplied?: string[]; downloading?: boolean; metadataReady?: boolean; transfer?: { phase: 'uploading' | 'downloading'; completed: number; total: number }; error?: string }
 export type CooperationState = { version: 1; userId: string; groups: CooperativeGroup[]; mirrors: Record<string, Mirror>; deletions: PendingDeletion[]; dismissedSpheres?: string[]; error?: string }
 let state: CooperationState = { version: 1, userId: '', groups: [], mirrors: {}, deletions: [] }
 let activeRoot: FileSystemDirectoryHandle | null = null
@@ -48,9 +49,14 @@ async function withStateLock<T>(work: () => Promise<T>): Promise<T> {
   return navigator.locks ? navigator.locks.request(`cooperation:${state.userId}`, run) : run()
 }
 export async function refreshCooperation() {
-  if (syncing) await syncing
   const result = await cooperationApi('groups') as { user: { id: string }; groups: CooperativeGroup[] }
   const handle = await root()
+  if (syncing && state.userId === result.user.id && activeRoot === handle) {
+    // Discovery must stay responsive while a PDF is transferring. The active
+    // synchronization persists this directory update with its next checkpoint.
+    state.groups = result.groups; delete state.error; cooperationChanged(); return state
+  }
+  if (syncing) await syncing
   if (state.userId !== result.user.id || activeRoot !== handle) {
     for (const socket of sockets.values()) socket.close()
     sockets.clear()
@@ -90,7 +96,7 @@ async function installSubject(b: SphereBinding) {
   if (JSON.stringify(workspace) !== before) await writeJson(handle, 'manifests/workspace-state.json', workspace)
   window.dispatchEvent(new CustomEvent('cursado-cooperation-subject', { detail: b }))
 }
-export async function shareCooperationSphere(groupId: string, subject: { id: string; name: string; color: string; storageKey?: string }) {
+export async function shareCooperationSphere(groupId: string, subject: { id: string; name: string; color: string; storageKey?: string }, options: { background?: boolean } = {}) {
   await refreshCooperation()
   const binding = await withStateLock(async () => {
   const already = Object.values(state.mirrors).find(m => m.binding.groupId === groupId && m.binding.subjectId === subject.id)
@@ -106,11 +112,15 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
   await save()
   return binding
   })
+  await publishSphereMetadata(state.mirrors[binding.id])
+  await refreshCooperation()
+  if (options.background) { synchronizeInBackground(); return binding }
   await synchronizeCooperation()
+  if (state.mirrors[binding.id]?.error) throw new Error(state.mirrors[binding.id].error)
   await refreshCooperation()
   return binding
 }
-export async function acceptCooperationSphere(sphere: CooperativeSphere) {
+export async function acceptCooperationSphere(sphere: CooperativeSphere, options: { background?: boolean; choose?: boolean } = {}) {
   const handle = await root()
   await cooperationApi(`spheres/${sphere.id}/accept`, {})
   const snapshot = await cooperationApi(`spheres/${sphere.id}/snapshot`) as Snapshot
@@ -121,17 +131,67 @@ export async function acceptCooperationSphere(sphere: CooperativeSphere) {
     const subjectId = `coop-${sphere.id}`, storageKey = `Cooperativo-${sphere.id}`
     const catalog = await readJson<{ subjects: Record<string, { storageKey: string }> }>(handle, 'manifests/subject-catalog.json', { subjects: {} })
     if (catalog.subjects[subjectId] || Object.values(catalog.subjects).some(s => s.storageKey === storageKey)) throw new Error('Ya existe una materia con el identificador de esta esfera. No se sobrescribió.')
-    state.mirrors[sphere.id] = { binding: { id: sphere.id, groupId: sphere.group_id, subjectId, storageKey, sourceId: String(meta.subjectId), sourceKey: String(meta.storageKey), name: sphere.name, color: sphere.color, owner: false }, baseline: { seq: 0, resources: {}, conflicts: [] }, downloading: true }
+    state.mirrors[sphere.id] = { binding: { id: sphere.id, groupId: sphere.group_id, subjectId, storageKey, sourceId: String(meta.subjectId), sourceKey: String(meta.storageKey), name: sphere.name, color: sphere.color, owner: false }, baseline: { seq: 0, resources: {}, conflicts: [] }, downloading: true, ...(options.choose ? { selection: { choosing: true, excludedWeeks: [], weeks: [] } } : {}) }
     await save()
   }
   })
+  if (options.choose) {
+    await synchronizeCooperation()
+    const mirror = state.mirrors[sphere.id]
+    if (mirror.error) throw new Error(mirror.error)
+    window.dispatchEvent(new CustomEvent('cursado-cooperation-select', { detail: mirror.binding }))
+    return
+  }
+  if (options.background) { synchronizeInBackground(); return }
   await synchronizeCooperation()
   if (state.mirrors[sphere.id]?.error) throw new Error(state.mirrors[sphere.id].error)
   await installSubject(state.mirrors[sphere.id].binding)
   await refreshCooperation()
 }
+export async function toggleCooperationWeek(sphereId: string, week: number) {
+  if (syncing) await syncing
+  await withStateLock(async () => {
+    const selection = state.mirrors[sphereId]?.selection
+    if (!selection?.choosing || !selection.weeks.includes(week)) return
+    selection.excludedWeeks = selection.excludedWeeks.includes(week) ? selection.excludedWeeks.filter(w => w !== week) : [...selection.excludedWeeks, week]
+    await save()
+  })
+}
+export async function finishCooperationSelection(sphereId: string) {
+  if (syncing) await syncing
+  await withStateLock(async () => {
+    const mirror = state.mirrors[sphereId]
+    if (!mirror?.selection?.choosing) return
+    const handle = await root(), snapshot = mirror.incoming || mirror.baseline
+    const { allowed } = await selectionResources(snapshot.resources, mirror.selection.excludedWeeks)
+    // Preview metadata is local only. Removing it must never become a remote deletion.
+    for (const [key, resource] of Object.entries(snapshot.resources)) {
+      if (!allowed.has(key) && resource.type === 'json' && !key.startsWith('scope/') && key !== 'sphere.json') await removeFile(handle, mapBindingText(key, mirror.binding, true))
+    }
+    mirror.selection.choosing = false
+    mirror.baseline = snapshot; delete mirror.incoming; delete mirror.incomingApplied
+    mirror.downloading = true
+    await save()
+    window.dispatchEvent(new CustomEvent('cursado-cooperation-applied', { detail: mirror.binding }))
+  })
+  synchronizeInBackground()
+}
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const record = (v: unknown): v is Record<string, Json> => !!v && typeof v === 'object' && !Array.isArray(v)
+const metadataKinds = new WeakMap<Resource, boolean>()
+function metadataResource(resource: Resource) {
+  let result = metadataKinds.get(resource)
+  if (result === undefined) {
+    result = resource.type === 'json' && !resource.key.startsWith('progreso/pizarras/') && JSON.stringify(resource.value ?? null).length <= 256 * 1024
+    metadataKinds.set(resource, result)
+  }
+  return result
+}
+async function publishSphereMetadata(mirror: Mirror) {
+  if (!mirror.binding.owner || mirror.baseline.resources['sphere.json']) return
+  const b = mirror.binding
+  await cooperationApi(`spheres/${b.id}/operations`, { id: `metadata-${b.id}`, changes: [{ key: 'sphere.json', type: 'json', value: { subjectId: b.sourceId, storageKey: b.sourceKey, name: b.name, color: b.color } }] })
+}
 async function prepareBinding(b: SphereBinding, resources: Record<string, Resource>) {
   if (b.owner) return
   const numbers = new Set<number>()
@@ -207,7 +267,23 @@ function withoutPersonal(sphereId: string, key: string, value: Json | undefined)
 }
 async function synchronizeMirror(mirror: Mirror) {
   const handle = await root(), b = mirror.binding
+  let moreChanges = false
   if (state.deletions.some(d => d.sphereId === b.id && d.key === 'sphere.json' && d.decision !== 'wait')) return
+  if (mirror.selection?.choosing) {
+    const snapshot = await cooperationApi(`spheres/${b.id}/snapshot`) as Snapshot
+    await prepareBinding(b, snapshot.resources)
+    const { weeks } = await selectionResources(snapshot.resources, [])
+    const existing = new Set(mirror.selection.weeks)
+    // Start gray; genuinely new weeks after finishing remain included automatically.
+    mirror.selection.excludedWeeks.push(...weeks.filter(w => !existing.has(w)))
+    mirror.selection.weeks = weeks
+    for (const [key, resource] of Object.entries(snapshot.resources)) if ((key.startsWith('manifests/materials/') || key.startsWith('manifests/entries/') || key === 'scope/containers.json' || key === 'scope/shortcuts.json') && !resource.deleted && resource.value !== undefined) await applyMirrorFile(handle, b, key, resource.value)
+    mirror.incoming = snapshot; mirror.metadataReady = true; delete mirror.error
+    await installSubject(b); await save()
+    window.dispatchEvent(new CustomEvent('cursado-cooperation-applied', { detail: b }))
+    return
+  }
+  await publishSphereMetadata(mirror)
   const wasDownloading = mirror.downloading
   const localCatalog = await readJson<{ subjects: Record<string, { name: string; storageKey: string }> }>(handle, 'manifests/subject-catalog.json', { subjects: {} })
   const catalogSubject = localCatalog.subjects[b.subjectId]
@@ -221,13 +297,17 @@ async function synchronizeMirror(mirror: Mirror) {
       b.pathAliases = { ...b.pathAliases, [sourceHash]: localHash }
     }
   }
-  let files = mirror.downloading ? [] : await scanSphere(handle, b)
+  let files = mirror.downloading && !mirror.metadataReady ? [] : await scanSphere(handle, b)
   if (!mirror.downloading) {
     const catalog = await readJson<{ subjects: Record<string, unknown> }>(handle, 'manifests/subject-catalog.json', { subjects: {} })
     const workspace = await readJson<{ customSubjects: Record<string, { color: string }> }>(handle, 'manifests/workspace-state.json', { customSubjects: {} })
     if (workspace.customSubjects[b.subjectId]?.color) b.color = workspace.customSubjects[b.subjectId].color
     if (catalog.subjects[b.subjectId]) files.push({ key: 'sphere.json', value: { subjectId: b.sourceId, storageKey: b.sourceKey, name: b.name, color: b.color } })
   }
+  const publicationResources = { ...mirror.baseline.resources, ...Object.fromEntries(files.map(file => [file.key, { key: file.key, type: file.blob ? 'blob' : 'json', value: file.value, blob: mirror.baseline.resources[file.key]?.blob }])) }
+  const publicationSelection = mirror.selection ? await selectionResources(publicationResources, mirror.selection.excludedWeeks) : null
+  const publicationAllowed = publicationSelection?.allowed
+  if (publicationAllowed) files = files.filter(file => publicationAllowed.has(file.key))
   const current = new Map(files.map(file => [file.key, file]))
   if (mirror.outbox && !mirror.incoming) {
     for (const change of mirror.outbox.changes) if (change.blob) {
@@ -244,11 +324,18 @@ async function synchronizeMirror(mirror: Mirror) {
         const hash = await digest(file.blob)
         if (hash !== prior?.blob?.hash) changes.push({ key: file.key, type: 'blob', blob: { hash, size: file.blob.size, mime: file.blob.type }, baseHash: prior?.blob?.hash })
       } else {
-        const value = withoutPersonal(b.id, file.key, file.value)
+        let value = withoutPersonal(b.id, file.key, file.value)
+        if (mirror.selection && file.key === 'scope/tags.json' && record(value) && record(prior?.value)) {
+          const base = prior.value
+          const materialIds = publicationSelection!.materialIds
+          const untouched = (rows: Json, regions = false) => Object.fromEntries(Object.entries(record(rows) ? rows : {}).filter(([id]) => !materialIds.has(regions ? id.split(':')[0] : id)))
+          const mergeRows = (a: Json, b: Json) => [...new Map([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])].filter(record).map(row => [String(row.id), row])).values()]
+          value = { ...base, ...value, tags: mergeRows(base.tags, value.tags), assignments: { ...untouched(base.assignments), ...(record(value.assignments) ? value.assignments : {}) }, regions: { ...untouched(base.regions, true), ...(record(value.regions) ? value.regions : {}) } }
+        }
         if (value !== undefined && !eq(value, prior?.value)) changes.push({ key: file.key, type: 'json', value, base: prior?.value })
       }
     }
-    for (const [key, prior] of Object.entries(mirror.baseline.resources)) if (!prior.deleted && !current.has(key) && !state.deletions.some(d => d.sphereId === b.id && d.key === key)) {
+    for (const [key, prior] of Object.entries(mirror.baseline.resources)) if ((!publicationAllowed || publicationAllowed.has(key)) && !prior.deleted && !current.has(key) && !state.deletions.some(d => d.sphereId === b.id && d.key === key)) {
       // An empty week is still a live collection: future PDFs must be able to use it.
       const field = key.startsWith('manifests/materials/') ? 'materials' : key.startsWith('manifests/entries/') ? 'entries' : null
       if (field && record(prior.value)) {
@@ -257,11 +344,17 @@ async function synchronizeMirror(mirror: Mirror) {
       } else changes.push({ key, type: 'delete' })
     }
     if (changes.length) {
-      mirror.outbox = { id: crypto.randomUUID(), changes: changes.slice(0, 200) }
+      // Publish metadata before starting any large upload. Board JSON follows its assets.
+      const metadata = changes.filter(metadataResource)
+      const batch = (metadata.length ? metadata : changes.sort((a,b) => Number(a.key.startsWith('progreso/pizarras/')) - Number(b.key.startsWith('progreso/pizarras/')))).slice(0, 200)
+      moreChanges = changes.length > batch.length
+      mirror.outbox = { id: crypto.randomUUID(), changes: batch }
       await save() // Persist the operation before the first network mutation.
     }
   }
   if (mirror.outbox && !mirror.incoming) {
+    mirror.transfer = { phase: 'uploading', completed: 0, total: mirror.outbox.changes.filter(change => change.blob).length }
+    await save()
     for (const change of mirror.outbox.changes) if (change.blob) {
       const file = current.get(change.key)?.blob
       // A queued file may have changed while offline. Its exact bytes live in staging.
@@ -273,6 +366,7 @@ async function synchronizeMirror(mirror: Mirror) {
       }
       const response = await fetch(`/pizarra/api/cooperation/spheres/${b.id}/files/${change.blob.hash}`, { method: 'PUT', headers: { 'Content-Type': change.blob.mime || 'application/octet-stream' }, body: blob })
       if (!response.ok) throw new Error('No se pudo subir el archivo cooperativo.')
+      mirror.transfer.completed++; await save()
     }
     const wire = structuredClone(mirror.outbox) as Operation & { changes: (Operation['changes'][number] & { valueFile?: { hash: string; size: number }; baseFile?: { hash: string; size: number } })[] }
     for (const change of wire.changes) if (change.type === 'json') {
@@ -296,18 +390,39 @@ async function synchronizeMirror(mirror: Mirror) {
     if (canonical !== local) b.pathAliases = { ...b.pathAliases, [await digest(new Blob([canonical]))]: await digest(new Blob([local])) }
   }
   const previous = mirror.baseline
+  if (!mirror.incoming) mirror.incomingApplied = []
+  mirror.incomingApplied ||= []
   mirror.incoming = remote
   await save() // An interrupted download resumes before any new local publication.
   if (remote.resources['sphere.json']?.deleted) {
     if (!previous.resources['sphere.json']?.deleted) protectDeletions(b.id, 'sphere.json', previous.resources['sphere.json']?.value, undefined, current.get('sphere.json')?.value)
-    mirror.baseline = remote; mirror.outbox = undefined; mirror.incoming = undefined
+    mirror.baseline = remote; mirror.outbox = undefined; mirror.incoming = undefined; delete mirror.incomingApplied
     await save()
     window.dispatchEvent(new CustomEvent('cursado-cooperation-applied', { detail: b }))
     return
   }
-  const incomingResources = Object.entries(remote.resources).sort(([, a], [, b]) => Number(a.type === 'json') - Number(b.type === 'json'))
-  for (const [key, resource] of incomingResources) {
-    const prior = previous.resources[key], local = current.get(key)
+  const priority = (r: Resource) => metadataResource(r) ? 0 : r.type === 'blob' ? 1 : 2
+  const incomingSelection = mirror.selection ? await selectionResources(remote.resources, mirror.selection.excludedWeeks) : null
+  const incomingAllowed = incomingSelection?.allowed
+  const incomingResources = Object.entries(remote.resources).filter(([key]) => !incomingAllowed || incomingAllowed.has(key)).sort(([, a], [, b]) => priority(a) - priority(b))
+  mirror.transfer = { phase: 'downloading', completed: 0, total: incomingResources.filter(([key,r]) => r.blob && !mirror.incomingApplied!.includes(key) && (!eq(previous.resources[key],r) || mirror.downloading)).length }
+  let metadataExposed = false
+  const changedMetadata = incomingResources.some(([key,r]) => metadataResource(r) && !eq(previous.resources[key],r))
+  const exposeMetadata = async () => {
+    if (metadataExposed || (!mirror.downloading && !changedMetadata)) return
+    metadataExposed = true
+    const metadata = remote.resources['sphere.json']?.value
+    if (record(metadata)) { if (typeof metadata.name === 'string') b.name = metadata.name; if (typeof metadata.color === 'string') b.color = metadata.color }
+    mirror.metadataReady = true
+    await installSubject(b); await save()
+    window.dispatchEvent(new CustomEvent('cursado-cooperation-applied', { detail: b }))
+  }
+  for (const [key, rawResource] of incomingResources) {
+    const resource = key === 'scope/tags.json' && incomingSelection ? { ...rawResource, value: projectSelectionTags(rawResource.value, incomingSelection.materialIds) } : rawResource
+    if (!metadataResource(resource)) await exposeMetadata()
+    if (mirror.incomingApplied.includes(key)) continue
+    const rawPrior = previous.resources[key]
+    const prior = key === 'scope/tags.json' && incomingSelection && rawPrior ? { ...rawPrior, value: projectSelectionTags(rawPrior.value, incomingSelection.materialIds) } : rawPrior, local = current.get(key)
     if (state.deletions.some(d => d.sphereId === b.id && d.key === key && !d.selector.length && d.decision !== 'wait')) continue
     if (eq(prior, resource) && !mirror.downloading) continue
     if (resource.deleted) {
@@ -333,33 +448,43 @@ async function synchronizeMirror(mirror: Mirror) {
       await writeFile(handle, temp, blob)
       // Preserve a newer local file if it changed during the transfer.
       const latest = await readFile(handle, mapBindingText(key, b, true))
+      if (!key.startsWith('scope/') && mirror.downloading && mirror.metadataReady && latest && await digest(latest) !== resource.blob.hash) {
+        // The newly visible subject may already have a local edit. Keep it;
+        // the next normal reconciliation will publish it against this snapshot.
+        await removeFile(handle, temp); mirror.incomingApplied.push(key); mirror.transfer.completed++; await save(); continue
+      }
       if (!key.startsWith('scope/') && !mirror.downloading && local?.blob && (!latest || await digest(latest) !== await digest(local.blob))) continue
       await applyMirrorFile(handle, b, key, (await readFile(handle, temp))!)
       await removeFile(handle, temp)
+      mirror.incomingApplied.push(key)
+      mirror.transfer.completed++; await save()
     } else if (resource.type === 'json' && resource.value !== undefined) {
       let localValue = local?.value
-      if (key.startsWith('scope/') && !mirror.downloading) localValue = (await scanSphere(handle, b)).find(file => file.key === key)?.value
-      if (!key.startsWith('scope/') && key !== 'sphere.json' && !mirror.downloading) {
+      if (key.startsWith('scope/') && (!mirror.downloading || mirror.metadataReady)) localValue = (await scanSphere(handle, b)).find(file => file.key === key)?.value
+      if (!key.startsWith('scope/') && key !== 'sphere.json' && (!mirror.downloading || mirror.metadataReady)) {
         const latest = await readFile(handle, mapBindingText(key, b, true))
         localValue = latest ? mapBindingJson(JSON.parse(await latest.text()), b, false) : undefined
       }
       const protect = key.startsWith('manifests/materials/') || key.startsWith('manifests/entries/') || key === 'scope/containers.json' || /^manifests\/subject-voice\/[^/]+\/workspace\.json$/.test(key) || key.startsWith('manifests/subject-voice/topics/')
       if (protect) protectDeletions(b.id, key, prior?.value, resource.value, localValue)
       const conflicts: Parameters<typeof mergeCooperation>[3] = []
-      let merged = mirror.downloading ? resource.value : mergeCooperation(prior?.value, localValue, resource.value, conflicts)
+      let merged = mirror.downloading && (!mirror.metadataReady || localValue === undefined) ? resource.value : mergeCooperation(prior?.value, localValue, resource.value, conflicts)
       for (const pending of state.deletions.filter(d => d.sphereId === b.id && d.key === key && d.decision !== 'delete')) merged = setSelected(merged, pending.selector, select(localValue, pending.selector))
       if (conflicts.length) await writeJson(handle, `.cooperation/${state.userId}/recovery/${b.id}-${remote.seq}-${await digest(new Blob([key]))}.json`, { key, conflicts })
       if (merged !== undefined) await applyMirrorFile(handle, b, key, merged)
+      mirror.incomingApplied.push(key)
     }
   }
+  await exposeMetadata()
   if (remote.conflicts.length) await writeJson(handle, `.cooperation/${state.userId}/recovery/${b.id}-server.json`, remote.conflicts)
-  mirror.baseline = remote; mirror.outbox = undefined; mirror.incoming = undefined; mirror.downloading = false; delete mirror.error
+  mirror.baseline = remote; mirror.outbox = undefined; mirror.incoming = undefined; mirror.downloading = false; delete mirror.error; delete mirror.transfer; delete mirror.incomingApplied
   const metadata = remote.resources['sphere.json']?.value
   if (record(metadata)) { if (typeof metadata.name === 'string') b.name = metadata.name; if (typeof metadata.color === 'string') b.color = metadata.color }
   if (wasDownloading || metadata) await installSubject(b)
   await save()
   window.dispatchEvent(new CustomEvent('cursado-cooperation-applied', { detail: b }))
   connectMirror(b.id)
+  return moreChanges
 }
 async function connectMirror(id: string) {
   if (sockets.has(id)) return
@@ -378,13 +503,18 @@ async function connectMirror(id: string) {
   } catch { /* The periodic reconciliation retries a failed connection. */ }
 }
 let syncing: Promise<void> | null = null
+function synchronizeInBackground() {
+  void synchronizeCooperation().catch(error => {
+    state.error = error instanceof Error ? error.message : String(error); cooperationChanged()
+  })
+}
 export function synchronizeCooperation(): Promise<void> {
   if (syncing) return syncing
   const work = async () => {
     if (!state.userId || navigator.onLine === false) return
     const execute = async () => {
       for (const mirror of Object.values(state.mirrors)) {
-        try { await synchronizeMirror(mirror) }
+        try { while (await synchronizeMirror(mirror)) { /* Drain metadata and file batches without waiting for the next poll. */ } }
         catch (error) { mirror.error = error instanceof Error ? error.message : String(error); await save() }
       }
     }
@@ -488,8 +618,11 @@ export function startCooperationBackground() {
   const refresh = async () => {
     if (stopped || busy) return
     busy = true
-    try { await refreshCooperation(); if (!stopped) await synchronizeCooperation() }
-    catch { if (!stopped && !state.userId) await restoreCooperationOffline().catch(() => {}) }
+    try { await refreshCooperation(); if (!stopped) synchronizeInBackground() }
+    catch (error) {
+      if (!stopped && !state.userId) await restoreCooperationOffline().catch(() => {})
+      if (!stopped) { state.error = error instanceof Error ? error.message : String(error); cooperationChanged() }
+    }
     finally { busy = false }
   }
   const saved = () => { clearTimeout(timer); timer = setTimeout(() => { void refresh() }, 250) }

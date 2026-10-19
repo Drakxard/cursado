@@ -6,7 +6,7 @@ import { deviceDB, emptyContent, readDeviceBoard, writeDeviceBoard } from './sto
 import { nativeBoardMode } from './nativeWorkspace'
 import { mergeCooperation, type Json } from '../../lib/cooperation-model'
 
-type TopicWorkspace = { cooperationSubjectId?: string; pdfReferences?: BoardPdfReference[]; boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
+type TopicWorkspace = { cooperationWeekNumber?: number; cooperationSubjectId?: string; pdfReferences?: BoardPdfReference[]; boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
 type TopicSnapshot = { version: 1; boardId: string; name: string; content: BoardContentWithExtras; assets: Record<string, string> }
 let workspace: TopicWorkspace | null = null
 let presented: BoardContentWithExtras | null = null
@@ -94,7 +94,7 @@ export async function saveTopicWorkspace() {
   }
   const file = await directory.getFileHandle(`${workspace.boardId}.json`, { create: true })
   const writer = await file.createWritable()
-  await writer.write(JSON.stringify({ version: 1, boardId: workspace.boardId, name: workspace.name, content, assets, cooperationSubjectId: workspace.cooperationSubjectId }))
+  await writer.write(JSON.stringify({ version: 1, boardId: workspace.boardId, name: workspace.name, content, assets, cooperationWeekNumber: workspace.cooperationWeekNumber, cooperationSubjectId: workspace.cooperationSubjectId }))
   await writer.close()
   saved = structuredClone(content)
   parent.postMessage({ type: 'topic-board:saved', boardId: workspace.boardId }, location.origin)

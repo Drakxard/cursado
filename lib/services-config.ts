@@ -10,7 +10,7 @@ export const emptyServicesDraft = () => Object.fromEntries(SERVICE_FIELDS.map(fi
 
 export const SERVICE_GROUPS = [
   { id: 'azureStorage', name: 'Respaldo en Azure', fields: ['storage_azure', 'storage_azure_container'] },
-  { id: 'azureGpt', name: 'Verlo · Azure', fields: ['gpt5mini', 'conexiongpt5mini', 'AZURE_OPENAI_DEPLOYMENT'] },
+  { id: 'azureGpt', name: 'Verlo / API chat · Azure', fields: ['gpt5mini', 'conexiongpt5mini', 'AZURE_OPENAI_DEPLOYMENT'] },
   { id: 'gateway', name: 'AI Gateway', fields: ['gatewayia'] },
   { id: 'datalab', name: 'Datalab · PDF', fields: ['datalab'] },
   { id: 'cloudflareVoice', name: 'Cloudflare · Voz', fields: ['cloudflareapi', 'CLOUDFLARE_ACCOUNT_ID'] },
@@ -30,7 +30,7 @@ export function servicesStatus(config: Partial<ServicesDraft>): ServicesStatus {
 }
 
 export function isServicesServerRequest(path: string) {
-  return path === '/api/pdf-explanation' || path === '/api/pdf-translate' || path === '/api/synthesis-voice'
+  return path === '/api/board-chat' || path === '/api/pdf-explanation' || path === '/api/pdf-translate' || path === '/api/synthesis-voice'
     || path === '/api/tts' || path.startsWith('/api/subject-voice') || path.startsWith('/api/storage/azure')
     || path.startsWith('/api/inscreen/')
 }

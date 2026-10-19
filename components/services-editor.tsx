@@ -30,6 +30,7 @@ export function ServicesEditor({ replacingServices = false, values, status, init
             {SERVICE_GROUPS.map(group => <option key={group.id} value={group.id}>{group.name}{status[group.id] ? ' · Configurado' : ''}</option>)}
           </select>
         </label>
+        {group.id === 'azureGpt' && <p className="text-xs text-slate-600">GPT-5 mini para Verlo y API chat de la pizarra. Ambos usan la misma clave, endpoint y despliegue.</p>}
         {status[group.id] ? <p className="text-xs text-emerald-700">Ya configurado. Los campos vacíos conservan los valores guardados.</p> : null}
         <div className="grid gap-3 sm:grid-cols-2">
           {group.fields.map(field => <label key={field} className={`block text-sm font-medium ${field === 'storage_azure' || field === 'conexiongpt5mini' || field === 'R2_ENDPOINT' ? 'sm:col-span-2' : ''}`}>

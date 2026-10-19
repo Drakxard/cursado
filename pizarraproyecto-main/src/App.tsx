@@ -23,6 +23,7 @@ import type { StickyNoteEditorHandle } from './components/StickyNoteEditor'
 import AcademicLibrary from './components/AcademicLibrary'
 import CodeWorkspace from './components/CodeWorkspace'
 import ChatGPTConsultation from './components/ChatGPTConsultation'
+import BoardApiChat from './components/BoardApiChat'
 import ImageCropDialog from './components/ImageCropDialog'
 import TouchButton from './components/TouchButton'
 import {croppedGeometry} from './canvas/imageCrop'
@@ -1002,6 +1003,10 @@ function App() {
   const [importStatus, setImportStatus] = useState('')
   const [recognizing, setRecognizing] = useState(false)
   const [selectionPicking,setSelectionPicking]=useState(false)
+  const [apiChat,setApiChat]=useState<{boardId:string;image:string}|null>(null)
+  const pdfPinRef=useRef<HTMLButtonElement>(null)
+  const apiCaptureRef=useRef(false)
+  const lastPinnedPdfRef=useRef<{boardId:string;id:string}|null>(null)
   const [studyAssistant,setStudyAssistant]=useState<{boardId:string;file?:File;question?:string;transcription?:{id:string;position:Point}}|null>(null)
   const selectionDestinationRef=useRef<'assistant'|'transcription'>('assistant')
   const [controlNavigation,setControlNavigation]=useState(false)
@@ -1499,6 +1504,14 @@ function App() {
 
   function redraw() {
     sendCamera()
+    const pin=pdfPinRef.current,item=selectedPdfShortcut()
+    if(pin&&item){
+      const bounds=rotatedRect(item,item.rotation),camera=cameraRef.current
+      const width=canvasRef.current?.clientWidth??innerWidth,height=canvasRef.current?.clientHeight??innerHeight
+      pin.style.left=`${Math.max(4,Math.min((bounds.x+bounds.width)*camera.zoom+camera.x+12,width-48))}px`
+      pin.style.top=`${Math.max(4,Math.min(bounds.y*camera.zoom+camera.y,height-48))}px`
+      pin.style.visibility=rectsIntersect(visibleWorldRect(camera,width,height,0),bounds)?'visible':'hidden'
+    }
     inlineNoteRef.current?.layout()
     if(sceneRef.current){
       const cam=cameraRef.current
@@ -2110,7 +2123,7 @@ function App() {
 
   useEffect(()=>beforeAppUpdate(flushBoardForHistory,()=>loadedRef.current&&pointerRef.current===null&&
     !activeStroke.current&&!pdfPointer.current&&!touchPointersRef.current.size&&!importBusyRef.current&&
-    !recognizing&&!studyAssistant&&!imageCrop&&!materialLibrary.reader&&!materialLibrary.splitOpen))
+    !recognizing&&!studyAssistant&&!apiChat&&!apiCaptureRef.current&&!imageCrop&&!materialLibrary.reader&&!materialLibrary.splitOpen))
   useEffect(()=>beforeHome(async()=>{
     // There is nothing to commit if the initial board has not loaded yet.
     if(!loadedRef.current&&!dirtyRef.current)return
@@ -3205,7 +3218,7 @@ function App() {
       pdfPointer.current=null
       if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId)
       if(pdf.moved)scheduleSave()
-      else if(pdf.transform.group.length===1){const reference=shapesRef.current.find(shape=>shape.id===pdf.id)?.pdfReference;if(reference)materialLibrary.openReader(reference)}
+      else if(pdf.transform.group.length===1){const reference=shapesRef.current.find(shape=>shape.id===pdf.id)?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:pdf.id};materialLibrary.openReader(reference)}}
       return
     }
     if(cartesianDragRef.current&&e.pointerId===pointerRef.current){moveCartesianResize(toWorld(e.clientX,e.clientY));finishCartesianResize();return}
@@ -3466,62 +3479,94 @@ function App() {
     if(!pages.length)return
     const requestId=++printRequestRef.current
     setOpenMenu(null);setVisualEditor(null);setPrintPreview({busy:true,error:'',images:[]})
+    try {
+      const images=await renderBoardRegions(pages)
+      if(requestId===printRequestRef.current)setPrintPreview({busy:false,error:'',images})
+    }catch(error){if(requestId===printRequestRef.current)setPrintPreview({busy:false,error:String(error instanceof Error?error.message:error),images:[]})}
+  }
+
+  async function renderBoardRegions(pages:(Bounds&{rotation?:number})[],outputWidth=1240,includePages=false) {
     // Freeze the printable content while media loads; camera and selection never enter it.
     const data=snapshot(),renderers:{z:number;paint:(ctx:CanvasRenderingContext2D)=>void}[]=[]
+    const captureZoom=cameraRef.current.zoom,captureTheme=themeRef.current
+    const background=includePages&&canvasRef.current?.parentElement?getComputedStyle(canvasRef.current.parentElement).backgroundColor:'#fff'
     const intersects=(bounds:Bounds)=>pages.some(page=>rectsIntersect(rotatedRect(page,page.rotation),bounds))
     const transform=(ctx:CanvasRenderingContext2D,bounds:Bounds,rotation=0)=>{
       const cx=bounds.x+bounds.width/2,cy=bounds.y+bounds.height/2
       ctx.translate(cx,cy);ctx.rotate(rotation);ctx.translate(-cx,-cy)
     }
     const image=async(src:string)=>{const result=new Image();result.src=src;await result.decode();return result}
-    try {
-      await document.fonts.ready
-      for(const item of data.media.filter(item=>intersects(rotatedRect(item,item.rotation)))) {
-        const blob=await loadAsset(item.assetId)
-        if(!blob)throw new Error(`No se pudo cargar ${item.name} para imprimir.`)
-        const url=URL.createObjectURL(blob);let bitmap:HTMLImageElement
-        try{bitmap=await image(url)}finally{URL.revokeObjectURL(url)}
-        renderers.push({z:(item as GroupedItem).zIndex??-300000,paint:ctx=>{ctx.save();transform(ctx,item,item.rotation);ctx.drawImage(bitmap,item.x,item.y,item.width,item.height);ctx.restore()}})
-      }
-      for(const item of data.shapes.filter(item=>item.visualType!=='page'&&intersects(rotatedRect(visualBounds(item,ref=>resolveObject(ref,data)),item.rotation))))
-        renderers.push({z:item.zIndex??(item.visualType==='page'?-400000:-200000),paint:ctx=>drawShape(ctx,item,ref=>resolveObject(ref,data))})
-      for(const item of data.strokes)renderers.push({z:(item as GroupedItem).zIndex??-100000,paint:ctx=>drawStroke(ctx,item)})
-      for(const item of data.texts)renderers.push({z:(item as GroupedItem).zIndex??0,paint:ctx=>drawText(ctx,item)})
-      for(const item of data.tables.filter(item=>intersects(rotatedRect(tableSize(item),item.rotation)))) {
-        const box=tableSize(item),chrome=tableChrome(item),evaluate=createFormulaEvaluator(item.cells)
-        renderers.push({z:(item as GroupedItem).zIndex??100000,paint:ctx=>{
-          ctx.save();transform(ctx,box,item.rotation);ctx.fillStyle='#fff';ctx.fillRect(box.x,box.y,box.width,box.height)
-          ctx.font=`${tableFontSize(item)}px system-ui`;ctx.textBaseline='middle';ctx.fillStyle='#1f2937';ctx.fillText(item.name,box.x+8,box.y+chrome.title/2)
-          const cols=Math.max(1,...item.cells.map(r=>r.length))
-          for(let r=-1;r<item.cells.length;r++)for(let c=-1;c<cols;c++) {
-            const x=box.x+(c<0?0:chrome.rowHeader+c*item.cellWidth),y=box.y+chrome.title+(r<0?0:chrome.colHeader+r*item.cellHeight)
-            const w=c<0?chrome.rowHeader:item.cellWidth,h=r<0?chrome.colHeader:item.cellHeight,cell=r>=0&&c>=0?item.cells[r]?.[c]:undefined
-            ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();ctx.fillStyle=cell?.backgroundColor??(r<0||c<0?'#eef2f7':'#fff');ctx.fillRect(x,y,w,h);ctx.strokeStyle='#cbd5e1';ctx.lineWidth=1;ctx.strokeRect(x,y,w,h)
-            ctx.fillStyle=cell?.textColor??'#1f2937';ctx.fillText(r<0?(c<0?'':labelColumn(c)):c<0?String(r+1):String(evaluate(r,c)),x+5,y+h/2);ctx.restore()
-          }ctx.restore()
-        }})
-      }
-      if(data.graphs.some(item=>intersects(rotatedRect(item,item.rotation)))) {
-        const {graphPrintImage}=await import('./canvas/printGraph')
-        for(const item of data.graphs.filter(item=>intersects(rotatedRect(item,item.rotation)))) {
-          const bitmap=await image(await graphPrintImage(item))
-          renderers.push({z:(item as GroupedItem).zIndex??200000,paint:ctx=>{ctx.save();transform(ctx,item,item.rotation);ctx.drawImage(bitmap,item.x,item.y,item.width,item.height);ctx.restore()}})
-        }
-      }
-      for(const item of data.videos.filter(item=>intersects(item)))renderers.push({z:item.zIndex??-150000,paint:ctx=>{
-        ctx.fillStyle='#111';ctx.fillRect(item.x,item.y,item.width,item.height);ctx.fillStyle='#fff';ctx.font='16px system-ui';ctx.fillText(`YouTube · https://youtu.be/${item.videoId}`,item.x+12,item.y+item.height/2,item.width-24)
+    if(includePages&&data.videos.some(item=>intersects(item)))throw new Error('La vista contiene un video externo que no se puede capturar. Movelo fuera del encuadre antes de abrir API chat.')
+    await document.fonts.ready
+    for(const item of data.media.filter(item=>intersects(rotatedRect(item,item.rotation)))) {
+      const blob=await loadAsset(item.assetId)
+      if(!blob)throw new Error(`No se pudo cargar ${item.name} para preparar la imagen.`)
+      const url=URL.createObjectURL(blob);let bitmap:HTMLImageElement
+      try{bitmap=await image(url)}finally{URL.revokeObjectURL(url)}
+      renderers.push({z:(item as GroupedItem).zIndex??-300000,paint:ctx=>{ctx.save();transform(ctx,item,item.rotation);ctx.drawImage(bitmap,item.x,item.y,item.width,item.height);ctx.restore()}})
+    }
+    for(const item of data.shapes.filter(item=>(includePages||item.visualType!=='page')&&intersects(rotatedRect(visualBounds(item,ref=>resolveObject(ref,data)),item.rotation))))
+      renderers.push({z:item.zIndex??(item.visualType==='page'?-400000:-200000),paint:ctx=>drawShape(ctx,item,ref=>resolveObject(ref,data))})
+    for(const item of data.strokes)renderers.push({z:(item as GroupedItem).zIndex??-100000,paint:ctx=>drawStroke(ctx,item)})
+    for(const item of data.texts)renderers.push({z:(item as GroupedItem).zIndex??0,paint:ctx=>drawText(ctx,item)})
+    for(const item of data.tables.filter(item=>intersects(rotatedRect(tableSize(item),item.rotation)))) {
+      const box=tableSize(item),chrome=tableChrome(item),evaluate=createFormulaEvaluator(item.cells)
+      renderers.push({z:(item as GroupedItem).zIndex??100000,paint:ctx=>{
+        ctx.save();transform(ctx,box,item.rotation);ctx.fillStyle='#fff';ctx.fillRect(box.x,box.y,box.width,box.height)
+        ctx.font=`${tableFontSize(item)}px system-ui`;ctx.textBaseline='middle';ctx.fillStyle='#1f2937';ctx.fillText(item.name,box.x+8,box.y+chrome.title/2)
+        const cols=Math.max(1,...item.cells.map(r=>r.length))
+        for(let r=-1;r<item.cells.length;r++)for(let c=-1;c<cols;c++) {
+          const x=box.x+(c<0?0:chrome.rowHeader+c*item.cellWidth),y=box.y+chrome.title+(r<0?0:chrome.colHeader+r*item.cellHeight)
+          const w=c<0?chrome.rowHeader:item.cellWidth,h=r<0?chrome.colHeader:item.cellHeight,cell=r>=0&&c>=0?item.cells[r]?.[c]:undefined
+          ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();ctx.fillStyle=cell?.backgroundColor??(r<0||c<0?'#eef2f7':'#fff');ctx.fillRect(x,y,w,h);ctx.strokeStyle='#cbd5e1';ctx.lineWidth=1;ctx.strokeRect(x,y,w,h)
+          ctx.fillStyle=cell?.textColor??'#1f2937';ctx.fillText(r<0?(c<0?'':labelColumn(c)):c<0?String(r+1):String(evaluate(r,c)),x+5,y+h/2);ctx.restore()
+        }ctx.restore()
       }})
-      renderers.sort((a,b)=>a.z-b.z)
-      const images=pages.map(page=>{
-        const canvas=document.createElement('canvas');canvas.width=1240;canvas.height=Math.round(1240*297/210)
-        const ctx=canvas.getContext('2d')!;ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height)
-        ctx.scale(canvas.width/page.width,canvas.height/page.height);ctx.translate(-page.x,-page.y)
-        const center={x:page.x+page.width/2,y:page.y+page.height/2};ctx.translate(center.x,center.y);ctx.rotate(-(page.rotation??0));ctx.translate(-center.x,-center.y)
-        for(const renderer of renderers)renderer.paint(ctx)
-        return canvas.toDataURL('image/png')
-      })
-      if(requestId===printRequestRef.current)setPrintPreview({busy:false,error:'',images})
-    }catch(error){if(requestId===printRequestRef.current)setPrintPreview({busy:false,error:String(error instanceof Error?error.message:error),images:[]})}
+    }
+    if(data.graphs.some(item=>intersects(rotatedRect(item,item.rotation)))) {
+      const {graphPrintImage}=await import('./canvas/printGraph')
+      for(const item of data.graphs.filter(item=>intersects(rotatedRect(item,item.rotation)))) {
+        const bitmap=await image(await graphPrintImage(item))
+        renderers.push({z:(item as GroupedItem).zIndex??200000,paint:ctx=>{ctx.save();transform(ctx,item,item.rotation);ctx.drawImage(bitmap,item.x,item.y,item.width,item.height);ctx.restore()}})
+      }
+    }
+    for(const item of data.videos.filter(item=>intersects(item)))renderers.push({z:item.zIndex??-150000,paint:ctx=>{
+      ctx.fillStyle='#111';ctx.fillRect(item.x,item.y,item.width,item.height);ctx.fillStyle='#fff';ctx.font='16px system-ui';ctx.fillText(`YouTube · https://youtu.be/${item.videoId}`,item.x+12,item.y+item.height/2,item.width-24)
+    }})
+    renderers.sort((a,b)=>a.z-b.z)
+    const images=pages.map(page=>{
+      const canvas=document.createElement('canvas');canvas.width=outputWidth;canvas.height=Math.max(1,Math.round(outputWidth*page.height/page.width))
+      if(includePages)canvas.className='board-content-canvas'
+      const ctx=canvas.getContext('2d')!;ctx.fillStyle=background;ctx.fillRect(0,0,canvas.width,canvas.height)
+      ctx.scale(canvas.width/page.width,canvas.height/page.height);ctx.translate(-page.x,-page.y)
+      if(includePages){
+        let step=24;while(step*captureZoom<12)step*=2
+        ctx.fillStyle=captureTheme==='dark'?'rgba(210,220,240,0.28)':captureTheme==='rest'?'rgba(112,91,61,0.30)':'rgba(118,128,145,0.40)'
+        ctx.beginPath()
+        for(let x=Math.ceil(page.x/step)*step;x<page.x+page.width;x+=step)for(let y=Math.ceil(page.y/step)*step;y<page.y+page.height;y+=step){ctx.moveTo(x+1/captureZoom,y);ctx.arc(x,y,1/captureZoom,0,Math.PI*2)}
+        ctx.fill()
+      }
+      const center={x:page.x+page.width/2,y:page.y+page.height/2};ctx.translate(center.x,center.y);ctx.rotate(-(page.rotation??0));ctx.translate(-center.x,-center.y)
+      for(const renderer of renderers)renderer.paint(ctx)
+      return canvas.toDataURL('image/png')
+    })
+    return images
+  }
+
+  async function startApiChat() {
+    if(apiCaptureRef.current)return
+    apiCaptureRef.current=true
+    const boardId=getActiveBoardId()
+    try {
+      finishPendingPen();if(editingRef.current)commitText()
+      const rect=canvasRef.current!.getBoundingClientRect()
+      const view=visibleWorldRect({...cameraRef.current},rect.width,rect.height,0)
+      setOpenMenu(null)
+      const [image]=await renderBoardRegions([view],Math.min(1600,Math.round(rect.width)),true)
+      if(image.length>4_000_000)throw new Error('La captura es demasiado grande. Reducí el contenido visible y reintentá.')
+      if(boardId===getActiveBoardId())setApiChat({boardId,image})
+    }catch(error){setSelectionError(error instanceof Error?error.message:'No se pudo capturar la pizarra.')}
+    finally{apiCaptureRef.current=false}
   }
 
   function applyVisualEdit(base:ShapeItem,next:ShapeItem) {
@@ -4677,9 +4722,18 @@ function App() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if(e.defaultPrevented)return
-      if (nativeBoardMode() && !((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f")) return
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return
+      if(e.isComposing||apiChat)return
+      if(e.key==='<'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat&&!editingRef.current&&!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&!treePanel) {
+        if(materialLibrary.reader){e.preventDefault();materialLibrary.closeReader();return}
+        const pinned=shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference)
+        const last=lastPinnedPdfRef.current
+        const item=pinned.find(item=>last?.boardId===getActiveBoardId()&&item.id===last.id)??pinned[0]
+        if(item?.pdfReference){e.preventDefault();lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:item.id};materialLibrary.openReader(item.pdfReference)}
+        return
+      }
+      if (nativeBoardMode() && !((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) return
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&!libraryOpen){e.preventDefault();setBoardSearchOpen(true);return}
       if(e.key==='Escape' && !e.repeat) {
         if(editingRef.current || imageCrop || studyAssistant || importStatus || recognizing)return
@@ -4727,7 +4781,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [imageCrop, studyAssistant, libraryOpen, treePanel, selectionError, handwrittenEvent, handwrittenError, openMenu, importStatus, recognizing, boardSearchOpen, contextMenu, materialLibrary.reader, materialLibrary.splitOpen])
+  }, [apiChat, imageCrop, studyAssistant, libraryOpen, treePanel, selectionError, handwrittenEvent, handwrittenError, openMenu, importStatus, recognizing, boardSearchOpen, contextMenu, materialLibrary.reader, materialLibrary.splitOpen])
 
   const cam = cameraRef.current
   const editorX = editing ? editing.x * cam.zoom + cam.x : 0
@@ -5121,16 +5175,17 @@ function App() {
           )}
         </div>}
       </div>
-      <RightMathDock getSelection={getMathSelectionForDock} addGraphToBoard={(formulas,settings)=>insertBoardGraph(formulas,undefined,settings)}
-        pinnedPdfs={shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).map(item=>({id:item.id,name:item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')}))}
-        onOpenPdf={id=>{const reference=shapesRef.current.find(item=>item.id===id)?.pdfReference;if(reference)materialLibrary.openReader(reference)}}
-        onRevealPdf={revealPdfShortcut}
-        pdfPinControl={!visualEditor&&!openMenu&&!treePanel&&selectedPdfShortcut()&&(()=>{
-        const item=selectedPdfShortcut()!,name=item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')
-        return <button type="button" className="pdf-pin-control" aria-pressed={!!item.pdfPinned}
+      {!visualEditor&&!openMenu&&!treePanel&&selectedPdfShortcut()&&(()=>{
+        const item=selectedPdfShortcut()!,bounds=rotatedRect(item,item.rotation),name=item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')
+        const width=canvasRef.current?.clientWidth??innerWidth,height=canvasRef.current?.clientHeight??innerHeight
+        return <button type="button" ref={pdfPinRef} className="pdf-pin-control" style={{left:Math.max(4,Math.min((bounds.x+bounds.width)*cam.zoom+cam.x+12,width-48)),visibility:rectsIntersect(visibleWorldRect(cam,width,height,0),bounds)?'visible':'hidden',top:Math.max(4,Math.min(bounds.y*cam.zoom+cam.y,height-48))}} onPointerDown={e=>e.stopPropagation()} aria-pressed={!!item.pdfPinned}
           aria-label={`${item.pdfPinned?'Desfijar':'Fijar'} PDF ${name}`} title={item.pdfPinned?'Desfijar de la barra lateral':'Fijar en la barra lateral'}
           onClick={togglePdfPin}><PdfPinIcon/></button>
       })()}
+      <RightMathDock getSelection={getMathSelectionForDock} addGraphToBoard={(formulas,settings)=>insertBoardGraph(formulas,undefined,settings)}
+        pinnedPdfs={[...new Map(shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).map(item=>[item.id,{id:item.id,name:item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')}])).values()]}
+        onOpenPdf={id=>{const reference=shapesRef.current.find(item=>item.id===id)?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id};materialLibrary.openReader(reference)}}}
+        onRevealPdf={revealPdfShortcut}
         getSelectedMatrix={()=>{
           const selected=groupRef.current
           if(selected.length!==1||selected[0].kind!=='shape')return null
@@ -5200,6 +5255,7 @@ function App() {
           {openMenu === 'ai' && <div className="toolbar-popover ai-popover" role="menu" aria-label="Reconocimiento con IA">
             <button className="assistant-menu-entry" role="menuitem" onClick={()=>{setOpenMenu(null);setStudyAssistant({boardId:getActiveBoardId()})}}><span>Consultar con ChatGPT</span><small>Abrí ChatGPT en este dispositivo y llevá tu ejercicio, sin depender de la PC.</small></button>
             <button className="assistant-menu-entry" role="menuitem" aria-label="Transcribir manuscrito con ChatGPT" onClick={()=>void transcribeSelection()}><span>Transcribir manuscrito con ChatGPT</span><small>Prepará la selección para convertirla en texto editable.</small></button>
+            <button className="assistant-menu-entry" role="menuitem" onClick={()=>void startApiChat()}><span>API chat</span><small>Consultá a GPT-5 mini con la vista actual de la pizarra.</small></button>
           </div>}
         </div>
         <span className="separator" />
@@ -5309,7 +5365,8 @@ function App() {
           {!handwrittenEvent && <button onClick={() => setHandwrittenError('')}>Cerrar</button>}
         </div>
       </div>}
-      {liveBoardId&&<StudyCheckIn boardId={liveBoardId} hidden={Boolean(imageCrop||studyAssistant||libraryOpen||historyTarget)} onHelp={question=>setStudyAssistant({boardId:getActiveBoardId(),question})}/>}
+      {liveBoardId&&<StudyCheckIn boardId={liveBoardId} hidden={Boolean(imageCrop||studyAssistant||apiChat||libraryOpen||historyTarget)} onHelp={question=>setStudyAssistant({boardId:getActiveBoardId(),question})}/>}
+      {apiChat&&apiChat.boardId===getActiveBoardId()&&<BoardApiChat key={apiChat.boardId} image={apiChat.image} onClose={()=>{setApiChat(null);requestAnimationFrame(()=>canvasRef.current?.focus())}}/>}
       {studyAssistant&&<ChatGPTConsultation key={studyAssistant.boardId+(studyAssistant.transcription?':transcription':'')} boardId={studyAssistant.boardId} initialImage={studyAssistant.file} initialQuestion={studyAssistant.question} transcription={studyAssistant.transcription}
         beforeOpen={flushBoardForHistory}
         onInsertImage={async file=>{if(studyAssistant.boardId!==getActiveBoardId())throw new Error('Cambiaste de pizarra.');await importFiles([file]);await flushBoardForHistory()}}
@@ -5371,9 +5428,9 @@ function App() {
         return item?.code?<CodeWorkspace key={item.id} item={item} onApply={applyVisualEdit} onClose={()=>setVisualEditor(null)}/>:item&&item.symbol!=='cartesian'?<VisualObjectInspector key={item.id} item={materializeConnector(item,resolveObject)} onApply={applyVisualEdit} onClose={()=>setVisualEditor(null)}/>:null
       })()}
       <div className="zoom-controls">
-        <button onClick={() => changeZoom(2 / 3, window.innerWidth / 2, window.innerHeight / 2)}>−</button>
+        <button aria-label="Alejar" onClick={() => changeZoom(2 / 3, window.innerWidth / 2, window.innerHeight / 2)}>−</button>
         <span>{zoomLabel}%</span>
-        <button onClick={() => changeZoom(1.5, window.innerWidth / 2, window.innerHeight / 2)}>+</button>
+        <button aria-label="Acercar" onClick={() => changeZoom(1.5, window.innerWidth / 2, window.innerHeight / 2)}>+</button>
       </div>
       {editing && (
         <textarea

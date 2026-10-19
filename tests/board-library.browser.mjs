@@ -161,3 +161,95 @@ test('topic arrow keeps the board open on a save failure and closes after a succ
   await page.getByRole('button',{name:'Volver a Temas',exact:true}).click()
   await expect(page.locator('iframe[title^="Pizarra de"]')).toHaveCount(0)
 })
+
+test('pin follows the PDF, < toggles the retained reader, API chat captures visible board layers',{timeout:150000},async t=>{
+  const {page,context,errors}=await setup(t)
+  // Isolate board behavior from subject-catalog migrations, while keeping real PDF.js.
+  await context.route('**/board-test.pdf',route=>route.fulfill({contentType:'application/pdf',body:Buffer.from(pdfBytes())}))
+  await context.route(url=>url.pathname==='/biblioteca/pizarra'&&url.searchParams.get('mode')==='reader',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><style>html,body,iframe{margin:0;width:100%;height:100%;border:0}</style><script>
+    const params=new URLSearchParams(location.search),session=params.get('session'),boardId=params.get('boardId');let frame;
+    const send=type=>parent.postMessage({type,session,boardId},location.origin);
+    addEventListener('message',e=>{
+      if(e.origin!==location.origin)return;
+      if(e.source===parent&&e.data.session===session&&e.data.boardId===boardId){
+        if(e.data.type==='board-library:init'&&!frame){frame=document.createElement('iframe');frame.title='Visor PDF: fixture';frame.src='/pdfjs/web/viewer.html?file=%2Fboard-test.pdf&viewerMode=inline&boardReader=1';document.body.append(frame)}
+        if(e.data.type==='board-library:escape-reader')frame?.contentWindow.postMessage({type:'requestViewerEscape'},location.origin);
+      }
+      if(e.source===frame?.contentWindow){
+        if(e.data.type==='viewerPageRendered')send('board-library:reader-rendered');
+        if(e.data.type==='viewerRequestClose')send('board-library:reader-closed');
+      }
+    });addEventListener('DOMContentLoaded',()=>send('board-library:ready'));
+  </script>`}))
+  await page.evaluate(async()=>{
+    const root=await (await navigator.storage.getDirectory()).getDirectoryHandle('board-library-test')
+    const dir=await (await root.getDirectoryHandle('progreso',{create:true})).getDirectoryHandle('pizarras',{create:true})
+    const tile=document.createElement('canvas');tile.width=100;tile.height=100
+    const ctx=tile.getContext('2d');ctx.fillStyle='#ff0000';ctx.fillRect(0,0,100,100)
+    const reference={materialId:101,subjectId:'custom-calculo3',fileName:'Guía de integrales.PDF',workspaceFileId:'workspace://teoria/calculo3/guia.pdf'}
+    const scene={version:1,boardId:'test-integrales',name:'Integrales',assets:{red:tile.toDataURL()},content:{
+      camera:{x:0,y:0,zoom:1},strokes:[],texts:[{id:'text',x:100,y:150,text:'Prueba de captura',fontSize:24,color:'#000000'}],
+      shapes:[{id:'pdf',kind:'rounded',visualType:'pdf-shortcut',pdfReference:reference,label:'Guía de integrales',x:100,y:250,width:280,height:54,color:'#2563eb',strokeWidth:1.5}],
+      media:[{id:'image',assetId:'red',x:60,y:450,width:100,height:100,name:'Imagen roja',kind:'image'},
+        {id:'fragment',assetId:'red',x:190,y:450,width:100,height:100,name:'Fragmento PDF',kind:'pdf-page',pageNumber:1}],
+      tables:[{id:'table',name:'Tabla',x:500,y:180,cells:[[{value:'42'}]],cellWidth:90,cellHeight:32}],
+      graphs:[{id:'graph',x:850,y:200,width:350,height:250,formulas:[{id:'f',expr:'x^2',color:'#16a34a',enabled:true}]}],
+    }}
+    const writer=await (await dir.getFileHandle('test-integrales.json',{create:true})).createWritable();await writer.write(JSON.stringify(scene));await writer.close()
+  })
+  const board=await openTopic(page),canvas=board.locator('.app > canvas').first()
+  await canvas.press('Escape')
+  await canvas.focus();assert.equal(await canvas.evaluate(el=>getComputedStyle(el).outlineStyle),'none')
+  // Dragging selects the link without opening it.
+  const box=await canvas.boundingBox()
+  await page.mouse.move(box.x+180,box.y+275);await page.mouse.down();await page.mouse.move(box.x+190,box.y+280,{steps:4});await page.mouse.up()
+  const pin=board.getByRole('button',{name:'Fijar PDF Guía de integrales',exact:true})
+  await expect(pin).toBeVisible();assert.equal(await board.locator('.math-dock .pdf-pin-control').count(),0)
+  const before=await pin.boundingBox()
+  await board.locator('.zoom-controls').getByRole('button',{name:'Acercar',exact:true}).click()
+  await expect.poll(async()=>{const after=await pin.boundingBox();return Math.hypot(after.x-before.x,after.y-before.y)}).toBeGreaterThan(1).catch(async error=>{await mkdir('test-results',{recursive:true});await page.screenshot({path:'test-results/board-pin-failure.png'});throw error})
+  // Restore the viewport so capture pixels have deterministic world coordinates.
+  await board.locator('.zoom-controls').getByRole('button',{name:'Alejar',exact:true}).click()
+  await pin.click()
+  await expect(board.getByRole('button',{name:'Abrir PDF fijado Guía de integrales',exact:true})).toHaveCount(1)
+  await canvas.press('<')
+  const pdf=board.frameLocator('iframe[title="Lector de PDF de la pizarra"]').frameLocator('iframe[title^="Visor PDF:"]')
+  await pdf.locator('.page[data-page-number="1"] canvas').waitFor({timeout:45000}).catch(async error=>{for(const frame of page.frames())console.error(frame.url(),(await frame.locator('body').innerText().catch(()=>'' )).slice(-1500));console.error(errors);throw error})
+  await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
+  await pdf.locator('body').press('<')
+  await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
+  await canvas.press('<');await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
+  await pdf.locator('body').press('<');await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
+  await canvas.press('t');await canvas.click({position:{x:150,y:160}})
+  const textEditor=board.locator('textarea.text-editor')
+  await expect(textEditor).toBeVisible();await textEditor.press('<')
+  assert.ok((await textEditor.inputValue()).includes('<'))
+  await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
+  await textEditor.press('Escape')
+  const calls=[]
+  await context.route('**/api/board-chat',async route=>{calls.push(route.request().postDataJSON());await route.fulfill({json:{answer:'Respuesta \\(x^2\\)'}})})
+  await board.getByRole('button',{name:'IA: opciones de reconocimiento',exact:true}).click()
+  await board.getByRole('menuitem').filter({hasText:'API chat'}).click()
+  const prompt=board.getByRole('textbox',{name:'Pregunta para GPT-5 mini'})
+  await expect(prompt).toBeFocused({timeout:30000})
+  await prompt.fill('Explicá < esto');await prompt.press('Enter')
+  await expect(board.locator('.board-api-chat-answer .katex')).toHaveCount(1)
+  assert.equal(calls.length,1)
+  const capture=await canvas.evaluate(async(el,image)=>{
+    const bitmap=new Image();bitmap.src=image;await bitmap.decode()
+    const out=document.createElement('canvas');out.width=bitmap.width;out.height=bitmap.height;const ctx=out.getContext('2d');ctx.drawImage(bitmap,0,0)
+    const pixels=(x,y)=>[...ctx.getImageData(Math.round(x*bitmap.width/el.clientWidth),Math.round(y*bitmap.height/el.clientHeight),1,1).data]
+    const ink=(x,y,w,h)=>{
+      const data=ctx.getImageData(Math.round(x*bitmap.width/el.clientWidth),Math.round(y*bitmap.height/el.clientHeight),Math.round(w*bitmap.width/el.clientWidth),Math.round(h*bitmap.height/el.clientHeight)).data
+      let count=0;for(let i=0;i<data.length;i+=4)if(Math.min(data[i],data[i+1],data[i+2])<200)count++
+      return count
+    }
+    return {width:bitmap.width,height:bitmap.height,image:pixels(100,500),fragment:pixels(230,500),toolbar:pixels(700,30),tableInk:ink(500,180,150,110),graphInk:ink(850,200,350,250)}
+  },calls[0].image)
+  assert.deepEqual(capture.image,[255,0,0,255]);assert.deepEqual(capture.fragment,[255,0,0,255])
+  assert.deepEqual(capture.toolbar,[255,255,255,255])
+  assert.ok(capture.tableInk>20);assert.ok(capture.graphInk>100)
+  await prompt.press('Escape');await expect(board.getByRole('dialog',{name:'API chat',exact:true})).toHaveCount(0)
+  await expect(canvas).toBeFocused()
+  assert.deepEqual(errors,[])
+})

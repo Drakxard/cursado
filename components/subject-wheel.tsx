@@ -1,8 +1,9 @@
 "use client"
 
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
+import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
 import { CooperationPanel, useCooperation } from '@/components/cooperation'
-import { COOPERATIVE_TAB_ID, cooperationGroupTab, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
+import { COOPERATIVE_TAB_ID, cooperationGroupTab, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
 import type { SphereBinding } from '@/lib/client/cooperation-files'
 import type { BoardPdfReference } from "@/lib/board-library-contract"
 
@@ -1272,7 +1273,7 @@ export function SubjectWheel({
   boardLibrary?: boolean
 }) {
   const router = useRouter()
-  const [containerBoard, setContainerBoard] = useState<{ boardId: string; name: string; pdfReferences: BoardPdfReference[]; cooperationSubjectId?: string } | null>(null)
+  const [containerBoard, setContainerBoard] = useState<{ boardId: string; name: string; pdfReferences: BoardPdfReference[]; cooperationWeekNumber?: number; cooperationSubjectId?: string } | null>(null)
   const closeContainerBoard = useCallback(() => setContainerBoard(null), [])
   const localWorkspace = useLocalWorkspace()
   const localWorkspaceReady =
@@ -1348,7 +1349,7 @@ export function SubjectWheel({
   const visibleSubjectIds = useMemo(() => visibleSubjects.map((subject) => subject.id), [visibleSubjects])
   const cooperative = useCooperation()
   useEffect(() => {
-    const bindings = Object.values(cooperative.mirrors).filter(m => !m.downloading && !cooperative.deletions.some(d => d.sphereId === m.binding.id && d.key === 'sphere.json' && d.decision === 'delete')).map(m => m.binding)
+    const bindings = Object.values(cooperative.mirrors).filter(m => (!m.downloading || m.metadataReady) && !cooperative.deletions.some(d => d.sphereId === m.binding.id && d.key === 'sphere.json' && d.decision === 'delete')).map(m => m.binding)
     if (!bindings.length) return
     setCustomSubjects(previous => {
       const next = { ...previous }
@@ -1921,7 +1922,7 @@ export function SubjectWheel({
     try {
       for (const id of getDeleteTargetSubjectIds(deleteConfirmationTarget)) {
         const subject = customSubjects[id] || SUBJECTS.find(s => s.id === id)
-        if (subject) await shareCooperationSphere(groupId, subject)
+        if (subject) await shareCooperationSphere(groupId, subject, { background: true })
       }
       if (move) {
         const ids = new Set(getDeleteTargetSubjectIds(deleteConfirmationTarget)), destination = cooperationGroupTab(groupId)
@@ -1942,6 +1943,11 @@ export function SubjectWheel({
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isNextWeekDialogOpen, setIsNextWeekDialogOpen] = useState(false)
   const [currentSubject, setCurrentSubject] = useState<Subject | null>(null)
+  const selectionMirror = Object.values(cooperative.mirrors).find(m => m.binding.subjectId === currentSubject?.id && m.selection?.choosing)
+  const openedSelectionRef = useRef<string | null>(null)
+  const [isFinishingSelection, setIsFinishingSelection] = useState(false)
+  const [selectionError, setSelectionError] = useState('')
+  const [selectionWeekNumber, setSelectionWeekNumber] = useState<number | null>(null)
   const [subjectDialogEntryMode, setSubjectDialogEntryMode] = useState<SubjectDialogEntryMode>("default")
   const [currentDateKey, setCurrentDateKey] = useState(getTodayDateString())
   const [showAllSubjectsForDay, setShowAllSubjectsForDay] = useState(false)
@@ -2261,7 +2267,7 @@ export function SubjectWheel({
     [synthesisSelectedState, synthesisSelectedSubject, synthesisWeekNumber]
   )
   const dialogSelectedDate = useMemo(() => parseDateKey(dialogDateKey), [dialogDateKey])
-  const dialogSelectedWeekNumber = useMemo(() => getWeekNumberForDate(dialogSelectedDate), [dialogSelectedDate])
+  const dialogSelectedWeekNumber = useMemo(() => selectionMirror && selectionWeekNumber !== null ? selectionWeekNumber : getWeekNumberForDate(dialogSelectedDate), [dialogSelectedDate, selectionMirror, selectionWeekNumber])
   const dialogWeekDates = useMemo(() => getWeekDates(dialogSelectedWeekNumber), [dialogSelectedWeekNumber])
   const currentCalendarWeekRef = useRef(currentCalendarWeek)
   const previousCalendarWeekRef = useRef(currentCalendarWeek)
@@ -3390,6 +3396,40 @@ export function SubjectWheel({
     setIsDialogOpen(true)
   }
 
+  useEffect(() => {
+    const mirror = Object.values(cooperative.mirrors).find(m => m.selection?.choosing && m.metadataReady)
+    if (!mirror) { openedSelectionRef.current = null; return }
+    const subject = customSubjects[mirror.binding.subjectId]
+    if (!subject || openedSelectionRef.current === mirror.binding.id) return
+    openedSelectionRef.current = mirror.binding.id
+    setIsVoiceModeEnabled(false)
+    selectWorkspaceTab(cooperationGroupTab(mirror.binding.groupId))
+    void (async () => {
+      await loadCurrentSubjectWeekState(subject.id)
+      setCurrentSubject(subject)
+      const firstWeek = mirror.selection!.weeks[0]
+      setSelectionWeekNumber(firstWeek ?? null)
+      const firstDay = firstWeek === undefined ? undefined : getWeekDates(firstWeek)[0]
+      if (firstDay) setDialogDateKey(formatDateKey(firstDay))
+      resetSubjectUiState(); setSubjectDialogEntryMode('default'); setPracticeSectionView('exercises'); setExerciseWeeklyScopeEnabled(true); setIsDialogOpen(true)
+    })().catch(error => { openedSelectionRef.current = null; setWorkspaceNoticeMessage((error as Error).message) })
+  }, [cooperative, customSubjects])
+
+  useEffect(() => {
+    const weeks = selectionMirror?.selection?.weeks || []
+    if (!weeks.length || selectionWeekNumber !== null && weeks.includes(selectionWeekNumber)) return
+    const week = weeks[0], day = getWeekDates(week)[0]
+    setSelectionWeekNumber(week)
+    if (day) setDialogDateKey(formatDateKey(day))
+  }, [selectionMirror, selectionWeekNumber])
+
+  const navigateCooperationWeek = (direction: -1 | 1) => {
+    const weeks = selectionMirror?.selection?.weeks || []
+    const week = direction < 0 ? [...weeks].reverse().find(w => w < dialogSelectedWeekNumber) : weeks.find(w => w > dialogSelectedWeekNumber)
+    const day = week === undefined ? undefined : getWeekDates(week)[0]
+    if (day) { setSelectionWeekNumber(week!); setSubjectViewDateOverride(null); setDialogDateKey(formatDateKey(day)); setSelectedPracticeMaterialId(null) }
+  }
+
   const openSubjectDay = async (subjectId: string, dateKey: string) => {
     await flushPendingFeaturedUpdate()
     const subject = getSubjectById(subjectId, visibleSubjects)
@@ -3753,6 +3793,13 @@ export function SubjectWheel({
       const isEditable = Boolean(target?.isContentEditable)
       if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT" || isEditable) return
 
+      if (selectionMirror) {
+        if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault(); navigateCooperationWeek(event.key === 'ArrowLeft' ? -1 : 1)
+        }
+        return
+      }
       const shouldMoveByWeek = practiceSectionView === "exercises" && !subjectViewDateOverride
       if (event.key === "ArrowLeft") {
         if (event.repeat) return
@@ -6992,7 +7039,7 @@ export function SubjectWheel({
                     container?.isPinned ? "pinned" : isWeeklyExercisesScope ? dialogSelectedWeekNumber : subjectDialogDateKey])
                   void crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)).then(hash => {
                     const boardId = localCooperationBoardId(currentSubject.id, "study-" + Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join(""))
-                    void guardCooperationElement(currentSubject.id, undefined, () => setContainerBoard({ boardId, cooperationSubjectId: currentSubject.id, name: `${currentSubject.name} - ${title}`, pdfReferences: materialsForMode
+                    void guardCooperationElement(currentSubject.id, undefined, () => setContainerBoard({ boardId, cooperationWeekNumber: container?.isPinned ? undefined : dialogSelectedWeekNumber, cooperationSubjectId: currentSubject.id, name: `${currentSubject.name} - ${title}`, pdfReferences: materialsForMode
                       .filter(material => !("is_pending_upload" in material) && /\.pdf$/i.test(material.file_name))
                       .map(material => ({ materialId: material.id, subjectId: material.subject_id, fileName: material.file_name,
                         workspaceFileId: material.drive_file_id?.startsWith("workspace://") ? material.drive_file_id : null })) }), `progreso/pizarras/${boardId}.json`)
@@ -7102,7 +7149,9 @@ export function SubjectWheel({
                 ) : (
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      {material.local_file_status === "missing" ? (
+                      {selectionMirror ? (
+                        <span className="block min-w-0 truncate text-sm text-foreground">{material.file_name}</span>
+                      ) : material.local_file_status === "missing" ? (
                         <div>
                           <span className="block min-w-0 truncate text-sm text-red-700">{material.file_name}</span>
                           <span className="text-xs text-red-600">El manifiesto existe, pero falta el archivo. No se elimino la referencia.</span>
@@ -8443,19 +8492,28 @@ export function SubjectWheel({
 
       <Dialog open={isDialogOpen && !containerBoard} onOpenChange={(open) => (!open ? void closeSubjectDialogOrReturn() : undefined)}>
         <DialogContent className="h-[100dvh] w-screen max-w-none border-0 bg-card p-0 shadow-none sm:h-[96vh] sm:w-[98vw] sm:max-w-[98vw] sm:border sm:border-border" showCloseButton={false}>
-          <div className="relative flex h-full flex-col overflow-hidden px-3 py-3 sm:p-8">
-            <MaterialTagBar controller={materialTags} />
+          <div className="relative flex h-full flex-col overflow-hidden px-3 py-3 sm:p-8" onClickCapture={event => {
+            if (selectionMirror && !(event.target as HTMLElement).closest('[data-cooperation-selection-control]')) { event.preventDefault(); event.stopPropagation() }
+          }} onDragOverCapture={event => {
+            if (selectionMirror) { event.preventDefault(); event.stopPropagation() }
+          }} onDropCapture={event => {
+            if (selectionMirror) { event.preventDefault(); event.stopPropagation() }
+          }} onKeyDownCapture={event => {
+            if (selectionMirror && !(event.target as HTMLElement).closest('[data-cooperation-selection-control]') && !['Tab', 'Escape', '<', '>', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) { event.preventDefault(); event.stopPropagation() }
+          }}>
+            {selectionMirror && <CooperationWeekSelector sphereId={selectionMirror.binding.id} selection={selectionMirror.selection!} weekNumber={dialogSelectedWeekNumber} onNavigate={navigateCooperationWeek} />}
+            {!selectionMirror && <MaterialTagBar controller={materialTags} />}
             <Button
               variant="outline"
               size="icon"
-              onClick={() => void (practiceSectionView === "exercises" && !subjectViewDateOverride ? moveWeek(-1) : moveDay(-1))}
-              disabled={isPreviousWeekAdvanceDisabled}
+              data-cooperation-selection-control onClick={() => selectionMirror ? navigateCooperationWeek(-1) : void (practiceSectionView === "exercises" && !subjectViewDateOverride ? moveWeek(-1) : moveDay(-1))}
+              disabled={selectionMirror ? !selectionMirror.selection!.weeks.some(w => w < dialogSelectedWeekNumber) : isPreviousWeekAdvanceDisabled}
               className="absolute left-3 top-1/2 z-20 hidden h-10 w-10 -translate-y-1/2 rounded-full border border-border bg-card text-foreground opacity-70 hover:bg-accent hover:opacity-100 disabled:opacity-25 sm:flex sm:h-12 sm:w-12"
             >
               <ChevronLeft className="h-5 w-5" />
             </Button>
             <div className="absolute right-3 top-1/2 z-20 hidden -translate-y-1/2 sm:flex">
-              {renderNextWeekAdvanceButton("desktop")}
+              {selectionMirror ? <Button data-cooperation-selection-control variant="outline" size="icon" aria-label="Semana siguiente" disabled={!selectionMirror.selection!.weeks.some(w => w > dialogSelectedWeekNumber)} onClick={() => navigateCooperationWeek(1)}><ChevronRight className="h-5 w-5" /></Button> : renderNextWeekAdvanceButton("desktop")}
             </div>
 
             <DialogHeader className="border-b border-border pb-3 sm:pb-4">
@@ -8550,7 +8608,7 @@ export function SubjectWheel({
                     type="button"
                     onClick={() => void closeSubjectDialogOrReturn()}
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                    aria-label="Cerrar modal"
+                    data-cooperation-selection-control aria-label="Cerrar modal"
                     title="Cerrar"
                   >
                     <X className="h-4 w-4" />
@@ -8561,8 +8619,8 @@ export function SubjectWheel({
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={() => void (practiceSectionView === "exercises" && !subjectViewDateOverride ? moveWeek(-1) : moveDay(-1))}
-                    disabled={isPreviousWeekAdvanceDisabled}
+                    data-cooperation-selection-control onClick={() => selectionMirror ? navigateCooperationWeek(-1) : void (practiceSectionView === "exercises" && !subjectViewDateOverride ? moveWeek(-1) : moveDay(-1))}
+                    disabled={selectionMirror ? !selectionMirror.selection!.weeks.some(w => w < dialogSelectedWeekNumber) : isPreviousWeekAdvanceDisabled}
                     className="h-9 w-9 rounded-full border-border"
                   >
                     <ChevronLeft className="h-4 w-4" />
@@ -8572,7 +8630,7 @@ export function SubjectWheel({
                       ? `Semana ${dialogSelectedWeekNumber}`
                       : getWeekdayLabel(subjectDialogDateKey)}
                   </div>
-                  {renderNextWeekAdvanceButton("mobile")}
+                  {selectionMirror ? <Button data-cooperation-selection-control variant="outline" size="icon" aria-label="Semana siguiente" disabled={!selectionMirror.selection!.weeks.some(w => w > dialogSelectedWeekNumber)} onClick={() => navigateCooperationWeek(1)}><ChevronRight className="h-5 w-5" /></Button> : renderNextWeekAdvanceButton("mobile")}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -8806,7 +8864,7 @@ export function SubjectWheel({
               ) : null}
             </div>
 
-            <div className="relative h-0">
+            <div hidden={Boolean(selectionMirror)} className="relative h-0">
               <div
                 className={`absolute bottom-4 right-2 flex flex-col items-center gap-3 sm:right-4 ${
                   practiceSectionView !== "theory" ? "pointer-events-none opacity-0" : ""
@@ -8859,6 +8917,15 @@ export function SubjectWheel({
                 </button>
               </div>
             </div>
+            {selectionMirror && <div data-cooperation-selection-control className="z-30 flex shrink-0 flex-col items-center gap-2 border-t bg-card pt-3">
+              {selectionError && <p role="alert" className="text-sm text-red-600">{selectionError}</p>}
+              <Button disabled={isFinishingSelection} className="min-w-40" onClick={async () => {
+                setIsFinishingSelection(true); setSelectionError('')
+                try { await finishCooperationSelection(selectionMirror.binding.id); await closeSubjectDialog() }
+                catch (error) { setSelectionError((error as Error).message) }
+                finally { setIsFinishingSelection(false) }
+              }}>{isFinishingSelection ? 'Guardando...' : 'Terminar'}</Button>
+            </div>}
           </div>
         </DialogContent>
       </Dialog>

@@ -77,7 +77,7 @@ export class SharedContentRoom extends DurableObject {
   webSocketError(socket) {socket.close(1011,'Reconectar');this.presence()}
   snapshot() {return this.read()}
   snapshotResponse() {return json(this.read())}
-  summary() {const state=this.read();return {ready:!!state.resources['sphere.json']&&!state.resources['sphere.json'].deleted,name:state.resources['sphere.json']?.value?.name,color:state.resources['sphere.json']?.value?.color,bytes:Object.values(state.resources).filter(r=>!r.deleted).reduce((total,r)=>total+(r.blob?.size || new TextEncoder().encode(JSON.stringify(r.value)).length),0)}}
+  summary() {const state=this.read();return {deleted:!!state.resources['sphere.json']?.deleted,ready:!!state.resources['sphere.json']&&!state.resources['sphere.json'].deleted,name:state.resources['sphere.json']?.value?.name,color:state.resources['sphere.json']?.value?.color,bytes:Object.values(state.resources).filter(r=>!r.deleted).reduce((total,r)=>total+(r.blob?.size || new TextEncoder().encode(JSON.stringify(r.value)).length),0)}}
   async upload(sphereId, request, expected, mime) {
     if(!/^[a-f0-9]{64}$/.test(expected))return {error:'Archivo inválido.',status:422}
     const key=`${this.env.CONTENT_PREFIX}${sphereId}/${expected}`

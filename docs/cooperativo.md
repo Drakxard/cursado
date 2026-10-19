@@ -11,6 +11,11 @@ retira el acceso anterior. Una esfera pertenece a un grupo en esta versión.
 
 La primera descarga requiere Confirmar y muestra el tamaño en MB. Cancelar
 deja la esfera gris. Aceptar una esfera también acepta participar en su grupo.
+La esfera aparece como «Preparando publicación» apenas se comparte. El aviso
+llega cuando se publica su descripción, sin esperar a los PDF. Tras confirmar,
+los metadatos se instalan primero y permiten abrir la materia; PDF, imágenes y
+pizarras continúan en segundo plano con progreso y reintento visible. Una
+transferencia larga no bloquea el descubrimiento de nuevas invitaciones.
 Después, los agregados y cambios se guardan localmente y se sincronizan sin
 preguntar. Se comparten PDF, explicaciones, síntesis e imágenes, contenedores,
 conjuntos del micrófono, apuntes y pizarras asociadas. No hay llamada de voz.
@@ -66,6 +71,28 @@ $env:COOP_LOCAL_URL='http://127.0.0.1:8794'
 node --test tests/cooperation-worker.integration.mjs
 ```
 
-Los tests de réplicas simulan tres usuarios y carpetas independientes, incluyen
+Los tests de réplicas simulan cuatro usuarios y carpetas independientes, incluyen
 copias locales de PDF, pizarras con imágenes, conjuntos y síntesis, y verifican
 que Guardar no resucite una eliminación en los demás participantes.
+
+## Selección de semanas
+
+La invitación ofrece «Sincronizar todo» y «Elegir». Elegir instala solamente
+una vista previa de los listados y abre la esfera. El botón «Sincronizar» cambia
+entre gris y verde para la semana completa; `<`, `>` y las flechas recorren las
+semanas. Los campos editables conservan sus teclas. «Terminar» guarda la selección,
+retira los listados excluidos y comienza las descargas en segundo plano.
+
+Se guardan las semanas excluidas: las elegidas y las semanas creadas después se
+sincronizan automáticamente. Los archivos compartidos por varias semanas se
+incluyen si alguna está seleccionada. PDF, imágenes, síntesis y pizarras siguen
+las referencias de sus semanas. Las pizarras nuevas guardan su semana explícita;
+para las anteriores se utilizan sus referencias PDF o su identificador de Estudio.
+Los archivos sin asociación verificable a una semana no se descargan en este modo.
+La selección y su vista previa se recuperan después de recargar. Las exclusiones
+son locales y nunca se publican como eliminaciones para los compañeros.
+
+Pruebas específicas:
+`node --test --experimental-strip-types tests/cooperation-selection.test.mts tests/cooperation-mirror.test.mts tests/cooperation-panel.browser.mts`.
+Con la aplicación iniciada, `node --test tests/cooperation-weeks.browser.mjs`
+comprueba el recorrido en la esfera real, incluidos los listados previos a la descarga.
