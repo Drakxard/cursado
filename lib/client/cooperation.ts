@@ -2,7 +2,7 @@
 import { uploadCooperationFile } from './cooperation-upload.ts'
 import { projectSelectionTags, selectionResources, type WeekSelection } from './cooperation-selection.ts'
 import { COOPERATIVE_TAB_ID, mergeCooperation, type Json } from '../cooperation-model.ts'
-import { getReadyWorkspaceHandle, loadWorkspaceHandle, queryWorkspacePermission } from '../local-workspace-client.ts'
+import { getReadyInscreenConfigToken, getReadyWorkspaceHandle, loadServicesFile, loadWorkspaceHandle, queryWorkspacePermission } from '../local-workspace-client.ts'
 import { applyMirrorFile, digest, isFileReferenced, mapBindingJson, mapBindingText, readFile, readJson, removeFile, scanSphere, writeFile, writeJson, type SphereBinding } from './cooperation-files.ts'
 
 export type CooperativeSphere = { id: string; group_id: string; name: string; color: string; created_by: string; bytes: number; ready?: boolean }
@@ -354,6 +354,9 @@ async function synchronizeMirror(mirror: Mirror) {
     }
   }
   if (mirror.outbox && !mirror.incoming) {
+    const configToken = getReadyInscreenConfigToken() || (await loadServicesFile(handle))?.inscreenToken
+    const library = await readJson<{ workspaceId?: string }>(handle, 'manifests/workspace-library-sync.json', {})
+    const uploadOptions = { configToken, workspaceId: library.workspaceId }
     mirror.transfer = { phase: 'uploading', completed: 0, total: mirror.outbox.changes.filter(change => change.blob).length }
     await save()
     for (const change of mirror.outbox.changes) if (change.blob) {
@@ -366,7 +369,7 @@ async function synchronizeMirror(mirror: Mirror) {
         await writeFile(handle, staging, file); blob = await readFile(handle, staging)
       }
       if (!blob) throw new Error('No se pudo leer el archivo cooperativo local.')
-      await uploadCooperationFile(b.id, change.blob.hash, blob, change.blob.mime || 'application/octet-stream')
+      await uploadCooperationFile(b.id, change.blob.hash, blob, change.blob.mime || 'application/octet-stream', uploadOptions)
       mirror.transfer.completed++; await save()
     }
     const wire = structuredClone(mirror.outbox) as Operation & { changes: (Operation['changes'][number] & { valueFile?: { hash: string; size: number }; baseFile?: { hash: string; size: number } })[] }
@@ -375,7 +378,7 @@ async function synchronizeMirror(mirror: Mirror) {
         const blob = new Blob([JSON.stringify(change[field])], { type: 'application/json' })
         if (blob.size <= 256 * 1024) continue
         const hash = await digest(blob)
-        await uploadCooperationFile(b.id, hash, blob, 'application/json')
+        await uploadCooperationFile(b.id, hash, blob, 'application/json', uploadOptions)
         change[field === 'value' ? 'valueFile' : 'baseFile'] = { hash, size: blob.size }
         delete change[field]
       }

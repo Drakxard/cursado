@@ -6,7 +6,7 @@ import { memoryWorkspace } from './helpers/cooperation-filesystem.mjs'
 
 const bundled = await build({ entryPoints: ['lib/client/cooperation.ts'], bundle: true, write: false, platform: 'browser', format: 'esm', plugins: [{ name: 'workspace-fixture', setup(builder) {
   builder.onResolve({ filter: /local-workspace-client\.ts$/ }, () => ({ path: 'workspace', namespace: 'test' }))
-  builder.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: 'export const getReadyWorkspaceHandle=()=>globalThis.__cooperationRoot;export const loadWorkspaceHandle=async()=>globalThis.__cooperationRoot;export const queryWorkspacePermission=async()=>"granted"' }))
+  builder.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: 'export const getReadyWorkspaceHandle=()=>globalThis.__cooperationRoot;export const loadWorkspaceHandle=async()=>globalThis.__cooperationRoot;export const queryWorkspacePermission=async()=>"granted";export const getReadyInscreenConfigToken=()=>"";export const loadServicesFile=async()=>null' }))
 } }] })
 
 test('local mirrors download exact files, isolate subjects, synchronize independent offline edits, and persist deletion choices', async t => {

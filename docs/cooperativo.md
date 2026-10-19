@@ -70,10 +70,20 @@ al endpoint S3 de R2, incluyendo los documentos JSON grandes. La firma vincula
 el tamaño (hasta 100 MiB), el tipo y el checksum SHA-256. Las operaciones se
 publican después de que R2 confirme la subida.
 
-La aplicación requiere `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
-y `R2_BUCKET_NAME=estudiodiario` en el servidor, además de `PIZARRA_BACKEND_URL`.
-Estas credenciales son de infraestructura; no se envían al navegador ni se
-toman del archivo personal User.Services.
+La aplicación usa la configuración R2 sellada de `User.Services`, igual que
+la publicación de biblioteca existente. También admite `R2_ENDPOINT`,
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` y `R2_BUCKET_NAME=estudiodiario` del
+servidor. Requiere `PIZARRA_BACKEND_URL` y el bucket debe coincidir con el del
+Worker. La configuración personal se envía solamente a la ruta de Vercel;
+no se reenvía a Cloudflare ni se comparte con los otros participantes.
+
+Antes de firmar, el Worker comprueba si el archivo ya existe en la esfera
+con el mismo hash y tamaño. Si falta allí, se busca en la biblioteca R2 del
+dispositivo (`manifests/workspace-library/<workspaceId>/blobs/<hash>`). Se
+verifican los bytes con SHA-256 y se hace una copia interna condicionada al
+ETag de origen. Esto evita volver a subir el contenido desde el navegador y
+mantiene independiente la copia cooperativa del respaldo personal. Si no hay
+una copia exacta, se emite la URL para la subida directa.
 
 El bucket debe permitir `PUT` desde `https://cursado.vercel.app` con los headers
 `Content-Type` y `x-amz-checksum-sha256`. `cloudflare/cooperation-cors.json`

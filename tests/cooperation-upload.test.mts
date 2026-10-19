@@ -3,6 +3,9 @@ import test from 'node:test'
 import { uploadCooperationFile } from '../lib/client/cooperation-upload.ts'
 import { createCooperationR2UploadSession } from '../lib/cooperation-upload-session.ts'
 import { build } from 'esbuild'
+import { CopyObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { createHash } from 'node:crypto'
+import { withInscreenRuntimeConfig } from '../lib/inscreen-user-config.ts'
 
 test('upload session forwards the Pizarra cookie and refuses rejected membership and foreign origins', async t => {
   const originalFetch = globalThis.fetch, originalBackend = process.env.PIZARRA_BACKEND_URL
@@ -13,13 +16,13 @@ test('upload session forwards the Pizarra cookie and refuses rejected membership
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export async function createCooperationR2UploadSession(input) { return { uploadUrl: "https://r2.test/file", authorizedKey: input.objectKey } }' }))
   } }] })
   const { POST } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
-  let allowed = false, calls = 0
+  let allowed = false, exists = false, calls = 0
   globalThis.fetch = async (url, options = {}) => {
     calls++
     assert.equal(new URL(String(url)).host, 'backend.test')
     assert.equal((options.headers as Record<string, string>).Cookie, 'session=secret')
     assert.equal((options.headers as Record<string, string>).Origin, 'https://cursado.vercel.app')
-    return allowed ? Response.json({ objectKey: 'authorized/file', bucket: 'estudiodiario' }) : Response.json({ detail: 'Sin acceso.' }, { status: 403 })
+    return allowed ? Response.json({ objectKey: 'authorized/file', bucket: 'estudiodiario', exists }) : Response.json({ detail: 'Sin acceso.' }, { status: 403 })
   }
   const request = (origin = 'https://cursado.vercel.app') => new Request('https://cursado.vercel.app/pizarra/upload-session', { method: 'POST', headers: { Origin: origin, Cookie: 'session=secret' }, body: JSON.stringify({ sphereId: 'a'.repeat(36), hash: 'b'.repeat(64), size: 9000000, mime: 'application/pdf' }) })
   assert.equal((await POST(request('https://foreign.test'))).status, 403)
@@ -29,6 +32,8 @@ test('upload session forwards the Pizarra cookie and refuses rejected membership
   const response = await POST(request())
   assert.equal(response.status, 200)
   assert.equal((await response.json()).authorizedKey, 'authorized/file')
+  exists = true
+  assert.deepEqual(await (await POST(request())).json(), { exists: true })
 })
 
 test('large cooperative files go directly to R2; authorization receives metadata only', async t => {
@@ -48,6 +53,10 @@ test('large cooperative files go directly to R2; authorization receives metadata
   assert.equal(calls[1].options.body, blob)
   assert.equal(calls[1].options.credentials, 'omit')
   calls.length = 0
+  globalThis.fetch = async () => { calls.push({ url: 'session', options: {} }); return Response.json({ exists: true }) }
+  await uploadCooperationFile('sphere', 'hash', blob, 'application/pdf', { configToken: 'sealed-personal-config', workspaceId: 'personal-workspace' })
+  assert.equal(calls.length, 1)
+  calls.length = 0
   globalThis.fetch = async () => Response.json({ detail: 'No tenés acceso.' }, { status: 403 })
   await assert.rejects(uploadCooperationFile('sphere', 'hash', blob, 'application/pdf'), /No tenés acceso/)
 })
@@ -58,10 +67,39 @@ test('direct R2 URL binds checksum, size and MIME and expires in fifteen minutes
   t.after(() => { for (const name of names) { if (previous[name] === undefined) delete process.env[name]; else process.env[name] = previous[name] } })
   Object.assign(process.env, { R2_ENDPOINT: 'https://account.r2.cloudflarestorage.com', R2_ACCESS_KEY_ID: 'test-key', R2_SECRET_ACCESS_KEY: 'test-secret', R2_BUCKET_NAME: 'estudiodiario' })
   const session = await createCooperationR2UploadSession({ objectKey: 'cursado/shared/sphere/file', bucket: 'estudiodiario', hash: 'ab'.repeat(32), size: 9 * 1024 * 1024, mime: 'application/pdf' })
+  assert.ok(session.uploadUrl && session.headers)
   const url = new URL(session.uploadUrl)
   assert.equal(url.searchParams.get('X-Amz-Expires'), '900')
   for (const header of ['content-length', 'content-type', 'x-amz-checksum-sha256']) assert.ok(url.searchParams.get('X-Amz-SignedHeaders')!.split(';').includes(header))
   assert.equal(session.headers['x-amz-checksum-sha256'], Buffer.from('ab'.repeat(32), 'hex').toString('base64'))
   assert.equal(url.searchParams.get('x-amz-checksum-crc32'), null)
   await assert.rejects(createCooperationR2UploadSession({ objectKey: 'key', bucket: 'wrong', hash: 'ab'.repeat(32), size: 1, mime: 'text/plain' }))
+})
+
+test('personal R2 configuration reuses only a byte-verified backup and protects against concurrent replacement', async t => {
+  const original = S3Client.prototype.send
+  t.after(() => { S3Client.prototype.send = original })
+  const bytes = Buffer.from('existing private PDF'), hash = createHash('sha256').update(bytes).digest('hex')
+  const copies: CopyObjectCommand[] = []
+  let corrupt = false, replaced = false
+  S3Client.prototype.send = (async function(command) {
+    if (command instanceof GetObjectCommand) {
+      assert.equal(command.input.Key, `manifests/workspace-library/personal-workspace/blobs/${hash}`)
+      return { ContentLength: bytes.length, ETag: 'original-etag', Body: { transformToWebStream: () => new Blob([corrupt ? Buffer.alloc(bytes.length) : bytes]).stream() } }
+    }
+    assert.ok(command instanceof CopyObjectCommand)
+    copies.push(command)
+    if (replaced) throw Object.assign(new Error('replaced'), { $metadata: { httpStatusCode: 412 } })
+    return {}
+  }) as typeof S3Client.prototype.send
+  const config = { R2_BUCKET_NAME: 'estudiodiario', R2_ENDPOINT: 'https://account.r2.cloudflarestorage.com', R2_ACCESS_KEY_ID: 'personal-key', R2_SECRET_ACCESS_KEY: 'personal-secret' }
+  const input = { objectKey: `cursado/shared/sphere/${hash}`, bucket: 'estudiodiario', hash, size: bytes.length, mime: 'application/pdf', workspaceId: 'personal-workspace' }
+  assert.deepEqual(await withInscreenRuntimeConfig(config, () => createCooperationR2UploadSession(input)), { exists: true })
+  assert.equal(copies[0].input.CopySourceIfMatch, 'original-etag')
+  assert.equal(copies[0].input.Key, input.objectKey)
+  corrupt = true
+  assert.ok((await withInscreenRuntimeConfig(config, () => createCooperationR2UploadSession(input))).uploadUrl)
+  assert.equal(copies.length, 1)
+  corrupt = false; replaced = true
+  assert.ok((await withInscreenRuntimeConfig(config, () => createCooperationR2UploadSession(input))).uploadUrl)
 })

@@ -79,7 +79,9 @@ export async function cooperationRequest(directory,request) {
     if(request.method==='POST') {
       const {size}=await request.json()
       if(!Number.isSafeInteger(size) || size<0 || size>100*1024*1024)return json({detail:'Archivo inválido.'},422)
-      return json({objectKey:`${env.CONTENT_PREFIX}${sphere.id}/${parts[3]}`,bucket:'estudiodiario'})
+      const objectKey=`${env.CONTENT_PREFIX}${sphere.id}/${parts[3]}`
+      const existing=await env.CONTENT_FILES.head(objectKey)
+      return json({objectKey,bucket:'estudiodiario',exists:existing?.size===size})
     }
     if(request.method==='PUT') {
       const result=await room.upload(sphere.id,request,parts[3],request.headers.get('content-type'))

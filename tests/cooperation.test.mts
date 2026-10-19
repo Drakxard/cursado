@@ -72,6 +72,8 @@ test('three participants, invitations, isolation, durable operation deduplicatio
   const upload = body => backend.fetch(new Request(url, { method: 'PUT', headers: { Origin: backend.env.CURSADO_ORIGIN, Cookie: a.cookie, 'Content-Type': 'application/pdf' }, body }))
   assert.equal((await upload(new Uint8Array([1]))).status, 422)
   assert.equal((await upload(data)).status, 200)
+  assert.equal((await (await request(a, `spheres/${sphere.id}/files/${fingerprint}`, { size: data.length })).json()).exists, true)
+  assert.equal((await (await request(a, `spheres/${sphere.id}/files/${fingerprint}`, { size: data.length + 1 })).json()).exists, false)
   const blob = { hash: fingerprint, size: data.length, mime: 'application/pdf' }
   await request(a, `spheres/${sphere.id}/operations`, { id: 'file', changes: [{ key: 'teoria/algebra/one.pdf', type: 'blob', blob }] })
   assert.deepEqual(new Uint8Array(await (await backend.fetch(new Request(url, { headers: { Cookie: c.cookie } }))).arrayBuffer()), data)

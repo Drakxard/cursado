@@ -1,15 +1,16 @@
 import { createCooperationR2UploadSession } from '@/lib/cooperation-upload-session'
+import { withOptionalServicesConfig } from '@/lib/inscreen-user-config'
 
 export const runtime = 'nodejs'
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const origin = new URL(request.url).origin
   if (request.headers.get('origin') !== origin) return Response.json({ error: 'Origen no permitido.' }, { status: 403 })
   if (Number(request.headers.get('content-length') || 0) > 4096) return Response.json({ error: 'Solicitud demasiado grande.' }, { status: 413 })
   try {
     const text = await request.text()
     if (text.length > 4096) return Response.json({ error: 'Solicitud demasiado grande.' }, { status: 413 })
-    const { sphereId, hash, size, mime } = JSON.parse(text)
+    const { sphereId, hash, size, mime, workspaceId } = JSON.parse(text)
     if (!/^[a-f0-9-]{36}$/.test(sphereId || '') || !/^[a-f0-9]{64}$/.test(hash || '') || !Number.isSafeInteger(size) || size < 0 || size > 100 * 1024 * 1024 || typeof mime !== 'string' || mime.length > 200) {
       return Response.json({ error: 'Archivo inválido.' }, { status: 422 })
     }
@@ -22,9 +23,14 @@ export async function POST(request: Request) {
     })
     const result = await authorization.json()
     if (!authorization.ok) return Response.json(result, { status: authorization.status })
-    return Response.json(await createCooperationR2UploadSession({ objectKey: result.objectKey, bucket: result.bucket, hash, size, mime }), { headers: { 'Cache-Control': 'private, no-store' } })
+    if (result.exists) return Response.json({ exists: true }, { headers: { 'Cache-Control': 'private, no-store' } })
+    return Response.json(await createCooperationR2UploadSession({ objectKey: result.objectKey, bucket: result.bucket, hash, size, mime, workspaceId }), { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (error) {
     console.error('Cooperation upload session failed:', error)
-    return Response.json({ error: 'No se pudo preparar la subida directa a R2.' }, { status: 503 })
+    return Response.json({ error: 'No se pudo preparar la subida a R2. Revisá la configuración R2 de User.Services o del servidor.' }, { status: 503 })
   }
+}
+
+export function POST(request: Request) {
+  return withOptionalServicesConfig(request, () => handlePOST(request))
 }
