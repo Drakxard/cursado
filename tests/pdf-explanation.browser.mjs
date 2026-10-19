@@ -319,7 +319,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
         const pdf = window.PDFViewerApplication.pdfDocument
         const annotations = await (await pdf.getPage(1)).getAnnotations()
         const layer = window.PDFViewerApplication.pdfViewer.getPageView(0).annotationEditorLayer?.annotationEditorLayer
-        return { annotations: annotations.map(a => ({id:a.id, subtype:a.subtype, text:a.textContent, contents:a.contentsObj, native:!!layer?.getEditableAnnotation(a.id)})), storage:[...(pdf.annotationStorage.serializable.map?.values() || [])], manifests:Object.entries(localStorage).filter(([key]) => key.startsWith('pdf-explanations:')).map(([key,value]) => [key,JSON.parse(value)]), notes:[...document.querySelectorAll('.pdf-explanation-text')].map(el => ({text:el.innerText,classes:el.className})) }
+        return { annotations: annotations.map(a => ({id:a.id, subtype:a.subtype, text:a.textContent, contents:a.contentsObj, native:!!layer?.getEditableAnnotation(a.id)})), storage:[...(pdf.annotationStorage.serializable.map?.values() || [])], manifests:Object.entries(localStorage).filter(([key]) => key.startsWith('pdf-explanations:')).map(([key,value]) => [key,JSON.parse(value).entries.map(({html,...entry}) => entry)]), notes:[...document.querySelectorAll('.pdf-explanation-text')].map(el => ({text:el.innerText,classes:el.className})) }
       })
       console.log('Deleted-note restoration', JSON.stringify(diagnostic))
       throw error

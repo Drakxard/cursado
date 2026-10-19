@@ -356,14 +356,20 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       persist(state).catch(report);
     };
     const remove = editor.remove.bind(editor), rebuild = editor.rebuild.bind(editor);
+    let removedInThisSession = false;
     editor.remove = () => {
-      if (!entry.deleted) { entry.deleted = true; persist(state).catch(report); }
+      if (!entry.deleted) { removedInThisSession = true; entry.deleted = true; persist(state).catch(report); }
       remove();
       state.pdf.annotationStorage.resetModifiedIds();
     };
     editor.rebuild = () => {
-      // PDF.js restores the same editor when undoing a deletion.
-      if (entry.deleted) { entry.deleted = false; persist(state).catch(report); }
+      // Rebuild also runs during rendering. Only an undo of this editor's local
+      // deletion may revive a note; loading a persisted tombstone must not.
+      if (entry.deleted && removedInThisSession && !restoring) {
+        removedInThisSession = false;
+        entry.deleted = false;
+        persist(state).catch(report);
+      }
       rebuild();
       // Text undo rebuilds before FreeText finishes measuring its new contents.
       // Sync afterwards so the manifest and visibility follow undo/redo as well.
