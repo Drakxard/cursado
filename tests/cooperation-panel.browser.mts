@@ -12,6 +12,7 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     window.resetInvitation=()=>{state.mirrors={};state.deletions=[];state.dismissedSpheres=[];changed()};
     export const cooperationState=()=>state;
     export const cooperationSubjectSyncLabel=()=> '100%';
+    export const cooperationSubjectSyncDetails=async()=>({name:'Álgebra',bytes:2500000});
     export const refreshCooperation=async()=>state;
     export const synchronizeCooperation=async()=>{};
     export const createCooperationGroup=async names=>{window.createdNames=names;return 'group-1'};
@@ -52,6 +53,11 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     await page.getByText('Pendiente', { exact: false }).waitFor({ state: 'hidden' })
     assert.equal(await page.evaluate(() => (window as any).downloadOptions.background), true)
     await page.getByLabel('Sincronización 100%').waitFor()
+    await page.getByLabel('Sincronización 100%').click()
+    const syncDetails = page.getByRole('dialog', { name: 'Álgebra', exact: true })
+    await syncDetails.getByText('2,5', { exact: false }).waitFor()
+    await page.keyboard.press('Escape')
+    await syncDetails.waitFor({ state: 'hidden' })
     await page.context().setOffline(true)
     await page.getByLabel('Sincronización sin confirmar').waitFor()
     await page.context().setOffline(false)

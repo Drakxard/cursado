@@ -8,6 +8,13 @@ type SyncMirror = {
   transfer?: { completed: number; total: number }
 }
 
+export function cooperationResourceBytes(resources: Record<string, { deleted?: boolean; blob?: { size: number }; value?: unknown }>, allowed?: ReadonlySet<string>): number {
+  return Object.entries(resources).reduce((total, [key, resource]) => {
+    if (resource.deleted || allowed && !allowed.has(key)) return total
+    return total + (resource.blob?.size ?? (resource.value === undefined ? 0 : new TextEncoder().encode(JSON.stringify(resource.value)).byteLength))
+  }, 0)
+}
+
 export function cooperationSyncLabel(subjectId: string, mirrors: SyncMirror[], confirmed: ReadonlySet<string>, online: boolean): string | null {
   const matching = mirrors.filter(mirror => mirror.binding.subjectId === subjectId)
   if (!matching.length) return null

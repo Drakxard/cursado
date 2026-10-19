@@ -1,6 +1,6 @@
 'use client'
 import { uploadCooperationFile } from './cooperation-upload.ts'
-import { cooperationSyncLabel } from '../cooperation-sync-status.ts'
+import { cooperationResourceBytes, cooperationSyncLabel } from '../cooperation-sync-status.ts'
 import { projectSelectionTags, selectionResources, type WeekSelection } from './cooperation-selection.ts'
 import { COOPERATIVE_TAB_ID, mergeCooperation, type Json } from '../cooperation-model.ts'
 import { getReadyInscreenConfigToken, getReadyWorkspaceHandle, loadServicesFile, loadWorkspaceHandle, queryWorkspacePermission } from '../local-workspace-client.ts'
@@ -24,6 +24,13 @@ let syncRevision = 0
 function invalidateSyncStatus() { syncRevision++; confirmedMirrors.clear(); cooperationChanged() }
 export function cooperationSubjectSyncLabel(subjectId: string) {
   return cooperationSyncLabel(subjectId, Object.values(state.mirrors), confirmedMirrors, navigator.onLine !== false && !state.error)
+}
+export async function cooperationSubjectSyncDetails(subjectId: string) {
+  const mirror = Object.values(state.mirrors).find(mirror => mirror.binding.subjectId === subjectId)
+  if (!mirror) return null
+  const resources = { ...mirror.baseline.resources, ...mirror.incoming?.resources, ...Object.fromEntries((mirror.outbox?.changes || []).map(change => [change.key, { ...change, deleted: change.type === 'delete' }])) }
+  const allowed = mirror.selection ? (await selectionResources(resources, mirror.selection.excludedWeeks)).allowed : undefined
+  return { name: mirror.binding.name, bytes: cooperationResourceBytes(resources, allowed) }
 }
 export { COOPERATIVE_TAB_ID }
 export const cooperationGroupTab = (id: string) => `cooperative-${id}`

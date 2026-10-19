@@ -3,11 +3,13 @@ import { useEffect, useState } from 'react'
 import { ListChecks, RefreshCw, X } from 'lucide-react'
 import { acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
 import { isNativeReadOnly } from '@/lib/native-workspace'
-import { cooperationSubjectSyncLabel } from '@/lib/client/cooperation'
+import { cooperationSubjectSyncDetails, cooperationSubjectSyncLabel } from '@/lib/client/cooperation'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 
 export function CooperationSyncStatus({ subjectId }: { subjectId: string }) {
   const state = useCooperation()
   const [online, setOnline] = useState<boolean | null>(null)
+  const [details, setDetails] = useState<{ name: string; bytes: number } | null>(null)
   useEffect(() => {
     const update = () => setOnline(navigator.onLine !== false)
     window.addEventListener('online', update); window.addEventListener('offline', update); update()
@@ -16,7 +18,16 @@ export function CooperationSyncStatus({ subjectId }: { subjectId: string }) {
   if (!Object.values(state.mirrors).some(mirror => mirror.binding.subjectId === subjectId)) return null
   const label = online === null ? null : online ? cooperationSubjectSyncLabel(subjectId) : '???'
   if (label === null) return null
-  return <span className="shrink-0 text-sm font-normal tabular-nums text-muted-foreground" aria-label={label === '???' ? 'Sincronización sin confirmar' : `Sincronización ${label}`}>{label}</span>
+  const megabytes = details ? details.bytes > 0 && details.bytes < 10_000 ? '<0,01' : new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(details.bytes / 1_000_000) : ''
+  return <>
+    <button type="button" disabled={label === '???'} className="shrink-0 rounded text-sm font-normal tabular-nums text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4" aria-label={label === '???' ? 'Sincronización sin confirmar' : `Sincronización ${label}`} onClick={async () => setDetails(await cooperationSubjectSyncDetails(subjectId))}>{label}</button>
+    <Dialog open={details !== null} onOpenChange={open => { if (!open) setDetails(null) }}>
+      <DialogContent className="max-w-xs gap-2 rounded-2xl py-8 text-center sm:max-w-xs">
+        <DialogTitle className="px-3 text-base font-medium">{details?.name}</DialogTitle>
+        <DialogDescription className="text-3xl font-normal tabular-nums text-foreground">{megabytes} <span className="text-base text-muted-foreground">MB</span></DialogDescription>
+      </DialogContent>
+    </Dialog>
+  </>
 }
 
 export function useCooperation() {
