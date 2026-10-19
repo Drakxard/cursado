@@ -41,9 +41,15 @@ export function openNativePdf(workspaceFileId: string, signal?: AbortSignal): Pr
   if (!file || !manifest) return Promise.reject(new Error('El PDF no está en la publicación sincronizada. Actualizá los archivos.'))
   return new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID()
+    // Android emits results in the host WebView; Pizarra runs in a same-origin iframe.
+    const targets = new Set<Window>([window])
+    try { if (window.top?.location.origin === location.origin) targets.add(window.top) } catch { /* Only listen in trusted same-origin frames. */ }
+    let settled = false
     const finish = (error?: string) => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
-      window.removeEventListener('cursado-native-pdf-result', result)
+      targets.forEach(target => target.removeEventListener('cursado-native-pdf-result', result))
       signal?.removeEventListener('abort', abort)
       bridge.cancelPdf?.(requestId)
       error ? reject(new Error(error)) : resolve()
@@ -56,7 +62,7 @@ export function openNativePdf(workspaceFileId: string, signal?: AbortSignal): Pr
     const abort = () => finish('Apertura del PDF cancelada.')
     if (signal?.aborted) { abort(); return }
     signal?.addEventListener('abort', abort, {once:true})
-    window.addEventListener('cursado-native-pdf-result', result)
+    targets.forEach(target => target.addEventListener('cursado-native-pdf-result', result))
     try { bridge.openPdf!(file.id, manifest.revision, requestId) } catch (error) { finish(String(error)) }
   })
 }
