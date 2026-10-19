@@ -1,5 +1,6 @@
 'use client'
 import { uploadCooperationFile } from './cooperation-upload.ts'
+import { cooperationSyncLabel } from '../cooperation-sync-status.ts'
 import { projectSelectionTags, selectionResources, type WeekSelection } from './cooperation-selection.ts'
 import { COOPERATIVE_TAB_ID, mergeCooperation, type Json } from '../cooperation-model.ts'
 import { getReadyInscreenConfigToken, getReadyWorkspaceHandle, loadServicesFile, loadWorkspaceHandle, queryWorkspacePermission } from '../local-workspace-client.ts'
@@ -18,6 +19,12 @@ let activeRoot: FileSystemDirectoryHandle | null = null
 const sockets = new Map<string, WebSocket>()
 const presences = new Map<string, { users: { id: string; name: string; color: string; emoji: string; client_ids: string[] }[]; you: string }>()
 export const cooperationState = () => state
+const confirmedMirrors = new Set<string>()
+let syncRevision = 0
+function invalidateSyncStatus() { syncRevision++; confirmedMirrors.clear(); cooperationChanged() }
+export function cooperationSubjectSyncLabel(subjectId: string) {
+  return cooperationSyncLabel(subjectId, Object.values(state.mirrors), confirmedMirrors, navigator.onLine !== false && !state.error)
+}
 export { COOPERATIVE_TAB_ID }
 export const cooperationGroupTab = (id: string) => `cooperative-${id}`
 export function cooperationChanged() { window.dispatchEvent(new CustomEvent('cursado-cooperation-changed', { detail: state })) }
@@ -59,6 +66,7 @@ export async function refreshCooperation() {
   }
   if (syncing) await syncing
   if (state.userId !== result.user.id || activeRoot !== handle) {
+    confirmedMirrors.clear()
     for (const socket of sockets.values()) socket.close()
     sockets.clear()
     activeRoot = handle
@@ -267,6 +275,7 @@ function withoutPersonal(sphereId: string, key: string, value: Json | undefined)
   return value
 }
 async function synchronizeMirror(mirror: Mirror) {
+  const revision = syncRevision
   const handle = await root(), b = mirror.binding
   let moreChanges = false
   if (state.deletions.some(d => d.sphereId === b.id && d.key === 'sphere.json' && d.decision !== 'wait')) return
@@ -484,6 +493,7 @@ async function synchronizeMirror(mirror: Mirror) {
   const metadata = remote.resources['sphere.json']?.value
   if (record(metadata)) { if (typeof metadata.name === 'string') b.name = metadata.name; if (typeof metadata.color === 'string') b.color = metadata.color }
   if (wasDownloading || metadata) await installSubject(b)
+  if (!moreChanges && revision === syncRevision) confirmedMirrors.add(b.id)
   await save()
   window.dispatchEvent(new CustomEvent('cursado-cooperation-applied', { detail: b }))
   connectMirror(b.id)
@@ -497,7 +507,7 @@ async function connectMirror(id: string) {
     const socket = new WebSocket(url); sockets.set(id, socket)
     socket.onmessage = event => { try {
       const message = JSON.parse(event.data)
-      if (message.type === 'changed') void synchronizeCooperation()
+      if (message.type === 'changed') { invalidateSyncStatus(); void synchronizeCooperation() }
       if (message.type === 'presence') { presences.set(id, message); window.dispatchEvent(new CustomEvent('cursado-cooperation-presence', { detail: { sphereId: id, ...message } })) }
       if (message.type === 'editor') window.dispatchEvent(new CustomEvent('cursado-cooperation-editor', { detail: { sphereId: id, ...message } }))
     } catch {} }
@@ -518,7 +528,7 @@ export function synchronizeCooperation(): Promise<void> {
     const execute = async () => {
       for (const mirror of Object.values(state.mirrors)) {
         try { while (await synchronizeMirror(mirror)) { /* Drain metadata and file batches without waiting for the next poll. */ } }
-        catch (error) { mirror.error = error instanceof Error ? error.message : String(error); await save() }
+        catch (error) { confirmedMirrors.delete(mirror.binding.id); mirror.error = error instanceof Error ? error.message : String(error); await save() }
       }
     }
     if (navigator.locks) await navigator.locks.request(`cooperation:${state.userId}`, async () => {
@@ -628,11 +638,12 @@ export function startCooperationBackground() {
     }
     finally { busy = false }
   }
-  const saved = () => { clearTimeout(timer); timer = setTimeout(() => { void refresh() }, 250) }
+  const saved = () => { invalidateSyncStatus(); clearTimeout(timer); timer = setTimeout(() => { void refresh() }, 250) }
   const channel = new BroadcastChannel('cursado-library-changes')
   channel.onmessage = saved
   window.addEventListener('online', refresh); window.addEventListener('focus', refresh); window.addEventListener('cursado-workspace-saved', saved)
+  window.addEventListener('offline', invalidateSyncStatus)
   const interval = setInterval(() => void refresh(), 4000)
   void refresh()
-  return () => { stopped = true; clearTimeout(timer); clearInterval(interval); channel.close(); for (const socket of sockets.values()) socket.close(); sockets.clear(); window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); window.removeEventListener('cursado-workspace-saved', saved) }
+  return () => { stopped = true; clearTimeout(timer); clearInterval(interval); channel.close(); for (const socket of sockets.values()) socket.close(); sockets.clear(); window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); window.removeEventListener('cursado-workspace-saved', saved); window.removeEventListener('offline', invalidateSyncStatus) }
 }

@@ -3,6 +3,19 @@ import { useEffect, useState } from 'react'
 import { ListChecks, RefreshCw, X } from 'lucide-react'
 import { acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
 import { isNativeReadOnly } from '@/lib/native-workspace'
+import { cooperationSubjectSyncLabel } from '@/lib/client/cooperation'
+
+export function CooperationSyncStatus({ subjectId }: { subjectId: string }) {
+  useCooperation()
+  const [online, setOnline] = useState(false)
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine !== false)
+    window.addEventListener('online', update); window.addEventListener('offline', update); update()
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
+  }, [])
+  const label = online ? cooperationSubjectSyncLabel(subjectId) : '???'
+  return <span className="shrink-0 text-sm font-normal tabular-nums text-muted-foreground" aria-label={label === '???' ? 'Sincronización sin confirmar' : `Sincronización ${label}`}>{label}</span>
+}
 
 export function useCooperation() {
   const [state, setState] = useState(cooperationState)

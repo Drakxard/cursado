@@ -11,6 +11,7 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     window.publishSphere=()=>{sphere.ready=true;changed()};
     window.resetInvitation=()=>{state.mirrors={};state.deletions=[];state.dismissedSpheres=[];changed()};
     export const cooperationState=()=>state;
+    export const cooperationSubjectSyncLabel=()=> '100%';
     export const refreshCooperation=async()=>state;
     export const synchronizeCooperation=async()=>{};
     export const createCooperationGroup=async names=>{window.createdNames=names;return 'group-1'};
@@ -21,7 +22,7 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     export const startCooperationBackground=()=>{queueMicrotask(changed);return ()=>{}};
     window.prepareDeletion=()=>{state.deletions.push({id:'delete-1',sphereId:sphere.id,key:'sphere.json',selector:[],label:'Álgebra',decision:'wait'});changed()};
   `
-  const bundled = await build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {CooperationPanel,CooperationRuntime} from './components/cooperation';createRoot(document.getElementById('root')).render(<><CooperationRuntime/><CooperationPanel onOpen={id=>window.openedSubject=id}/></>)`, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, platform: 'browser', format: 'iife', define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'cooperation-ui', setup(builder) {
+  const bundled = await build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {CooperationPanel,CooperationRuntime,CooperationSyncStatus} from './components/cooperation';createRoot(document.getElementById('root')).render(<><CooperationSyncStatus subjectId="coop-subject"/><CooperationRuntime/><CooperationPanel onOpen={id=>window.openedSubject=id}/></>)`, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, platform: 'browser', format: 'iife', define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'cooperation-ui', setup(builder) {
     builder.onResolve({ filter: /^@\/lib\/client\/cooperation$/ }, () => ({ path: 'cooperation', namespace: 'fixture' }))
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: fixture }))
   } }] })
@@ -31,6 +32,11 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     await page.route('https://cooperation.test/**', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }))
     await page.goto('https://cooperation.test/estudio')
     await page.addScriptTag({ content: bundled.outputFiles[0].text })
+    await page.getByLabel('Sincronización 100%').waitFor()
+    await page.context().setOffline(true)
+    await page.getByLabel('Sincronización sin confirmar').waitFor()
+    await page.context().setOffline(false)
+    await page.getByLabel('Sincronización 100%').waitFor()
     const invitation = page.getByRole('dialog', { name: 'Nuevo contenido cooperativo' })
     await page.getByText('Preparando publicación…', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Álgebra', exact: true }).click()

@@ -2,7 +2,7 @@
 
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
-import { CooperationPanel, useCooperation } from '@/components/cooperation'
+import { CooperationPanel, CooperationSyncStatus, useCooperation } from '@/components/cooperation'
 import { COOPERATIVE_TAB_ID, cooperationGroupTab, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
 import type { SphereBinding } from '@/lib/client/cooperation-files'
 import type { BoardPdfReference } from "@/lib/board-library-contract"
@@ -8537,6 +8537,9 @@ export function SubjectWheel({
                       {getSubjectDisplayName(currentSubject)}
                     </DialogTitle>
                   )}
+                  {currentSubject ? (
+                    <CooperationSyncStatus subjectId={currentSubject.id} />
+                  ) : null}
                   {currentSubject ? (
                     <Button data-workspace-write={isNativeReadOnly() || undefined}
                       type="button"
