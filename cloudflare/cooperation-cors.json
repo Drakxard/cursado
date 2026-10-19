@@ -2,10 +2,17 @@
   "rules": [
     {
       "allowed": {
-        "origins": ["https://cursado.vercel.app"],
-        "methods": ["PUT"],
-        "headers": ["Content-Type", "x-amz-checksum-sha256"]
+        "origins": [
+          "https://temparchivo.vercel.app",
+          "https://v0-lunas-moradas.vercel.app",
+          "https://pizarracursado.vercel.app",
+          "https://cursado.vercel.app",
+          "http://localhost:3000"
+        ],
+        "methods": ["PUT", "GET", "HEAD", "DELETE"],
+        "headers": ["Content-Type", "x-amz-*"]
       },
+      "exposeHeaders": ["ETag"],
       "maxAgeSeconds": 3600
     }
   ]
