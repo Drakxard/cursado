@@ -2,6 +2,7 @@ export const UNASSIGNED_WORKSPACE_TAB_ID = "tab-unassigned"
 export const UNASSIGNED_WORKSPACE_TAB_NAME = "Sin pestaña"
 
 export type LocalSubjectCatalogEntry = {
+  cooperationId?: string
   id: string
   name: string
   normalizedName: string
@@ -68,6 +69,7 @@ export function normalizeLocalSubjectCatalog(input: LegacyLocalSubjectCatalog | 
       if (!id || !safeName || !storageKey) return accumulator
       const timestamp = new Date().toISOString()
       accumulator[id] = {
+        ...(typeof value.cooperationId === 'string' && /^[a-f0-9-]{36}$/.test(value.cooperationId) ? { cooperationId: value.cooperationId } : {}),
         id,
         name: safeName,
         normalizedName: normalizeLocalSubjectName(safeName),
@@ -98,13 +100,15 @@ export function getLegacyLocalSubjectSources(input: LegacyLocalSubjectCatalog | 
 
 export function findCatalogSubjectByName(catalog: LocalSubjectCatalog, name: string) {
   const normalizedName = normalizeLocalSubjectName(name)
-  return Object.values(catalog.subjects).find((subject) => subject.normalizedName === normalizedName) ?? null
+  return Object.values(catalog.subjects).find((subject) => !subject.cooperationId && subject.normalizedName === normalizedName) ?? null
 }
 
 export function findCatalogSubjectByDirectoryName(catalog: LocalSubjectCatalog, directoryName: string) {
   const directoryKey = createLocalSubjectStorageKey(directoryName)
+  const exact = Object.values(catalog.subjects).find(subject => createLocalSubjectStorageKey(subject.storageKey) === directoryKey)
+  if (exact) return exact
   return Object.values(catalog.subjects).find((subject) =>
-    createLocalSubjectStorageKey(subject.name) === directoryKey ||
+    !subject.cooperationId && createLocalSubjectStorageKey(subject.name) === directoryKey ||
     createLocalSubjectStorageKey(subject.storageKey) === directoryKey
   ) ?? null
 }

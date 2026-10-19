@@ -16,6 +16,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   const getSystemPrompt = provider => { try { const text = localStorage.getItem(systemKey(provider)); return text?.trim() ? text : undefined; } catch { return undefined; } };
   let documentState = null, loading = null, modal = null, restoring = false;
   let saving = Promise.resolve();
+  let cooperativeBaseline = null;
   const editors = new Map();
   const notePreview = text => {
     const full = text.replace(/\s+/g, " ").trim();
@@ -88,6 +89,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       editors.clear();
       let fingerprint = pdf.fingerprints[0];
       const data = saved || { version: 1, entries: [], transcriptions: {} };
+      cooperativeBaseline = structuredClone(data);
       // Some PDFs have no document ID until PDF.js saves the first annotation, so their
       // fingerprint changes on that save. A persisted note links that revision to its source.
       if (saved && data.fingerprint !== fingerprint) {
@@ -119,8 +121,13 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       const json = JSON.stringify(state.data);
       if (!state.root) { localStorage.setItem(`pdf-explanations:${state.key}`, json); return; }
       const previous = await read(state.root, state.path);
+      if (previous && window.cursadoMergeCooperation) {
+        state.data = window.cursadoMergeCooperation(cooperativeBaseline, state.data, previous);
+        cooperativeBaseline = structuredClone(state.data);
+      }
       if (previous) await write(state.root, state.path + ".backup", JSON.stringify(previous));
-      await write(state.root, state.path, json);
+      await write(state.root, state.path, JSON.stringify(state.data));
+      window.dispatchEvent(new Event('cursado-workspace-saved'));
     });
     saving = next;
     return next;
@@ -796,6 +803,27 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     if (event.data?.type === "pdf-explanation-escape" && event.source === modal?.node.querySelector("iframe")?.contentWindow) close();
   });
   app.eventBus.on("documentloaded", () => { close(); load().then(restore).catch(report); });
+  window.addEventListener('cursado-cooperation-applied', async () => {
+    const state = documentState;
+    if (!state?.root || restoring || document.querySelector('.freeTextEditor.editing')) return;
+    try {
+      await saving;
+      const incoming = await read(state.root, state.path);
+      if (!incoming || !window.cursadoMergeCooperation) return;
+      const merged = window.cursadoMergeCooperation(cooperativeBaseline, state.data, incoming);
+      if (JSON.stringify(merged) === JSON.stringify(state.data)) { cooperativeBaseline = structuredClone(incoming); return; }
+      // Existing editor bindings retain their listeners; update the referenced entries.
+      for (const old of state.data.entries) {
+        const next = merged.entries.find(entry => entry.id === old.id);
+        if (next) Object.assign(old, next);
+        else { old.deleted = true; editors.get(old.id)?.remove(); }
+      }
+      merged.entries = merged.entries.map(entry => state.data.entries.find(old => old.id === entry.id) || entry);
+      state.data = merged; cooperativeBaseline = structuredClone(incoming);
+      localStorage.setItem(`pdf-explanations:${state.key}`, JSON.stringify(state.data));
+      await restore();
+    } catch (error) { report(error); }
+  });
   app.eventBus.on("pagerendered", restore);
   app.eventBus.on("annotationeditorlayerrendered", restore);
   app.eventBus.on("annotationeditormodechanged", restore);

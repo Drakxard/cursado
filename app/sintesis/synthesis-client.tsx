@@ -261,11 +261,13 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
     window.addEventListener("focus", refresh)
     window.addEventListener("storage", onStorage)
     window.addEventListener(SYNTHESIS_MATERIALS_CHANGED_EVENT, refresh)
+    window.addEventListener('cursado-cooperation-applied', refresh)
     return () => {
       disposed = true
       window.removeEventListener("focus", refresh)
       window.removeEventListener("storage", onStorage)
       window.removeEventListener(SYNTHESIS_MATERIALS_CHANGED_EVENT, refresh)
+      window.removeEventListener('cursado-cooperation-applied', refresh)
     }
   }, [acceptWorkspace, autosave, context.subjectId, context.weekNumber, storageKey, retry])
 

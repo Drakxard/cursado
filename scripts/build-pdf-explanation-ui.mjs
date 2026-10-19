@@ -5,6 +5,12 @@ import { buildGraphRuntime } from './build-pdf-explanation-graph-runtime.mjs'
 await buildGraphRuntime()
 
 await build({
+  entryPoints: ['lib/client/cooperation-viewer.ts'],
+  outfile: 'public/pdfjs/web/viewer-cooperation.js',
+  bundle: true, platform: 'browser', format: 'iife', target: 'es2022', minify: true,
+})
+
+await build({
   entryPoints: ["lib/client/pdf-explanation-ui.ts"],
   outfile: "public/pdfjs/web/viewer-explanation-sdk.js",
   bundle: true,

@@ -114,7 +114,7 @@ test('topic boards use the floating arrow, retain Escape, split with real Study 
   assert.deepEqual(scene.assets,{})
   // A drag moves the link without opening a reader.
   await page.mouse.move(260,326);await page.mouse.down();await page.mouse.move(330,376,{steps:8});await page.mouse.up()
-  assert.equal(await board.locator('.board-pdf-reader').count(),0)
+  assert.equal(await board.locator('.board-pdf-reader[aria-hidden="false"]').count(),0)
   await expect.poll(async()=>(await topicScene(page)).content.shapes[0].x).toBeGreaterThan(shortcut.x)
   await canvas.click({position:{x:350,y:377}})
   const reader=board.frameLocator('iframe[title="Lector de PDF de la pizarra"]')
@@ -128,7 +128,7 @@ test('topic boards use the floating arrow, retain Escape, split with real Study 
   assert.equal(await page.getByRole('button',{name:'Volver a Temas',exact:true}).count(),0)
   await pdf.locator('body').click({position:{x:40,y:130}})
   await page.keyboard.press('Escape')
-  await expect(board.locator('.board-pdf-reader')).toHaveCount(0)
+  await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
   await expect(board.locator('.app')).toHaveAttribute('data-library-split','true')
   await expect(library.getByText('Guía de integrales.PDF',{exact:true}).first()).toBeVisible()
   // Close the subject dialog first, then Escape closes the split view.

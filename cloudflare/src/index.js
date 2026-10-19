@@ -1,14 +1,6 @@
-import { DurableObject } from 'cloudflare:workers'
 import { apiJson } from './auth.js'
 export { IdentityDirectory } from './auth.js'
-
-// Authentication is available; shared content synchronization remains a separate release.
-// A room's stable name will be its shared content ID, independent of UI routes.
-export class SharedContentRoom extends DurableObject {
-  async checkStorage() {
-    return this.ctx.storage.sql.exec('SELECT 1 AS ready').one().ready === 1
-  }
-}
+export { SharedContentRoom } from './cooperation.js'
 
 function json(body, status = 200, headers = {}) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
@@ -17,6 +9,24 @@ function json(body, status = 200, headers = {}) {
 export default {
   async fetch(request, env, execution) {
     const url = new URL(request.url)
+    if (url.pathname.startsWith('/api/cooperation/')) {
+      if (url.pathname.startsWith('/api/cooperation/socket/')) {
+        const id=url.pathname.split('/').at(-1)
+        if(!/^[a-f0-9-]{36}$/.test(id || ''))return json({detail:'Sala inválida.'},404)
+        return env.CONTENT_ROOMS.getByName(id).fetch(request)
+      }
+      if(!['GET','POST','PUT'].includes(request.method))return apiJson({detail:'Método no permitido.'},405)
+      if(request.method!=='GET' && request.headers.get('origin')!==env.CURSADO_ORIGIN)return apiJson({detail:'Origen no permitido.'},403)
+      const limit=4*1024*1024
+      if(request.method==='POST') {
+        if(request.method==='POST' && !(request.headers.get('content-type') || '').startsWith('application/json'))return apiJson({detail:'Usá JSON para enviar los datos.'},415)
+        const reader=request.body?.getReader(), chunks=[];let size=0
+        if(reader)while(true){const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>limit){await reader.cancel();return apiJson({detail:'La solicitud es demasiado grande.'},413)}chunks.push(part.value)}
+        const body=new Uint8Array(size);let offset=0;for(const chunk of chunks){body.set(chunk,offset);offset+=chunk.byteLength}
+        request=new Request(request.url,{method:request.method,headers:request.headers,body})
+      }
+      try{return await env.IDENTITY_DIRECTORY.getByName('pizarra-identities-v1').fetch(request)}catch{return apiJson({detail:'No se pudo conectar con Cooperativo.'},503)}
+    }
     if (url.pathname.startsWith('/api/auth/') || ['/api/library','/api/calendars','/api/calendar/events'].includes(url.pathname)) {
       const supported = ['/api/auth/me','/api/auth/guest','/api/auth/login','/api/auth/logout','/api/auth/avatar','/api/auth/set-password','/api/library','/api/calendars','/api/calendar/events']
       if (!supported.includes(url.pathname)) return apiJson({detail:'Esta función todavía no está disponible.'},501)
@@ -59,7 +69,7 @@ export default {
         env.CONTENT_FILES.head(`${env.CONTENT_PREFIX}infrastructure-health`),
       ])
       if (!sqlite) throw new Error('Storage unavailable')
-      const response = json({ ok: true, service: 'cursado-realtime', phase: 'authentication', authenticationReady: Boolean(env.AUTH_PEPPER && env.IDENTITY_DIRECTORY), collaborationReady: false,
+      const response = json({ ok: true, service: 'cursado-realtime', phase: 'cooperation', authenticationReady: Boolean(env.AUTH_PEPPER && env.IDENTITY_DIRECTORY), collaborationReady: true,
         bindings: { durableObjects: true, sqlite: true, r2: true } }, 200, { 'Cache-Control': 'public, max-age=60' })
       execution.waitUntil(caches.default.put(key, response.clone()))
       return response

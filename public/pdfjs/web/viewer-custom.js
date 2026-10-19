@@ -486,6 +486,8 @@
     } finally {
       await writable.close();
     }
+    state.cooperativePdfHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', pdfBytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+    window.dispatchEvent(new Event('cursado-workspace-saved'));
   }
 
   function cleanupLocalWorkspaceObjectUrl() {
@@ -498,6 +500,7 @@
   async function createLocalWorkspaceObjectUrl() {
     const fileHandle = await getWorkspaceFileHandle(state.query?.workspaceFileId);
     const file = await fileHandle.getFile();
+    state.cooperativePdfHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('');
     return URL.createObjectURL(file);
   }
 
@@ -4839,6 +4842,22 @@
     }
   }
 
+  window.addEventListener('cursado-cooperation-applied', async event => {
+    if (!isLocalWorkspaceMode() || !state.query?.workspaceFileId || !state.app?.pdfDocument || state.isSyncing || state.isOpeningLocalWorkspaceDocument || hasUnsyncedAnnotations()) return;
+    if (event.detail?.subjectId && event.detail.subjectId !== state.query.subjectId) return;
+    try {
+      const file = await (await getWorkspaceFileHandle(state.query.workspaceFileId)).getFile();
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('');
+      if (hash === state.cooperativePdfHash || hasUnsyncedAnnotations() || state.isSyncing) return;
+      const page = state.app.pdfViewer.currentPageNumber, scale = state.app.pdfViewer.currentScaleValue;
+      const container = state.app.pdfViewer.container, top = container.scrollTop, left = container.scrollLeft;
+      cleanupLocalWorkspaceObjectUrl();
+      await openLocalWorkspaceDocumentInViewer();
+      state.app.pdfViewer.currentScaleValue = scale;
+      state.app.pdfViewer.currentPageNumber = Math.min(page, state.app.pdfDocument.numPages);
+      container.scrollTop = top; container.scrollLeft = left;
+    } catch (error) { console.warn('No se pudo actualizar el PDF cooperativo:', error); }
+  });
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
       void init();

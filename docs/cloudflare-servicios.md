@@ -37,8 +37,8 @@ en el panel de Cloudflare. R2 mantiene las condiciones de facturación de la
 cuenta existente.
 
 `GET /health` y `/healthz` comprueban acceso al namespace, SQLite y R2. Una
-respuesta correcta incluye `phase: "authentication"`, `authenticationReady` y
-`collaborationReady: false`. Se cachea durante 60 segundos.
+respuesta correcta incluye `phase: "cooperation"`, `authenticationReady` y
+`collaborationReady: true`. Se cachea durante 60 segundos.
 
 ## Estado de la integración
 
@@ -47,7 +47,9 @@ La API implementa creación de usuario (`/api/auth/guest`), ingreso
 cambio de contraseña. El formulario existente conserva esos contratos.
 La biblioteca empieza vacía y la interfaz abre o crea una pizarra privada local.
 El calendario se presenta vacío; sus escrituras, las pizarras compartidas,
-invitaciones, WebSockets y reconocimiento siguen respondiendo 501.
+invitaciones y reconocimiento de las rutas antiguas siguen respondiendo 501.
+La colaboración de Estudio usa la nueva API `/api/cooperation/`, independiente
+de esas rutas. Ver [Estudio cooperativo](cooperativo.md).
 Las cuentas Python anteriores no se migran automáticamente.
 
 Para usar este acceso, configurar `PIZARRA_BACKEND_URL` en Vercel con
@@ -68,7 +70,7 @@ como secreto de Wrangler. Desde otra computadora, restaurar ese respaldo de
 manera privada. Las mutaciones verifican el origen y el tamaño de los datos.
 Los límites de intentos por cuenta y red persisten al reiniciar el objeto.
 
-La evolución prevista es una sala por contenido compartido: copia local,
+La colaboración de Estudio usa una sala por esfera compartida: copia local,
 operaciones identificadas, autorización por sala, presencia temporal,
 WebSocket con hibernación y recuperación tras desconexión. Los PDF originales
 irán a R2; anotaciones y explicaciones se vincularán al ID y versión del PDF.

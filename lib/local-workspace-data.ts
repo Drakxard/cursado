@@ -1,6 +1,7 @@
 "use client"
 
 import { isNativeReadOnly, nativeFileUrl, readOnlyError } from './native-workspace.ts'
+import { COOPERATIVE_TAB_ID } from './cooperation-model.ts'
 import { readWorkspaceFileText } from './workspace-file-read.ts'
 
 import type {
@@ -1086,7 +1087,7 @@ function normalizeLocalWorkspaceTabsState(input: Partial<LocalWorkspaceTabsState
       return left.createdAt.localeCompare(right.createdAt)
     })[0]?.id ?? null
   const hasActiveCandidate =
-    activeCandidate === MAIN_WORKSPACE_TAB_ID ? isMainWorkspaceTabVisible : Boolean(workspaceTabs[activeCandidate])
+    activeCandidate === COOPERATIVE_TAB_ID || (activeCandidate === MAIN_WORKSPACE_TAB_ID ? isMainWorkspaceTabVisible : Boolean(workspaceTabs[activeCandidate]))
 
   return {
     workspaceTabs,
@@ -1671,6 +1672,7 @@ function buildSubjectFolderMigrationPlans(
   for (const subject of Object.values(inputState.customSubjects)) {
     const safeName = createLocalSubjectDirectoryName(subject.name)
     const catalogEntry = findCatalogSubjectByAnyId(catalog, subject.id) ?? findCatalogSubjectByName(catalog, safeName)
+    if (catalogEntry?.cooperationId) continue
     const subjectId = catalogEntry?.id ?? subject.id
     const sources = new Set([
       subject.id,
@@ -1709,10 +1711,11 @@ function reconcileLocalSubjectCatalogState(
       state = replaceWorkspaceSubjectId(state, subject.id, existing.id, existing.storageKey)
     }
     const entry: LocalSubjectCatalogEntry = {
+      ...(existing?.cooperationId ? { cooperationId: existing.cooperationId } : {}),
       id: existing?.id ?? subject.id,
       name: safeName,
       normalizedName: normalizeLocalSubjectName(safeName),
-      storageKey: safeName,
+      storageKey: existing?.cooperationId ? existing.storageKey : safeName,
       createdAt: existing?.createdAt ?? subject.createdAt,
       updatedAt: existing?.name === safeName && existing.storageKey === safeName ? existing.updatedAt : timestamp,
     }
@@ -1987,6 +1990,11 @@ export async function renameLocalCatalogSubject(subjectId: string, name: string)
   const current = findCatalogSubjectByAnyId(catalog, subjectId)
   if (!current) return null
   const safeName = createLocalSubjectDirectoryName(name)
+  if (current.cooperationId) {
+    const updated = { ...current, name: safeName, normalizedName: normalizeLocalSubjectName(safeName), updatedAt: nowIso() }
+    await writeLocalSubjectCatalog({ ...catalog, subjects: { ...catalog.subjects, [current.id]: updated } })
+    return updated
+  }
   const duplicate = findCatalogSubjectByName(catalog, safeName) ?? findCatalogSubjectByDirectoryName(catalog, safeName)
   if (duplicate && duplicate.id !== current.id) {
     await runSubjectFolderMigrations([{

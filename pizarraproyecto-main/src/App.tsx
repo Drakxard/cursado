@@ -2,7 +2,7 @@ import { PIZARRA_API_ROOT } from './backend'
 import { beforeHome } from './homeNavigation'
 import { BOARD_PDF_MIME, parseBoardPdfDrag } from '../../lib/board-library-contract'
 import { useBoardLibrary } from './BoardLibraryPanels'
-import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace } from './topicWorkspace'
+import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace, receiveTopicWorkspace, sendTopicLive } from './topicWorkspace'
 import { mergeBoard } from './storage/merge'
 import { applyScenePatch } from './storage/livePatch'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
@@ -857,6 +857,7 @@ function App() {
   const liveStrokeProgressRef = useRef<{id:string;sent:number;lastSent:number}|null>(null)
 
   function sendLive(value: Record<string,unknown>) {
+    if (isTopicWorkspace()) sendTopicLive(value)
     const socket = liveSocketRef.current
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value))
   }
@@ -1978,6 +1979,50 @@ function App() {
     undoRef.current.push(snapshot())
     applySnapshot(redoRef.current.pop()!)
   }
+
+  useEffect(() => {
+    let stopped = false, timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async () => {
+      if (stopped || !isTopicWorkspace()) return
+      if (!loadedRef.current || savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
+      const local = { ...snapshot(), camera: cameraRef.current }
+      try {
+        const merged = await receiveTopicWorkspace(local)
+        if (stopped || !merged) return
+        // If drawing began during disk I/O, retry against the current draft.
+        if (savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
+        strokesRef.current = merged.strokes; textsRef.current = merged.texts; mediaRef.current = merged.media
+        shapesRef.current = (merged.shapes || []) as ShapeItem[]; tablesRef.current = (merged.tables || []) as SheetItem[]
+        graphsRef.current = (merged.graphs || []) as BoardGraphItem[]; videosRef.current = (merged.videos || []) as YouTubeItem[]
+        setGraphs([...graphsRef.current]); setVideos([...videosRef.current]); refreshTables(n => n + 1)
+        redraw(); hydrateMedia(mediaRef.current)
+        for (const [key, remote] of remoteStrokesRef.current) if (remote.done) remoteStrokesRef.current.delete(key)
+      } catch (error) { console.warn('No se pudo actualizar la pizarra cooperativa:', error) }
+    }
+    const receive = (event: MessageEvent) => {
+      if (event.origin === location.origin && event.source === parent && event.data?.type === 'topic-board:refresh') { clearTimeout(timer); void refresh() }
+      if (event.origin !== location.origin || event.source !== parent || event.data?.type !== 'topic-board:live') return
+      const msg = event.data.payload
+      if (!msg) return
+      if (msg.type === 'presence' && Array.isArray(msg.users)) {
+        setLiveConnected(msg.connected !== false); setLiveUsers(msg.users); setLiveSelf(msg.you || null); liveSelfRef.current = msg.you || null
+        const present = new Set(msg.users.map((user: LiveUser) => user.id))
+        for (const [key, cursor] of remoteCursorsRef.current) if (!present.has(cursor.userId)) remoteCursorsRef.current.delete(key)
+      } else if (msg.type === 'cursor_move' && msg.point && msg.client_id) {
+        remoteCursorsRef.current.set(msg.client_id, { clientId: msg.client_id, userId: msg.user_id, name: msg.name, color: msg.color || '#6366f1', emoji: msg.emoji || '🙂', point: msg.point, updated: Date.now() })
+      } else if (msg.type === 'cursor_hide') remoteCursorsRef.current.delete(msg.client_id)
+      else if (msg.client_id && msg.stroke_id) {
+        const key = `${msg.client_id}:${msg.stroke_id}`, remote = remoteStrokesRef.current.get(key)
+        if (msg.type === 'stroke_start' && msg.point) remoteStrokesRef.current.set(key, { stroke: { points: [msg.point], color: msg.color, width: msg.width, highlighter: msg.highlighter === true } as Stroke, done: false, updated: Date.now() })
+        if (msg.type === 'stroke_points' && remote && Array.isArray(msg.points)) { remote.stroke.points.push(...msg.points); remote.updated = Date.now() }
+        if (msg.type === 'stroke_end' && remote) { remote.done = true; remote.updated = Date.now() }
+        if (msg.type === 'stroke_cancel') remoteStrokesRef.current.delete(key)
+      }
+      redraw()
+    }
+    window.addEventListener('message', receive)
+    return () => { stopped = true; clearTimeout(timer); window.removeEventListener('message', receive) }
+  }, [])
 
   async function persistBoard() {
     if (nativeBoardMode()) return
@@ -4704,7 +4749,7 @@ function App() {
       onAuxClick={e=>{if(e.button===1&&(e.target as HTMLElement).closest('canvas,.board-scene'))e.preventDefault()}}
       onDragEnter={onFileDragEnter} onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave} onDrop={onFileDrop}>
-      {liveBoardId && !privateBoard(liveBoardId) && <aside className="live-presence" aria-label="Usuarios activos en esta pizarra">
+      {liveBoardId && (!privateBoard(liveBoardId) || (isTopicWorkspace() && liveUsers.length > 0)) && <aside className="live-presence" aria-label="Usuarios activos en esta pizarra">
         <span className={`live-presence-state ${liveConnected?'':'disconnected'}`} title={liveConnected?'Conectado':'Reconectando'} />
         {liveUsers.map(user=><button type="button" key={user.id}
           className={`live-presence-avatar ${user.id===liveSelf?'live-presence-self':''} ${following===user.id?'following':''}`}

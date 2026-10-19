@@ -16,6 +16,7 @@ import { normalizePdfQuery } from "@/lib/subject-pdf-search"
 import { DatalabApiCard } from "@/components/datalab-api-card"
 import { needsDatalabConfiguration } from "@/lib/client/datalab-config"
 import { LoaderCircle } from "lucide-react"
+import { cooperationDeletionFor, guardCooperationElement } from '@/lib/client/cooperation'
 
 export type VoiceImagesHandle = { escape: () => boolean; dictate: (final: string, interim: string) => void }
 type Target = { groupId: string } | { name: string; color: string }
@@ -151,6 +152,12 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectId])
 
+  useEffect(() => {
+    const applied = (event: Event) => { if ((event as CustomEvent).detail?.subjectId === subjectId && !locked.current) void refresh() }
+    window.addEventListener('cursado-cooperation-applied', applied)
+    return () => window.removeEventListener('cursado-cooperation-applied', applied)
+  }, [subjectId])
+
   useEffect(() => () => { if (viewer) URL.revokeObjectURL(viewer.url) }, [viewer])
 
   useImperativeHandle(ref, () => ({ dictate: (final, interim) => {
@@ -273,7 +280,8 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
     if (mounted.current) setBusy(false)
   }
 
-  async function openImage(image: VoiceImage) {
+  async function openImage(image: VoiceImage, reviewing = false) {
+    if (!reviewing && cooperationDeletionFor(subjectId, image.id)) { await guardCooperationElement(subjectId, image.id, () => { void openImage(image, true) }); return }
     if (locked.current) return
     locked.current = true
     setBusy(true)
@@ -336,9 +344,9 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
             : group ? group.images.filter(image => !isDiscarded(history, scope, "image", image.id)).map(image => <SubjectImageBubble key={image.id} image={image} color={group.color} disabled={busy || !historyReady}
               open={() => void openImage(image)} remove={() => removeItem({ scope, kind: "image", itemId: image.id })} failed={failure => setError(message(failure))} />)
             : workspace.groups.map((item) => <HandDrawnBubble key={item.id} seed={item.id} color={item.color} disabled={busy}
-              className="aspect-square min-h-0 max-w-full shrink-0 px-5 py-5"
+              className={`aspect-square min-h-0 max-w-full shrink-0 px-5 py-5 ${cooperationDeletionFor(subjectId, item.id) ? 'opacity-40 grayscale' : ''}`}
               style={{ width: voiceGroupDiameter(visibleGroupCount(item)), fontSize: Math.min(28, voiceGroupDiameter(visibleGroupCount(item)) / 8) }}
-              onClick={() => setGroupId(item.id)} onDrop={(event) => drop(event, item.id)} aria-label={`${item.name}, ${visibleGroupCount(item)} ${item.pdfs?.length ? "elementos" : "imágenes"}`}>
+              onClick={() => { void guardCooperationElement(subjectId, item.id, () => setGroupId(item.id)) }} onDrop={(event) => drop(event, item.id)} aria-label={`${item.name}, ${visibleGroupCount(item)} ${item.pdfs?.length ? "elementos" : "imágenes"}`}>
               <span className="block">{item.name}</span><span className="mt-3 block text-5xl sm:text-6xl">{visibleGroupCount(item)}</span>
             </HandDrawnBubble>)}
           {searching && historyReady && visiblePdfs.map(result => <SubjectPdfBubble key={result.id} result={result}

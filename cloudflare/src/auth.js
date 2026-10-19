@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { initializeCooperation, cooperationRequest } from './cooperation-directory.js'
 
 const COOKIE = 'pizarra_sid'
 const SESSION_SECONDS = 90 * 86400
@@ -64,6 +65,7 @@ export class IdentityDirectory extends DurableObject {
     super(ctx,env)
     this.secret = env.AUTH_PEPPER
     this.sql = ctx.storage.sql
+    initializeCooperation(this.sql)
     this.sql.exec(`CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, login_name TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
       color TEXT NOT NULL, emoji TEXT NOT NULL, password_hash TEXT NOT NULL,
@@ -102,6 +104,7 @@ export class IdentityDirectory extends DurableObject {
     try {
       if (!this.secret || this.secret.length < 32) fail(503,'El acceso de Pizarra todavía no está configurado.')
       const path = new URL(request.url).pathname, method = request.method
+      if (path.startsWith('/api/cooperation/')) return await cooperationRequest(this,request)
       if (path === '/api/auth/me' && method === 'GET') return apiJson(profile((await this.authenticated(request)).user))
       if (path === '/api/library' && method === 'GET') {
         await this.authenticated(request)
@@ -161,7 +164,7 @@ export class IdentityDirectory extends DurableObject {
       }
       fail(404,'Ruta no encontrada.')
     } catch (error) {
-      return apiJson({detail:error instanceof ApiError ? error.message : 'No se pudo completar el acceso. Intentá nuevamente.'},error instanceof ApiError ? error.status : 500)
+      return apiJson({detail:error instanceof ApiError ? error.message : error instanceof SyntaxError ? 'El cuerpo debe ser JSON válido.' : 'No se pudo completar el acceso. Intentá nuevamente.'},error instanceof ApiError ? error.status : error instanceof SyntaxError ? 422 : 500)
     }
   }
 }

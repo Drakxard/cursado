@@ -1,6 +1,9 @@
 "use client"
 
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
+import { CooperationPanel, useCooperation } from '@/components/cooperation'
+import { COOPERATIVE_TAB_ID, cooperationGroupTab, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
+import type { SphereBinding } from '@/lib/client/cooperation-files'
 import type { BoardPdfReference } from "@/lib/board-library-contract"
 
 import { isNativeReadOnly } from '@/lib/native-workspace'
@@ -634,7 +637,7 @@ function normalizeWorkspaceTabsState(input: Partial<WorkspaceTabsState> | null |
       : MAIN_WORKSPACE_TAB_ID
   const firstWorkspaceTabId = sortWorkspaceTabs(workspaceTabs)[0]?.id ?? null
   const hasActiveCandidate =
-    activeCandidate === MAIN_WORKSPACE_TAB_ID ? isMainWorkspaceTabVisible : Boolean(workspaceTabs[activeCandidate])
+    activeCandidate === COOPERATIVE_TAB_ID || (activeCandidate === MAIN_WORKSPACE_TAB_ID ? isMainWorkspaceTabVisible : Boolean(workspaceTabs[activeCandidate]))
   const customSubjects = normalizeCustomSubjects(
     input?.customSubjects && typeof input.customSubjects === "object"
       ? (input.customSubjects as Record<string, CustomSubject>)
@@ -1269,7 +1272,7 @@ export function SubjectWheel({
   boardLibrary?: boolean
 }) {
   const router = useRouter()
-  const [containerBoard, setContainerBoard] = useState<{ boardId: string; name: string; pdfReferences: BoardPdfReference[] } | null>(null)
+  const [containerBoard, setContainerBoard] = useState<{ boardId: string; name: string; pdfReferences: BoardPdfReference[]; cooperationSubjectId?: string } | null>(null)
   const closeContainerBoard = useCallback(() => setContainerBoard(null), [])
   const localWorkspace = useLocalWorkspace()
   const localWorkspaceReady =
@@ -1322,7 +1325,7 @@ export function SubjectWheel({
     isMainWorkspaceTabVisible,
   }
   const workspaceTabList = useMemo(
-    () => getWorkspaceTabList(workspaceTabs, isMainWorkspaceTabVisible),
+    () => [...getWorkspaceTabList(workspaceTabs, isMainWorkspaceTabVisible), { id: COOPERATIVE_TAB_ID, name: 'Cooperativo', color: '#16a34a', createdAt: '', subjectIds: [] }],
     [isMainWorkspaceTabVisible, workspaceTabs]
   )
   const activeWorkspaceTab = useMemo(
@@ -1343,6 +1346,34 @@ export function SubjectWheel({
       .filter((subject): subject is CustomSubject => Boolean(subject))
   }, [activeWorkspaceTab, builtInVisibleSubjects, customSubjects])
   const visibleSubjectIds = useMemo(() => visibleSubjects.map((subject) => subject.id), [visibleSubjects])
+  const cooperative = useCooperation()
+  useEffect(() => {
+    const bindings = Object.values(cooperative.mirrors).filter(m => !m.downloading && !cooperative.deletions.some(d => d.sphereId === m.binding.id && d.key === 'sphere.json' && d.decision === 'delete')).map(m => m.binding)
+    if (!bindings.length) return
+    setCustomSubjects(previous => {
+      const next = { ...previous }
+      for (const b of bindings) next[b.subjectId] = { ...(next[b.subjectId] || { id: b.subjectId, tabId: b.owner ? 'main' : cooperationGroupTab(b.groupId), createdAt: new Date().toISOString(), targetWeekday: 0 }), storageKey: b.storageKey, name: b.name, color: b.color }
+      return JSON.stringify(next) === JSON.stringify(previous) ? previous : next
+    })
+    setWorkspaceTabs(previous => {
+      const next = { ...previous }
+      for (const group of cooperative.groups) {
+        const id = cooperationGroupTab(group.id), subjects = bindings.filter(b => b.groupId === group.id).map(b => b.subjectId)
+        const existing = next[id]
+        next[id] = { id, name: group.members.map(m => m.display_name).join(', '), color: '#16a34a', createdAt: existing?.createdAt || new Date().toISOString(), subjectIds: [...new Set([...(existing?.subjectIds || []), ...subjects])] }
+      }
+      return JSON.stringify(next) === JSON.stringify(previous) ? previous : next
+    })
+  }, [cooperative])
+  useEffect(() => {
+    const remove = (event: Event) => {
+      const b = (event as CustomEvent<SphereBinding>).detail
+      setWorkspaceTabs(previous => Object.fromEntries(Object.entries(previous).map(([id, tab]) => [id, { ...tab, subjectIds: tab.subjectIds.filter(s => s !== b.subjectId) }])))
+      setCustomSubjects(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => id !== b.subjectId)))
+    }
+    window.addEventListener('cursado-cooperation-remove-subject', remove)
+    return () => window.removeEventListener('cursado-cooperation-remove-subject', remove)
+  }, [])
 
   useEffect(() => {
     if (isNativeReadOnly() || !LOCAL_STORAGE_MODE || !localWorkspaceReady) return
@@ -1881,9 +1912,33 @@ export function SubjectWheel({
     const sourceTabId = deleteConfirmationTarget.type === "tab"
       ? deleteConfirmationTarget.id
       : activeWorkspaceTabId
-    return workspaceTabList.filter((tab) => tab.id !== sourceTabId)
+    return workspaceTabList.filter((tab) => tab.id !== sourceTabId && tab.id !== COOPERATIVE_TAB_ID && !tab.id.startsWith('cooperative-'))
   }, [activeWorkspaceTabId, deleteConfirmationTarget, workspaceTabList])
 
+  const cooperateDeleteTarget = async (groupId: string, move: boolean) => {
+    if (!deleteConfirmationTarget) return
+    setIsPermanentlyDeleting(true)
+    try {
+      for (const id of getDeleteTargetSubjectIds(deleteConfirmationTarget)) {
+        const subject = customSubjects[id] || SUBJECTS.find(s => s.id === id)
+        if (subject) await shareCooperationSphere(groupId, subject)
+      }
+      if (move) {
+        const ids = new Set(getDeleteTargetSubjectIds(deleteConfirmationTarget)), destination = cooperationGroupTab(groupId)
+        setWorkspaceTabs(previous => {
+          const next = Object.fromEntries(Object.entries(previous).filter(([id]) => deleteConfirmationTarget.type !== 'tab' || id !== deleteConfirmationTarget.id).map(([id, tab]) => [id, { ...tab, subjectIds: tab.subjectIds.filter(s => !ids.has(s)) }]))
+          const group = cooperative.groups.find(g => g.id === groupId)!
+          next[destination] = { ...(next[destination] || { id: destination, name: group.members.map(m => m.display_name).join(', '), color: '#16a34a', createdAt: new Date().toISOString() }), subjectIds: [...new Set([...(next[destination]?.subjectIds || []), ...ids])] }
+          return next
+        })
+        setCustomSubjects(previous => Object.fromEntries(Object.entries(previous).map(([id, subject]) => [id, ids.has(id) ? { ...subject, tabId: destination } : subject])))
+        hasUserChangedWorkspaceStateRef.current = true
+        setActiveWorkspaceTabId(destination)
+      }
+      setDeleteConfirmationTarget(null); setDeleteSummaries([])
+    } catch (error) { setWorkspaceNoticeMessage((error as Error).message) }
+    finally { setIsPermanentlyDeleting(false) }
+  }
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isNextWeekDialogOpen, setIsNextWeekDialogOpen] = useState(false)
   const [currentSubject, setCurrentSubject] = useState<Subject | null>(null)
@@ -2973,6 +3028,11 @@ export function SubjectWheel({
   useEffect(() => {
     void loadSubjectDayData()
   }, [loadSubjectDayData])
+  useEffect(() => {
+    const refresh = () => { void loadSubjectDayData(); void refreshLocalWeekOptions(); if (currentSubject) void loadMaterialContainers(currentSubject.id) }
+    window.addEventListener('cursado-cooperation-applied', refresh)
+    return () => window.removeEventListener('cursado-cooperation-applied', refresh)
+  }, [loadSubjectDayData, refreshLocalWeekOptions, currentSubject, loadMaterialContainers])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -6928,14 +6988,14 @@ export function SubjectWheel({
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-muted"
                 aria-label={`Abrir pizarra de ${title}`} title={`Abrir pizarra de ${title}`}
                 onClick={() => {
-                  const key = JSON.stringify([currentSubject.id, container?.id ?? mode,
+                  const key = JSON.stringify([canonicalCooperationSubject(currentSubject.id), canonicalCooperationElement(currentSubject.id, container?.id ?? mode),
                     container?.isPinned ? "pinned" : isWeeklyExercisesScope ? dialogSelectedWeekNumber : subjectDialogDateKey])
                   void crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)).then(hash => {
-                    const boardId = "study-" + Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("")
-                    setContainerBoard({ boardId, name: `${currentSubject.name} - ${title}`, pdfReferences: materialsForMode
+                    const boardId = localCooperationBoardId(currentSubject.id, "study-" + Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join(""))
+                    void guardCooperationElement(currentSubject.id, undefined, () => setContainerBoard({ boardId, cooperationSubjectId: currentSubject.id, name: `${currentSubject.name} - ${title}`, pdfReferences: materialsForMode
                       .filter(material => !("is_pending_upload" in material) && /\.pdf$/i.test(material.file_name))
                       .map(material => ({ materialId: material.id, subjectId: material.subject_id, fileName: material.file_name,
-                        workspaceFileId: material.drive_file_id?.startsWith("workspace://") ? material.drive_file_id : null })) })
+                        workspaceFileId: material.drive_file_id?.startsWith("workspace://") ? material.drive_file_id : null })) }), `progreso/pizarras/${boardId}.json`)
                   })
                 }}><img src="/pizarra-home.svg" alt="" className="h-7 w-7 object-contain" /></button>}
             {container?.kind === "custom" && activeContainerControlsId === container.id && editingContainerId !== container.id ? (
@@ -6975,6 +7035,14 @@ export function SubjectWheel({
             filteredMaterialsForMode.map((material) => (
               <div
                 key={material.id}
+                data-cooperative-material={material.id}
+                onClickCapture={event => {
+                  if (!currentSubject || !cooperationDeletionFor(currentSubject.id, material.id)) return
+                  const anchor = (event.target as HTMLElement).closest('a')
+                  if (!anchor) return
+                  event.preventDefault(); event.stopPropagation()
+                  void guardCooperationElement(currentSubject.id, material.id, () => window.open(anchor.href, '_blank', 'noopener,noreferrer'))
+                }}
                 draggable={!isMaterialEditSaving && !("is_pending_upload" in material)}
                 onDragStart={(event) => {
                   if ("is_pending_upload" in material) {
@@ -7013,9 +7081,11 @@ export function SubjectWheel({
                 }}
                 className={cn(
                   "rounded-xl border bg-card px-3 py-3 transition",
+                  currentSubject && cooperationDeletionFor(currentSubject.id, material.id) && 'opacity-45 grayscale',
                   tagDropMaterialId === material.id ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-border"
                 )}
               >
+                {currentSubject && cooperationPersonalFor(currentSubject.id, material.id) && <span className="mb-1 block text-xs text-muted-foreground">Personal</span>}
                 {"is_pending_upload" in material ? (
                   <div className="space-y-2">
                     <span className="block min-w-0 truncate text-sm text-muted-foreground">{material.file_name}</span>
@@ -7440,7 +7510,7 @@ export function SubjectWheel({
             <div className="pointer-events-auto flex max-h-[calc(100dvh-8rem)] min-w-0 flex-col items-start gap-1.5 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {workspaceTabList.map((tab) => {
                 const isActive = tab.id === activeWorkspaceTab.id
-                const canDragTab = !isNativeReadOnly() && tab.id !== MAIN_WORKSPACE_TAB_ID
+                const canDragTab = !isNativeReadOnly() && tab.id !== MAIN_WORKSPACE_TAB_ID && tab.id !== COOPERATIVE_TAB_ID && !tab.id.startsWith('cooperative-')
 
                 return (
                   <button
@@ -7451,6 +7521,7 @@ export function SubjectWheel({
                       selectWorkspaceTab(tab.id)
                     }}
                     onPointerDown={() => {
+                      if (tab.id === COOPERATIVE_TAB_ID || tab.id.startsWith('cooperative-')) return
                       startLongPressDelete({ type: "tab", id: tab.id, label: tab.name })
                     }}
                     onPointerUp={cancelLongPressDelete}
@@ -7537,6 +7608,11 @@ export function SubjectWheel({
       />
       {/* Main Content */}
       <main className="absolute inset-0 overflow-y-auto px-4 py-12 sm:px-6">
+        {activeWorkspaceTabId === COOPERATIVE_TAB_ID ? <CooperationPanel onOpen={(subjectId, groupId) => {
+          selectWorkspaceTab(cooperationGroupTab(groupId))
+          const subject = customSubjects[subjectId]
+          if (subject) void handleSubjectClick(subject)
+        }} /> : <>
         <div className="flex min-h-[calc(100dvh-6rem)] items-center justify-center">
           {homeSubjectCards.length > 0 ? (
             <div className="mx-auto flex w-full max-w-5xl items-center justify-center">
@@ -7619,7 +7695,7 @@ export function SubjectWheel({
             <p className="text-muted-foreground">Todas las materias fueron vistas hoy</p>
           </div>
         )}
-        </div>
+        </div></>}
       </main>
 
       {/* Footer - Completed Subjects */}
@@ -7855,7 +7931,7 @@ export function SubjectWheel({
             </DialogClose>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length === 0 || isPermanentlyDeleting}>
+                <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.filter(g => g.accepted).length === 0 || isPermanentlyDeleting}>
                   Mover
                 </Button>
               </DropdownMenuTrigger>
@@ -7867,11 +7943,12 @@ export function SubjectWheel({
                     {tab.name}
                   </DropdownMenuItem>
                 ))}
+                {cooperative.groups.filter(g => g.accepted).map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, true)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}</DropdownMenuItem>)}
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length === 0 || isPermanentlyDeleting}>
+                <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.filter(g => g.accepted).length === 0 || isPermanentlyDeleting}>
                   <Copy className="h-4 w-4" />
                   Copiar a
                 </Button>
@@ -7884,6 +7961,7 @@ export function SubjectWheel({
                     {tab.name}
                   </DropdownMenuItem>
                 ))}
+                {cooperative.groups.filter(g => g.accepted).map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, false)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}</DropdownMenuItem>)}
               </DropdownMenuContent>
             </DropdownMenu>
             <Button

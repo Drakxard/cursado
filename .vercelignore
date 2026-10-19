@@ -1,0 +1,25 @@
+# Build generated browser bundles from source on Vercel.
+/public/pizarra/
+/public/library-reader/
+/public/native-web/
+/pizarraproyecto-main/dist/
+
+# Keep local configuration, runtime state and verification artifacts off uploads.
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+.wrangler/
+.cache/
+.vercel/
+.next/
+node_modules/
+test-results/
+playwright-report/
+*.tsbuildinfo
+*.log
+/deployed-*.js
+/deployed-home.html
+/visor-pdf-selector-img-main/
+/Secuencial/

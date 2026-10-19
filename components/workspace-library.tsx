@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { Share2, X, RefreshCw, QrCode, FolderOpen } from 'lucide-react'
 import { R2SetupGuide } from '@/components/r2-setup-guide'
+import { CooperationGroupForm } from '@/components/cooperation'
 import { libraryConnection } from '@/lib/client/workspace-library-connection'
 import { getLibraryPublicationProgress, libraryOwnerApi, libraryRoot, publishLibrary, readLibraryState, type PublicationProgress } from '@/lib/client/workspace-library'
 import { getReadyInscreenConfigToken, loadServicesFile, loadWorkspaceHandle, persistServicesFile, pickWorkspaceRootHandle, queryWorkspacePermission, requestWorkspacePermission, setReadyInscreenConfigToken, setReadyWorkspaceHandle } from '@/lib/local-workspace-client'
@@ -29,6 +30,7 @@ export function WorkspaceLibraryPublisher() {
 
 type Device = { deviceId: string; name: string; enabled: boolean; createdAt: string }
 export function WorkspaceLibraryButton() {
+  const [choice, setChoice] = useState<'choose' | 'cooperate' | 'devices'>('choose')
   const [open, setOpen] = useState(false), [root, setRoot] = useState<FileSystemDirectoryHandle | null>(null)
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [configured, setConfigured] = useState<boolean | null>(null)
   const [editing, setEditing] = useState(false), [help, setHelp] = useState(false), [connectionSource, setConnectionSource] = useState('')
@@ -114,7 +116,7 @@ export function WorkspaceLibraryButton() {
     setQr(await QRCode.toDataURL(result.pairingUri, { width: 400, margin: 2, errorCorrectionLevel: 'L' })); setExpires(result.expiresAt); setNow(Date.now())
   }
   useEffect(() => {
-    if (!open) return
+    if (!open || choice !== 'devices') return
     setConfigured(null); setEditing(false); setScreen('setup')
     void run(async () => {
       const handle = await loadWorkspaceHandle()
@@ -123,24 +125,31 @@ export function WorkspaceLibraryButton() {
     })
     // Opening the panel loads services without prompting for filesystem permission.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, choice])
   useEffect(() => {
-    if (!open) return
+    if (!open || choice !== 'devices') return
     const interval = setInterval(() => { setNow(Date.now()); if (workspaceId) void refreshDevices(workspaceId).catch(() => {}) }, 5000)
     return () => clearInterval(interval)
-  }, [open, workspaceId])
+  }, [open, workspaceId, choice])
   useEffect(() => {
-    if (!open || screen !== 'devices' || !workspaceId) return
+    if (!open || choice !== 'devices' || screen !== 'devices' || !workspaceId) return
     void run(async () => { await refreshDevices(workspaceId); if (location.protocol === 'https:' && (!qr || Date.now() >= expires)) await createQr(workspaceId) })
     // QR creation follows the completed publication, never byte-transfer progress.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, screen, workspaceId])
+  }, [open, screen, workspaceId, choice])
   const totalBytes = progress?.bytesTotal || 0, sentBytes = Math.min(progress?.bytesDone || 0, totalBytes)
   const percent = totalBytes > 0 ? Math.min(99, Math.floor(sentBytes / totalBytes * 100)) : null
   const mb = (bytes: number) => `${(bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB`
   return <>
-    <button className="library-share" aria-label="Sincronizar dispositivos" onClick={() => setOpen(true)}><Share2 size={35} /></button>
-    {open && <div className="library-overlay" onClick={() => setOpen(false)}><section role="dialog" aria-modal="true" aria-labelledby="library-title" className="library-panel" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setOpen(false) }}>
+    <button className="library-share" aria-label="Compartir" onClick={() => { setChoice('choose'); setOpen(true) }}><Share2 size={35} /></button>
+    {open && choice !== 'devices' && <div className="library-overlay" onClick={() => setOpen(false)}><section role="dialog" aria-modal="true" aria-label="Compartir" className="library-panel" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setOpen(false) }}>
+      <header><h1>{choice === 'choose' ? 'Compartir' : 'Estudio cooperativo'}</h1><button aria-label="Cerrar" onClick={() => setOpen(false)}><X /></button></header>
+      {choice === 'choose' ? <div className="grid gap-6 py-8 sm:grid-cols-2">
+        <button className="rounded-xl border p-6 text-center" onClick={() => setChoice('cooperate')}><span className="block text-xl">Estudio cooperativo</span><span aria-hidden="true" className="mt-6 flex justify-center gap-2 text-2xl"><span className="rounded-[50%] border-2 border-gray-500 px-4 py-2">A</span><span className="rounded-[50%] border-2 border-green-500 px-3 py-2 text-green-600">B</span><span className="rounded-[50%] border-2 border-purple-500 px-4 py-2 text-purple-600">C</span></span></button>
+        <button className="rounded-xl border p-6 text-center" onClick={() => setChoice('devices')}><span className="block text-xl">Sincronizar dispositivos</span><span aria-hidden="true" className="mt-6 block text-5xl">▱ ⇄ ▯</span></button>
+      </div> : <CooperationGroupForm onCreated={() => setOpen(false)} />}
+    </section></div>}
+    {open && choice === 'devices' && <div className="library-overlay" onClick={() => setOpen(false)}><section role="dialog" aria-modal="true" aria-labelledby="library-title" className="library-panel" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setOpen(false) }}>
       <header><h1 id="library-title">{screen === 'sync' ? 'Sincronizando tu biblioteca' : 'Sincronizá tus dispositivos'}</h1><div className="library-header-actions"><button aria-label="Cómo conseguir y configurar R2" title="Ayuda para conectar R2" onClick={() => { setHelpStep(0); setHelp(true) }}>❔</button><button aria-label="Cerrar" onClick={() => setOpen(false)}><X /></button></div></header>
       <div key={screen} className={`library-stage library-stage-${screen}`}>
       {screen === 'setup' && <>

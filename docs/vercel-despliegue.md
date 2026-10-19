@@ -3,6 +3,9 @@
 Importar el repositorio `Drakxard/cursado`, rama `main`, raíz `./` y framework
 **Next.js**. Mantener los comandos de instalación y compilación de `vercel.json`;
 no elegir la carpeta de Pizarra como raíz ni establecer `public` como salida.
+Para publicar desde la CLI, usar el proyecto existente `cursado` y conservar
+`.vercelignore`: excluye secretos locales, resultados de pruebas y paquetes
+generados, que el comando de compilación reconstruye en Vercel.
 
 El inicio, las pizarras privadas y el organizador local pueden compilarse y
 abrirse sin claves de proveedores. No se necesita `DATABASE_URL` en el modo
@@ -20,8 +23,10 @@ agregarlas o modificarlas, volver a desplegar.
 
 Se lee durante la compilación. Sin ella, la pizarra ofrece las privadas y copias
 del dispositivo, y la API compartida responde 503. Cloudflare permite crear
-usuarios, ingresar y restaurar sesiones; la colaboración y las otras funciones
-remotas están pendientes. Ver [Servicios Cloudflare](cloudflare-servicios.md).
+usuarios, ingresar, restaurar sesiones y cooperar por esferas con copias locales,
+sincronización en segundo plano y eliminaciones protegidas. Publicar tanto el
+Worker como la aplicación para habilitar cambios de Cooperativo. Ver
+[Estudio cooperativo](cooperativo.md) y [Servicios Cloudflare](cloudflare-servicios.md).
 Si se usa Python, debe seguir conectado. En su `hosting.local.json`, actualizar `publicOrigin` al
 origen HTTPS del nuevo sitio y `backendOrigin` al del servidor; reiniciar Python.
 
@@ -53,7 +58,8 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 `ALLOWED_GOOGLE_EMAIL` y `APP_AUTH_SECRET` corresponden al acceso administrado
 del organizador en modo de base de datos; no son necesarios en su modo local
-actual. La cuenta de la pizarra se administra en Python y permanece independiente.
+actual. La cuenta de la pizarra se administra en el backend configurado
+(Cloudflare o Python) y permanece independiente.
 
 Conservar los nombres y las mayúsculas exactamente como aparecen aquí. Las
 claves son variables del servidor: no agregarles el prefijo `NEXT_PUBLIC_`,

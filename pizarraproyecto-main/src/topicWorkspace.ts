@@ -4,11 +4,15 @@ import { getActiveBoardId, selectBoard, setStorageSession } from './biblioteca'
 import type { BoardContentWithExtras } from './biblioteca'
 import { deviceDB, emptyContent, readDeviceBoard, writeDeviceBoard } from './storage/device'
 import { nativeBoardMode } from './nativeWorkspace'
+import { mergeCooperation, type Json } from '../../lib/cooperation-model'
 
-type TopicWorkspace = { pdfReferences?: BoardPdfReference[]; boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
+type TopicWorkspace = { cooperationSubjectId?: string; pdfReferences?: BoardPdfReference[]; boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
 type TopicSnapshot = { version: 1; boardId: string; name: string; content: BoardContentWithExtras; assets: Record<string, string> }
 let workspace: TopicWorkspace | null = null
+let presented: BoardContentWithExtras | null = null
+let saved: BoardContentWithExtras | null = null
 export const getTopicWorkspaceRoot = () => workspace?.rootHandle ?? null
+export function sendTopicLive(payload: Record<string, unknown>) { if (!workspace?.cooperationSubjectId) return; parent.postMessage({ type: 'topic-board:ephemeral', boardId: workspace.boardId, payload }, location.origin) }
 export const isTopicWorkspace = () => workspace !== null || (nativeBoardMode() && new URLSearchParams(location.search).has('topicBoard'))
 export function notifyTopicWorkspace(type: 'ready' | 'closed' | 'error', error?: string) {
   if (workspace) parent.postMessage({ type: `topic-board:${type}`, boardId: workspace.boardId, error }, location.origin)
@@ -57,6 +61,8 @@ export async function initializeTopicWorkspace(input: TopicWorkspace) {
   await writeDeviceBoard({ key: id, id, name: input.name, folder_id: null, version: cached?.version ?? 0,
     updated_at: new Date().toISOString(), storage: 'private', content })
   workspace = input
+  presented = structuredClone(content)
+  saved = structuredClone(content)
   setStorageSession(null, false)
   selectBoard(id, false)
   await saveTopicWorkspace()
@@ -67,7 +73,14 @@ export async function saveTopicWorkspace() {
   if (getActiveBoardId() !== `local:important-${workspace.boardId}`) throw new Error('La pizarra activa no corresponde al tema.')
   const board = await readDeviceBoard(getActiveBoardId())
   if (!board) throw new Error('No se encontró la pizarra del tema.')
-  const content = board.content
+  let content = board.content
+  const directory = await boardDirectory(workspace.rootHandle)
+  try {
+    const latest = JSON.parse(await (await (await directory.getFileHandle(`${workspace.boardId}.json`)).getFile()).text()) as TopicSnapshot
+    const camera = content.camera
+    content = mergeCooperation(saved as unknown as Json, content as unknown as Json, latest.content as unknown as Json) as unknown as BoardContentWithExtras
+    content.camera = camera
+  } catch (error) { if ((error as Error).name !== 'NotFoundError') throw error }
   const assets: Record<string, string> = {}
   for (const media of content.media) {
     const blob = await (await deviceDB).get('assets', `device:${media.assetId}`) as Blob | undefined
@@ -79,9 +92,29 @@ export async function saveTopicWorkspace() {
       reader.readAsDataURL(blob)
     })
   }
-  const directory = await boardDirectory(workspace.rootHandle)
   const file = await directory.getFileHandle(`${workspace.boardId}.json`, { create: true })
   const writer = await file.createWritable()
-  await writer.write(JSON.stringify({ version: 1, boardId: workspace.boardId, name: workspace.name, content, assets } satisfies TopicSnapshot))
+  await writer.write(JSON.stringify({ version: 1, boardId: workspace.boardId, name: workspace.name, content, assets, cooperationSubjectId: workspace.cooperationSubjectId }))
   await writer.close()
+  saved = structuredClone(content)
+  parent.postMessage({ type: 'topic-board:saved', boardId: workspace.boardId }, location.origin)
+}
+
+export async function receiveTopicWorkspace(local: BoardContentWithExtras): Promise<BoardContentWithExtras | null> {
+  if (!workspace) return null
+  const directory = await boardDirectory(workspace.rootHandle)
+  const snapshot = JSON.parse(await (await (await directory.getFileHandle(`${workspace.boardId}.json`)).getFile()).text()) as TopicSnapshot
+  if (!snapshot.content || snapshot.boardId !== workspace.boardId) throw new Error('Pizarra recibida inválida.')
+  const merged = mergeCooperation(presented as unknown as Json, local as unknown as Json, snapshot.content as unknown as Json) as unknown as BoardContentWithExtras
+  merged.camera = local.camera
+  for (const media of merged.media || []) {
+    const data = snapshot.assets[media.assetId]
+    if (!data || !/^data:[^,]*;base64,/.test(data)) continue
+    const comma = data.indexOf(',')
+    const bytes = Uint8Array.from(atob(data.slice(comma + 1)), c => c.charCodeAt(0))
+    await (await deviceDB).put('assets', new Blob([bytes], { type: data.slice(5, data.indexOf(';')) }), `device:${media.assetId}`)
+  }
+  presented = structuredClone(merged)
+  saved = structuredClone(snapshot.content)
+  return merged
 }

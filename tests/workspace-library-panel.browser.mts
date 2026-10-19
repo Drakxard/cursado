@@ -34,6 +34,8 @@ test('saved R2 stays hidden and is reused; missing R2 has an illustrated guide; 
         await route.fulfill({ contentType: 'text/html', body: `<html><head><style>${css}</style></head><body><div id="root"></div><script src="/panel.js"></script></body></html>` })
       })
       await page.goto('https://cursado.test')
+      await page.getByRole('button', { name: 'Compartir', exact: true }).click()
+      await page.getByRole('button', { name: 'Estudio cooperativo' }).waitFor()
       await page.getByRole('button', { name: 'Sincronizar dispositivos' }).click()
       if (scenario === 'workspace' || scenario === 'deployment') {
         await page.getByText('✓ R2 conectado', { exact: true }).waitFor()
@@ -83,6 +85,7 @@ test('saved R2 stays hidden and is reused; missing R2 has an illustrated guide; 
       return route.fulfill(path === '/panel.js' ? { contentType: 'text/javascript', body: bundle.outputFiles[0].text } : path === '/api/inscreen/workspace/config' ? { contentType: 'application/json', body: JSON.stringify({ ok: true, configured: true, source: 'deployment' }) } : { contentType: 'text/html', body: `<html><head><style>${css}</style></head><body><div id="root"></div><script src="/panel.js"></script></body></html>` })
     })
     await page.goto('https://cursado.test')
+    await page.getByRole('button', { name: 'Compartir', exact: true }).click()
     await page.getByRole('button', { name: 'Sincronizar dispositivos' }).click()
     await page.getByRole('heading', { name: 'Sincronizando tu biblioteca' }).waitFor()
     for (const phase of ['recovering', 'uploading', 'verifying']) {
@@ -97,6 +100,7 @@ test('saved R2 stays hidden and is reused; missing R2 has an illustrated guide; 
         await page.getByText('1 de 4 archivos · faltan 3', { exact: true }).waitFor()
         await page.screenshot({ path: '.cache/library-sync-stage.png' })
         await page.getByRole('button', { name: 'Cerrar', exact: true }).click()
+        await page.getByRole('button', { name: 'Compartir', exact: true }).click()
         await page.getByRole('button', { name: 'Sincronizar dispositivos' }).click()
         await page.getByText('25 %', { exact: true }).waitFor()
         assert.equal(await page.getByRole('button', { name: 'Generar nuevo QR' }).count(), 0)
