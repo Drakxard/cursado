@@ -7,14 +7,15 @@ import { cooperationSubjectSyncLabel } from '@/lib/client/cooperation'
 
 export function CooperationSyncStatus({ subjectId }: { subjectId: string }) {
   const state = useCooperation()
-  const [online, setOnline] = useState(false)
+  const [online, setOnline] = useState<boolean | null>(null)
   useEffect(() => {
     const update = () => setOnline(navigator.onLine !== false)
     window.addEventListener('online', update); window.addEventListener('offline', update); update()
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
   }, [])
   if (!Object.values(state.mirrors).some(mirror => mirror.binding.subjectId === subjectId)) return null
-  const label = online ? cooperationSubjectSyncLabel(subjectId) : '???'
+  const label = online === null ? null : online ? cooperationSubjectSyncLabel(subjectId) : '???'
+  if (label === null) return null
   return <span className="shrink-0 text-sm font-normal tabular-nums text-muted-foreground" aria-label={label === '???' ? 'Sincronización sin confirmar' : `Sincronización ${label}`}>{label}</span>
 }
 
