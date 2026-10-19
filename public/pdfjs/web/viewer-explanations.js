@@ -122,11 +122,22 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       if (!state.root) { localStorage.setItem(`pdf-explanations:${state.key}`, json); return; }
       const previous = await read(state.root, state.path);
       if (previous && window.cursadoMergeCooperation) {
-        state.data = window.cursadoMergeCooperation(cooperativeBaseline, state.data, previous);
+        const merged = window.cursadoMergeCooperation(cooperativeBaseline, state.data, previous);
+        // Editor callbacks retain each entry. A merge must update those objects,
+        // otherwise later edits/deletions only change detached, stale records.
+        const entries = new Map(state.data.entries.map(entry => [entry.id, entry]));
+        merged.entries = merged.entries.map(next => {
+          const entry = entries.get(next.id);
+          if (!entry) return next;
+          for (const key of Object.keys(entry)) if (!(key in next)) delete entry[key];
+          return Object.assign(entry, next);
+        });
+        state.data = merged;
         cooperativeBaseline = structuredClone(state.data);
       }
       if (previous) await write(state.root, state.path + ".backup", JSON.stringify(previous));
       await write(state.root, state.path, JSON.stringify(state.data));
+      try { localStorage.setItem(`pdf-explanations:${state.key}`, JSON.stringify(state.data)); } catch {}
       window.dispatchEvent(new Event('cursado-workspace-saved'));
     });
     saving = next;
