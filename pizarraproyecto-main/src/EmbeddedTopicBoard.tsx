@@ -26,7 +26,7 @@ export default function EmbeddedTopicBoard() {
       if (event.origin !== location.origin || event.source !== parent || event.data?.boardId !== boardId) return
       if (event.data.type === 'topic-board:init' && !initialized) {
         initialized = true
-        void initializeTopicWorkspace({ boardId: boardId!, name: String(event.data.name || 'Tema'), rootHandle: event.data.rootHandle, pdfReferences: event.data.pdfReferences, cooperationSubjectId: event.data.cooperationSubjectId }).then(() => {
+        void initializeTopicWorkspace({ boardId: boardId!, name: String(event.data.name || 'Tema'), rootHandle: event.data.rootHandle, pdfReferences: event.data.pdfReferences, cooperationWeekNumber: event.data.cooperationWeekNumber, cooperationSubjectId: event.data.cooperationSubjectId }).then(() => {
           if (alive) setReady(true)
         }).catch(reason => {
           const message = String(reason)

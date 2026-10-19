@@ -263,8 +263,14 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await imported.locator('#step-title').filter({ hasText: 'Dos valores en cada nodo' }).waitFor()
     assert.equal(generations, 2)
     await page.getByRole("button", { name: "Salir de la explicación" }).click()
-    const lastNote = page.locator(".pdf-explanation-text").last()
+    const lastNote = page.locator(".pdf-explanation-text").filter({ hasText: 'Explicalo' })
+    await lastNote.scrollIntoViewIfNeeded()
     const lastBox = await lastNote.boundingBox()
+    const dragHit = await lastNote.evaluate((element, box) => {
+      const hit = document.elementFromPoint(box.x + 20, box.y + 8)
+      return { matches: !!hit && element.contains(hit), hit: hit?.outerHTML.slice(0, 500), box, mode: window.PDFViewerApplication?.pdfViewer.annotationEditorMode }
+    }, lastBox)
+    assert.equal(dragHit.matches, true, JSON.stringify(dragHit))
     await page.mouse.move(lastBox.x + 20, lastBox.y + 8)
     await page.mouse.down()
     await page.mouse.move(lastBox.x + 80, lastBox.y + 48, { steps: 6 })
@@ -306,7 +312,18 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     // original annotation too, rather than resurrecting the interactive note.
     await page.reload()
     await initialize()
-    await page.waitForFunction(() => [...(window.PDFViewerApplication.pdfDocument.annotationStorage.serializable.map?.values() || [])].some(annotation => annotation.deleted))
+    try {
+      await page.waitForFunction(() => [...(window.PDFViewerApplication.pdfDocument.annotationStorage.serializable.map?.values() || [])].some(annotation => annotation.deleted))
+    } catch (error) {
+      const diagnostic = await page.evaluate(async () => {
+        const pdf = window.PDFViewerApplication.pdfDocument
+        const annotations = await (await pdf.getPage(1)).getAnnotations()
+        const layer = window.PDFViewerApplication.pdfViewer.getPageView(0).annotationEditorLayer?.annotationEditorLayer
+        return { annotations: annotations.map(a => ({id:a.id, subtype:a.subtype, text:a.textContent, contents:a.contentsObj, native:!!layer?.getEditableAnnotation(a.id)})), storage:[...(pdf.annotationStorage.serializable.map?.values() || [])], manifests:Object.entries(localStorage).filter(([key]) => key.startsWith('pdf-explanations:')).map(([key,value]) => [key,JSON.parse(value).entries.map(({html,...entry}) => entry)]), notes:[...document.querySelectorAll('.pdf-explanation-text')].map(el => ({text:el.innerText,classes:el.className})) }
+      })
+      console.log('Deleted-note restoration', JSON.stringify(diagnostic))
+      throw error
+    }
     await note.waitFor({ state: 'detached' })
     assert.equal(await note.count(), 0)
     bytes = Uint8Array.from(await page.evaluate(async () => Array.from(await window.PDFViewerApplication.pdfDocument.saveDocument())))

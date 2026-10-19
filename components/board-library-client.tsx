@@ -37,6 +37,9 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
       }
     }
     const escape = (event:KeyboardEvent) => {
+      if(reader && event.key==='<' && !event.defaultPrevented && !event.repeat && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && !(event.target as Element)?.closest('input,textarea,select,[contenteditable],[role="textbox"]')) {
+        event.preventDefault();send('board-library:reader-closed');return
+      }
       if(event.key!=='Escape' || event.defaultPrevented || event.repeat) return
       if(reader) {if(!viewerHost.current?.querySelector('iframe')){event.preventDefault();send('board-library:reader-closed')}return}
       if((event.target as Element)?.closest('input,textarea,select,[contenteditable=true]') || document.querySelector('[role=dialog],[role=alertdialog]')) return

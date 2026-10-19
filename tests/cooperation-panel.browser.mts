@@ -5,16 +5,19 @@ import { chromium } from '@playwright/test'
 
 test('cooperative UI accepts username lists, keeps declined spheres gray and offers deletion review and personal copies', async () => {
   const fixture = `
-    const sphere={id:'sphere-1',group_id:'group-1',name:'Álgebra',color:'#2563eb',created_by:'a',bytes:2500000};
+    const sphere={id:'sphere-1',group_id:'group-1',name:'Álgebra',color:'#2563eb',created_by:'a',bytes:2500000,ready:false};
     const state={version:1,userId:'b',groups:[{id:'group-1',accepted:false,members:[{id:'a',display_name:'PersonaA'},{id:'b',display_name:'PersonaB'}],spheres:[sphere]}],mirrors:{},deletions:[]};
     const changed=()=>dispatchEvent(new Event('cursado-cooperation-changed'));
+    window.publishSphere=()=>{sphere.ready=true;changed()};
+    window.resetInvitation=()=>{state.mirrors={};state.deletions=[];state.dismissedSpheres=[];changed()};
     export const cooperationState=()=>state;
     export const refreshCooperation=async()=>state;
+    export const synchronizeCooperation=async()=>{};
     export const createCooperationGroup=async names=>{window.createdNames=names;return 'group-1'};
     export const dismissCooperationSphere=async id=>{state.dismissedSpheres=[id];changed()};
     export const notifyCooperationDeletion=async id=>{state.deletions.find(d=>d.id===id).notified=true;changed()};
     export const decideCooperationDeletion=async(id,decision)=>{state.deletions.find(d=>d.id===id).decision=decision;changed()};
-    export const acceptCooperationSphere=async()=>{window.downloads=(window.downloads||0)+1;state.mirrors[sphere.id]={binding:{id:sphere.id,subjectId:'coop-subject',groupId:'group-1'},baseline:{conflicts:[]}};changed()};
+    export const acceptCooperationSphere=async(_sphere,options)=>{window.downloadOptions=options;window.downloads=(window.downloads||0)+1;state.mirrors[sphere.id]={binding:{id:sphere.id,name:sphere.name,subjectId:'coop-subject',groupId:'group-1'},baseline:{conflicts:[]},downloading:true,metadataReady:true,transfer:{phase:'downloading',completed:0,total:2}};changed()};
     export const startCooperationBackground=()=>{queueMicrotask(changed);return ()=>{}};
     window.prepareDeletion=()=>{state.deletions.push({id:'delete-1',sphereId:sphere.id,key:'sphere.json',selector:[],label:'Álgebra',decision:'wait'});changed()};
   `
@@ -26,11 +29,15 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
   try {
     const page = await browser.newPage()
     await page.route('https://cooperation.test/**', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }))
-    await page.goto('https://cooperation.test/')
+    await page.goto('https://cooperation.test/estudio')
     await page.addScriptTag({ content: bundled.outputFiles[0].text })
     const invitation = page.getByRole('dialog', { name: 'Nuevo contenido cooperativo' })
-    await invitation.getByText(/2,5 MB/).waitFor()
-    await invitation.getByRole('button', { name: 'Cancelar' }).click()
+    await page.getByText('Preparando publicación…', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Álgebra', exact: true }).click()
+    assert.equal(await invitation.count(),0)
+    await page.evaluate(() => (window as any).publishSphere())
+    await invitation.getByRole('heading', { name: 'Álgebra' }).waitFor()
+    await invitation.getByRole('button', { name: 'Cerrar invitación' }).click()
     assert.equal(await page.evaluate(() => (window as any).downloads || 0), 0)
     const sphere = page.getByRole('button', { name: 'Álgebra', exact: true })
     assert.match(await sphere.getAttribute('class'), /grayscale/)
@@ -39,8 +46,10 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     await page.getByRole('button', { name: 'Cooperar', exact: true }).click()
     assert.equal(await page.evaluate(() => (window as any).createdNames), '[PersonaA, PersonaC]')
     await sphere.click()
-    await page.getByRole('dialog', { name: 'Nuevo contenido cooperativo' }).getByRole('button', { name: 'Confirmar' }).click()
+    await page.getByRole('dialog', { name: 'Nuevo contenido cooperativo' }).getByRole('button', { name: 'Sincronizar todo' }).click()
     await page.getByText('Pendiente', { exact: false }).waitFor({ state: 'hidden' })
+    assert.equal(await page.evaluate(() => (window as any).downloadOptions.background), true)
+    await page.getByRole('complementary', { name: 'Sincronización cooperativa' }).getByText(/Metadatos disponibles/).waitFor()
     assert.doesNotMatch(await sphere.getAttribute('class'), /grayscale/)
     await sphere.click()
     assert.equal(await page.evaluate(() => (window as any).openedSubject), 'coop-subject')
@@ -53,5 +62,47 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     await deletion.getByRole('button', { name: 'Guardar', exact: true }).click()
     await page.getByText('Personal', { exact: true }).waitFor()
     assert.doesNotMatch(await sphere.getAttribute('class'), /grayscale/)
+    await page.evaluate(() => (window as any).resetInvitation())
+    await page.getByRole('dialog', { name: 'Nuevo contenido cooperativo' }).getByRole('button', { name: 'Elegir', exact: true }).click()
+    assert.equal(await page.evaluate(() => (window as any).downloadOptions.choose), true)
+    assert.equal(await page.evaluate(() => (window as any).downloadOptions.background), undefined)
+  } finally { await browser.close() }
+})
+
+
+test('week picker toggles whole weeks, navigates with angle keys and leaves editable/composing input alone', async () => {
+  const fixture = `
+    export const toggleCooperationWeek=async(id,week)=>{if(window.failToggle)throw new Error('Sin conexión');window.toggleWeek(week)};
+  `
+  const bundle = await build({ stdin: { contents: `
+    import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {CooperationWeekSelector} from './components/cooperation-week-selector';
+    function App(){const [week,setWeek]=useState(1),[excluded,setExcluded]=useState([1,2]);window.toggleWeek=w=>setExcluded(prev=>prev.includes(w)?prev.filter(v=>v!==w):[...prev,w]);
+    return <><CooperationWeekSelector sphereId="sphere-1" weekNumber={week} selection={{choosing:true,excludedWeeks:excluded,weeks:[1,2]}} onNavigate={direction=>setWeek(w=>Math.min(2,Math.max(1,w+direction)))}/><input aria-label="Texto"/><div contentEditable aria-label="Editor"/><button onClick={()=>window.finished=excluded}>Terminar</button></>};
+    createRoot(document.getElementById('root')).render(<App/>);
+  `, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, platform: 'browser', format: 'iife', define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'week-picker', setup(builder) {
+    builder.onResolve({ filter: /^@\/lib\/client\/cooperation$/ }, () => ({ path: 'cooperation', namespace: 'fixture' }))
+    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: fixture }))
+  } }] })
+  const browser = await chromium.launch({ headless: true, ...(process.env.CI ? {} : { channel: 'chrome' }) })
+  try {
+    const page = await browser.newPage()
+    await page.route('https://cooperation.test/**', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }))
+    await page.goto('https://cooperation.test/'); await page.addScriptTag({ content: bundle.outputFiles[0].text })
+    const toggle = page.getByRole('button', { name: /Sincronizar/ })
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
+    await toggle.click(); assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
+    await page.keyboard.press('>'); await toggle.getByText('Semana 2').waitFor()
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
+    await page.getByLabel('Texto').focus(); await page.keyboard.press('<'); await toggle.getByText('Semana 2').waitFor()
+    await page.getByLabel('Editor').focus(); await page.keyboard.press('<'); await toggle.getByText('Semana 2').waitFor()
+    await toggle.focus()
+    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown',{key:'<',isComposing:true})))
+    await toggle.getByText('Semana 2').waitFor()
+    await page.keyboard.press('<'); await toggle.getByText('Semana 1').waitFor()
+    await page.evaluate(() => (window as any).failToggle=true)
+    await toggle.click(); await page.getByRole('alert').getByText('Sin conexión').waitFor()
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
+    await page.getByRole('button',{name:'Terminar'}).click()
+    assert.deepEqual(await page.evaluate(() => (window as any).finished), [2])
   } finally { await browser.close() }
 })

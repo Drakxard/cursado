@@ -38,6 +38,9 @@ test('three participants, invitations, isolation, durable operation deduplicatio
   const { id: groupId } = await groupResponse.json()
   assert.equal((await (await request(a, 'groups', { names: 'PersonaC, PersonaB' })).json()).id, groupId)
   const sphere = await (await request(a, 'spheres', { groupId, name: 'Álgebra', color: '#2563eb' })).json()
+  const pendingGroups = await (await request(b, 'groups')).json()
+  assert.equal(pendingGroups.groups[0].spheres[0].id, sphere.id)
+  assert.equal(pendingGroups.groups[0].spheres[0].ready, false)
   const room = backend.env.CONTENT_ROOMS.getByName(sphere.id)
   for (const code of [1005, 1006, 1015]) {
     let replyCode = 0
@@ -74,4 +77,8 @@ test('three participants, invitations, isolation, durable operation deduplicatio
   await request(b, `spheres/${sphere.id}/operations`, { id: 'stale', changes: [{ key, type: 'json', value: initial }] })
   assert.equal((await (await request(c, `spheres/${sphere.id}/snapshot`)).json()).resources[key].deleted, true)
   assert.equal((await request(a, `spheres/${sphere.id}/operations`, { id: 'path', changes: [{ key: '../User.Services', type: 'json', value: {} }] })).status, 422)
+  await request(a, `spheres/${sphere.id}/operations`, { id: 'metadata', changes: [{ key: 'sphere.json', type: 'json', value: { subjectId: 'algebra', storageKey: 'algebra', name: 'Álgebra' } }] })
+  assert.equal((await (await request(b, 'groups')).json()).groups[0].spheres[0].ready, true)
+  await request(a, `spheres/${sphere.id}/operations`, { id: 'delete-sphere', changes: [{ key: 'sphere.json', type: 'delete' }] })
+  assert.equal((await (await request(b, 'groups')).json()).groups[0].spheres.length, 0)
 })

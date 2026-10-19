@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
+import { ListChecks, RefreshCw, X } from 'lucide-react'
+import { acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
 import { isNativeReadOnly } from '@/lib/native-workspace'
 
 export function useCooperation() {
@@ -33,28 +34,61 @@ export function CooperationGroupForm({ onCreated }: { onCreated?: () => void }) 
     <button type="submit" disabled={busy || !names.trim()} className="rounded border px-4 py-2 disabled:opacity-50">{busy ? 'Conectando…' : login ? 'Ingresar' : 'Cooperar'}</button>
   </form>
 }
+export function CooperationInvitation({ sphere, onClose, onAccepted }: { sphere: CooperativeSphere; onClose: () => void; onAccepted: () => void }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const accept = async (choose: boolean) => {
+    setBusy(true); setError('')
+    try {
+      await acceptCooperationSphere(sphere, choose ? { choose: true } : { background: true })
+      onAccepted()
+      if (choose && !location.pathname.startsWith('/estudio')) location.assign('/estudio')
+    } catch (reason) { setError((reason as Error).message) }
+    finally { setBusy(false) }
+  }
+  return <section role="dialog" aria-modal="true" aria-label="Nuevo contenido cooperativo" className="relative w-full max-w-sm space-y-5 rounded-2xl border bg-background p-6 text-foreground shadow-xl" onKeyDown={event => {
+    event.stopPropagation()
+    if (event.key === 'Escape') { event.preventDefault(); if (!busy) onClose() }
+    if (event.key === 'Tab') {
+      const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+      const target = event.shiftKey ? buttons.at(-1) : buttons[0]
+      if (!buttons.length || event.shiftKey && document.activeElement === buttons[0] || !event.shiftKey && document.activeElement === buttons.at(-1)) { event.preventDefault(); target?.focus() }
+    }
+  }}>
+    <button aria-label="Cerrar invitación" disabled={busy} onClick={onClose} className="absolute right-3 top-2 rounded-full px-2 py-1"><X className="h-5 w-5" /></button>
+    <h2 className="pr-5 text-lg font-medium">{sphere.name}</h2>
+    <div className="grid grid-cols-2 gap-3">
+      <button autoFocus disabled={busy} onClick={() => void accept(false)} className="rounded-xl border p-4 hover:bg-accent focus-visible:outline focus-visible:outline-2 disabled:opacity-50"><RefreshCw aria-hidden="true" className="mx-auto mb-2 h-6 w-6" />Sincronizar todo</button>
+      <button disabled={busy} onClick={() => void accept(true)} className="rounded-xl border p-4 hover:bg-accent focus-visible:outline focus-visible:outline-2 disabled:opacity-50"><ListChecks aria-hidden="true" className="mx-auto mb-2 h-6 w-6" />Elegir</button>
+    </div>
+    {busy && <p role="status" className="text-center text-sm text-muted-foreground">Cargando…</p>}
+    {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+  </section>
+}
 export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, groupId: string) => void }) {
-  const state = useCooperation(), [invite, setInvite] = useState<CooperativeSphere | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const state = useCooperation(), [invite, setInvite] = useState<CooperativeSphere | null>(null), [error, setError] = useState('')
   return <section className="relative z-10 mx-auto w-full max-w-2xl space-y-5 rounded-2xl border bg-background p-6 shadow-sm" aria-label="Estudio cooperativo">
     <h1 className="text-xl font-medium">Cooperativo</h1>
     <CooperationGroupForm />
+    {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
     {!state.groups.length && <p className="text-muted-foreground">Todavía no hay esferas compartidas. Agregá compañeros y copiá o mové una esfera al grupo.</p>}
     {state.groups.map(group => <section key={group.id} className="space-y-3 rounded-xl border p-4">
       <h2>{group.members.map(m => m.display_name).join(', ')}</h2>
       {!group.spheres.length && <p className="text-sm text-muted-foreground">Este grupo está vacío.</p>}
       <div className="flex flex-wrap gap-4">{group.spheres.map(sphere => {
-        const mirror = state.mirrors[sphere.id], ready = mirror && !mirror.downloading
+        const mirror = state.mirrors[sphere.id], ready = mirror && (!mirror.downloading || mirror.metadataReady)
         const deleted = state.deletions.find(d => d.sphereId === sphere.id && d.key === 'sphere.json')
         if (deleted?.decision === 'delete') return null
         return <div key={sphere.id} className="max-w-48 text-center">
           <button className={`min-h-20 min-w-28 rounded-[50%] border-2 p-4 ${!ready || deleted?.decision === 'wait' ? 'opacity-40 grayscale' : ''}`} style={{ borderColor: sphere.color }} onClick={() => {
-            if (!ready) setInvite(sphere)
+            if (!ready) { if (sphere.ready !== false) setInvite(sphere); return }
             else if (deleted?.decision === 'wait') window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending: deleted, open: () => onOpen(mirror.binding.subjectId, group.id) } }))
             else onOpen(mirror.binding.subjectId, group.id)
           }}>{sphere.name}</button>
-          {!ready && <p className="mt-1 text-xs">Pendiente · {(sphere.bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB</p>}
+          {sphere.ready === false && <p role="status" className="mt-1 text-xs">Preparando publicación…</p>}
+          {!ready && sphere.ready !== false && <p className="mt-1 text-xs">Pendiente · {(sphere.bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB</p>}
           {deleted?.decision === 'keep' && <p className="text-xs">Personal</p>}
-          {mirror?.error && <p role="alert" className="text-xs text-red-600">{mirror.error}</p>}
+          {mirror?.transfer && <p role="status" className="mt-1 text-xs">{mirror.transfer.phase === 'uploading' ? 'Subiendo' : 'Descargando'} archivos en segundo plano: {mirror.transfer.completed}/{mirror.transfer.total}</p>}
+          {mirror?.error && <div role="alert" className="text-xs text-red-600">{mirror.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button></div>}
           {mirror && mirror.baseline.conflicts.length > 0 && <details className="mt-2 text-left text-xs"><summary>Versiones recuperadas ({mirror.baseline.conflicts.length})</summary>{mirror.baseline.conflicts.map((entry, index) => <button key={index} className="mt-2 block underline" onClick={async () => {
             const item = entry as { key?: string; blob?: { hash: string } }
             let blob: Blob
@@ -70,22 +104,14 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
       })}</div>
       {state.deletions.filter(d => d.decision === 'wait' && state.mirrors[d.sphereId]?.binding.groupId === group.id).map(pending => <button key={pending.id} className="block text-sm text-muted-foreground underline" onClick={() => window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending, open: () => onOpen(state.mirrors[pending.sphereId].binding.subjectId, group.id) } }))}>{pending.label} · eliminación pendiente</button>)}
     </section>)}
-    {invite && <div role="dialog" aria-modal="true" aria-label="Nuevo contenido cooperativo" className="space-y-3 rounded-xl border p-4">
-      <p>Hay nuevo contenido de {state.groups.find(g => g.id === invite.group_id)?.members.filter(m => m.id === invite.created_by).map(m => m.display_name).join(', ') || 'tu compañero'}: <strong>{invite.name}</strong>.</p>
-      <p>Descarga inicial: {(invite.bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB.</p>
-      {error && <p role="alert">{error}</p>}
-      <div className="flex gap-3"><button disabled={busy} onClick={() => setInvite(null)}>Cancelar</button><button disabled={busy} onClick={async () => {
-        setBusy(true); setError('')
-        try { await acceptCooperationSphere(invite); setInvite(null) } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) }
-      }}>{busy ? 'Guardando copia local…' : 'Confirmar'}</button></div>
-    </div>}
+    {invite && <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><CooperationInvitation sphere={invite} onClose={() => setInvite(null)} onAccepted={() => setInvite(null)} /></div>}
   </section>
 }
 export function CooperationRuntime() {
   const state = useCooperation()
   const [review, setReview] = useState<{ pending: PendingDeletion; open?: () => void } | null>(null)
   const [error, setError] = useState('')
-  const [invitation, setInvitation] = useState<CooperativeSphere | null>(null), [busy, setBusy] = useState(false)
+  const [invitation, setInvitation] = useState<CooperativeSphere | null>(null)
   useEffect(() => {
     if (isNativeReadOnly()) return
     const reviewElement = (event: Event) => { setError(''); setReview((event as CustomEvent).detail) }
@@ -100,19 +126,22 @@ export function CooperationRuntime() {
   }, [state, review])
   useEffect(() => {
     if (invitation || review) return
-    const sphere = state.groups.flatMap(g => g.spheres).find(s => s.created_by !== state.userId && !state.mirrors[s.id] && !(state.dismissedSpheres || []).includes(s.id))
+    const sphere = state.groups.flatMap(g => g.spheres).find(s => s.ready !== false && s.created_by !== state.userId && !state.mirrors[s.id] && !(state.dismissedSpheres || []).includes(s.id))
     if (sphere) { setError(''); setInvitation(sphere) }
   }, [state, invitation, review])
-  if (invitation && !review) return <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><section role="dialog" aria-modal="true" aria-label="Nuevo contenido cooperativo" className="w-full max-w-md space-y-4 rounded-xl border bg-background p-6 text-foreground shadow-xl">
-    <p>Hay nuevo contenido de {state.groups.find(g => g.id === invitation.group_id)?.members.find(m => m.id === invitation.created_by)?.display_name || 'tu compañero'}: <strong>{invitation.name}</strong>.</p>
-    <p>{(invitation.bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB para guardar en este dispositivo.</p>
-    {error && <p role="alert">{error}</p>}
-    <div className="flex gap-4"><button disabled={busy} onClick={async () => { await dismissCooperationSphere(invitation.id); setInvitation(null) }}>Cancelar</button><button disabled={busy} onClick={async () => {
-      setBusy(true); setError('')
-      try { await acceptCooperationSphere(invitation); setInvitation(null) } catch (reason) { setError((reason as Error).message) } finally { setBusy(false) }
-    }}>{busy ? 'Guardando copia local…' : 'Confirmar'}</button></div>
-  </section></div>
-  if (!review) return null
+  if (invitation && !review) return <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><CooperationInvitation sphere={invitation} onClose={() => { void dismissCooperationSphere(invitation.id); setInvitation(null) }} onAccepted={() => setInvitation(null)} /></div>
+  if (!review) {
+    const transfers = Object.values(state.mirrors).filter(m => m.transfer || m.error)
+    if (!transfers.length && !(state.error && state.groups.length)) return null
+    return <aside aria-label="Sincronización cooperativa" className="fixed bottom-4 left-4 z-[240] max-w-sm space-y-2 rounded-xl border bg-background p-3 text-sm text-foreground shadow-lg">
+      {state.error && <p role="alert">{state.error}</p>}
+      {transfers.map(m => <div key={m.binding.id}>
+        <strong>{m.binding.name}</strong>
+        {m.error ? <p role="alert">{m.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button></p>
+          : <p role="status">{m.metadataReady && 'Metadatos disponibles. '}{m.transfer?.phase === 'uploading' ? 'Subiendo' : 'Descargando'} en segundo plano: {m.transfer?.completed}/{m.transfer?.total} archivos.</p>}
+      </div>)}
+    </aside>
+  }
   const decide = async (decision: 'wait' | 'keep' | 'delete') => {
     try { await decideCooperationDeletion(review.pending.id, decision); setReview(null); setError('') } catch (reason) { setError((reason as Error).message) }
   }

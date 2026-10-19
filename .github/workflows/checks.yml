@@ -4,6 +4,14 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      focus:
+        description: Comprobaciones a ejecutar
+        type: choice
+        default: all
+        options:
+          - all
+          - explanations
 
 permissions:
   contents: read
@@ -14,6 +22,7 @@ concurrency:
 
 jobs:
   checks:
+    if: ${{ inputs.focus != 'explanations' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -85,3 +94,72 @@ jobs:
             test-results/
             pizarraproyecto-main/test-results/
             ${{ runner.temp }}/cursado-next.log
+
+  board-cooperation:
+    if: ${{ inputs.focus != 'explanations' }}
+    name: Pizarra, API chat y cooperación semanal
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            pizarraproyecto-main/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: pizarraproyecto-main
+      - run: npx playwright install --with-deps chromium
+      - run: npm run typecheck
+      - name: Sincronización, exclusiones y ruta de API chat
+        run: node --test --experimental-strip-types tests/cooperation*.test.mts tests/board-chat.test.mts
+      - name: Invitaciones, selector semanal y overlay de chat
+        run: node --test --experimental-strip-types tests/cooperation-panel.browser.mts tests/board-api-chat.browser.mjs
+      - run: npm run build
+      - name: Pizarra y selección de semanas en la aplicación completa
+        shell: bash
+        run: |
+          node node_modules/next/dist/bin/next start > "$RUNNER_TEMP/cursado-board-cooperation.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --silent --fail http://localhost:3000/ > /dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail http://localhost:3000/ > /dev/null
+          node --test tests/cooperation-weeks.browser.mjs
+          node --test --test-name-pattern="pin follows" tests/board-library.browser.mjs
+      - name: Guardar capturas y diagnósticos de cooperación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pizarra-cooperacion-diagnosticos
+          if-no-files-found: ignore
+          path: |
+            test-results/
+            ${{ runner.temp }}/cursado-board-cooperation.log
+
+  explanation-regression:
+    name: Regresión puntual de estrella y zoom
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.focus == 'explanations' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:pdf-explanation-ui
+      - run: node --test --experimental-strip-types --test-name-pattern="PDF.js star generates|light graph player" tests/pdf-explanation.browser.mjs tests/pdf-explanation-graphs.browser.mts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: estrella-grafos-diagnosticos
+          if-no-files-found: ignore
+          path: test-results/

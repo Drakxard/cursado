@@ -11,11 +11,15 @@ export async function cooperationRequest(directory,request) {
   const url=new URL(request.url), parts=url.pathname.slice('/api/cooperation/'.length).split('/')
   if(parts[0]==='groups') {
     if(request.method==='GET') {
-      const groups=sql.exec(`SELECT g.*,m.accepted FROM cooperation_groups g JOIN cooperation_members m ON m.group_id=g.id WHERE m.user_id=?`,user.id).toArray().map(group=>({
+      const groups=await Promise.all(sql.exec(`SELECT g.*,m.accepted FROM cooperation_groups g JOIN cooperation_members m ON m.group_id=g.id WHERE m.user_id=?`,user.id).toArray().map(async group=>({
         id:group.id,accepted:!!group.accepted,
         members:sql.exec('SELECT u.id,u.display_name FROM users u JOIN cooperation_members m ON m.user_id=u.id WHERE m.group_id=?',group.id).toArray(),
-        spheres:sql.exec('SELECT * FROM cooperation_spheres WHERE group_id=? AND bytes>0',group.id).toArray(),
-      }))
+        spheres:(await Promise.all(sql.exec('SELECT * FROM cooperation_spheres WHERE group_id=?',group.id).toArray().map(async sphere=>{
+          // Zero bytes can mean either a new publication or a deleted sphere.
+          if(!sphere.bytes && (await env.CONTENT_ROOMS.getByName(sphere.id).summary()).deleted)return null
+          return {...sphere,ready:sphere.bytes>0}
+        }))).filter(Boolean),
+      })))
       return json({user:{id:user.id,name:user.display_name},groups})
     }
     if(request.method!=='POST')return json({detail:'Método no permitido.'},405)

@@ -6,7 +6,8 @@ import { isNativeReadOnly } from '@/lib/native-workspace'
 import { cooperationPresence, cooperationState, sendCooperationEditor } from '@/lib/client/cooperation'
 import { mapBindingText } from '@/lib/client/cooperation-files'
 
-export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfReferences, cooperationSubjectId, backLabel = "Volver a Temas" }: {
+export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfReferences, cooperationSubjectId, cooperationWeekNumber, backLabel = "Volver a Temas" }: {
+  cooperationWeekNumber?: number
   cooperationSubjectId?: string
   pdfReferences?: BoardPdfReference[]
   backLabel?: string
@@ -28,7 +29,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
       if (event.origin !== location.origin || event.source !== frame.current?.contentWindow || event.data?.boardId !== boardId) return
       if (event.data.type === "topic-board:request-init") {
         try {
-          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle, pdfReferences, cooperationSubjectId }, location.origin)
+          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle, pdfReferences, cooperationSubjectId, cooperationWeekNumber }, location.origin)
         } catch (reason) { setError(String(reason)) }
       }
       if (event.data.type === "topic-board:ready") {
@@ -62,7 +63,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
       window.removeEventListener('cursado-cooperation-presence', live)
       previousFocus?.focus({ preventScroll: true })
     }
-  }, [boardId, name, rootHandle, onClose, pdfReferences, cooperationSubjectId])
+  }, [boardId, name, rootHandle, onClose, pdfReferences, cooperationSubjectId, cooperationWeekNumber])
   const close = () => {
     if (isNativeReadOnly()) { onClose(); return }
     if (!ready) { onClose(); return }
@@ -78,7 +79,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
     <iframe ref={frame} title={`Pizarra de ${name}`} src={`/pizarra/?topicBoard=${encodeURIComponent(boardId)}`} className="min-h-0 w-full flex-1 border-0"
       onLoad={() => {
         try {
-          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle, pdfReferences, cooperationSubjectId }, location.origin)
+          if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle, pdfReferences, cooperationSubjectId, cooperationWeekNumber }, location.origin)
         } catch (reason) { setError(String(reason)) }
       }} />
   </div>

@@ -122,11 +122,22 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       if (!state.root) { localStorage.setItem(`pdf-explanations:${state.key}`, json); return; }
       const previous = await read(state.root, state.path);
       if (previous && window.cursadoMergeCooperation) {
-        state.data = window.cursadoMergeCooperation(cooperativeBaseline, state.data, previous);
+        const merged = window.cursadoMergeCooperation(cooperativeBaseline, state.data, previous);
+        // Editor callbacks retain each entry. A merge must update those objects,
+        // otherwise later edits/deletions only change detached, stale records.
+        const entries = new Map(state.data.entries.map(entry => [entry.id, entry]));
+        merged.entries = merged.entries.map(next => {
+          const entry = entries.get(next.id);
+          if (!entry) return next;
+          for (const key of Object.keys(entry)) if (!(key in next)) delete entry[key];
+          return Object.assign(entry, next);
+        });
+        state.data = merged;
         cooperativeBaseline = structuredClone(state.data);
       }
       if (previous) await write(state.root, state.path + ".backup", JSON.stringify(previous));
       await write(state.root, state.path, JSON.stringify(state.data));
+      try { localStorage.setItem(`pdf-explanations:${state.key}`, JSON.stringify(state.data)); } catch {}
       window.dispatchEvent(new Event('cursado-workspace-saved'));
     });
     saving = next;
@@ -356,14 +367,20 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       persist(state).catch(report);
     };
     const remove = editor.remove.bind(editor), rebuild = editor.rebuild.bind(editor);
+    let removedInThisSession = false;
     editor.remove = () => {
-      if (!entry.deleted) { entry.deleted = true; persist(state).catch(report); }
+      if (!entry.deleted) { removedInThisSession = true; entry.deleted = true; persist(state).catch(report); }
       remove();
       state.pdf.annotationStorage.resetModifiedIds();
     };
     editor.rebuild = () => {
-      // PDF.js restores the same editor when undoing a deletion.
-      if (entry.deleted) { entry.deleted = false; persist(state).catch(report); }
+      // Rebuild also runs during rendering. Only an undo of this editor's local
+      // deletion may revive a note; loading a persisted tombstone must not.
+      if (entry.deleted && removedInThisSession && !restoring) {
+        removedInThisSession = false;
+        entry.deleted = false;
+        persist(state).catch(report);
+      }
       rebuild();
       // Text undo rebuilds before FreeText finishes measuring its new contents.
       // Sync afterwards so the manifest and visibility follow undo/redo as well.
@@ -441,7 +458,8 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     }, true);
   }
   async function restore() {
-    if (!documentState || restoring || documentState.pdf !== app.pdfDocument) return;
+    if (!documentState || documentState.pdf !== app.pdfDocument) return;
+    if (restoring) { restore.pending = true; return; }
     restoring = true;
     try {
       const redraw = new Set();
@@ -487,7 +505,10 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
           keepXfaLayer: true, keepTextLayer: true, keepCanvasWrapper: true });
         app.pdfViewer.update();
       }
-    } catch (error) { report(error); } finally { restoring = false; }
+    } catch (error) { report(error); } finally {
+      restoring = false;
+      if (restore.pending) { restore.pending = false; void restore(); }
+    }
   }
   async function ask() {
     menu.hidden = true;
@@ -826,6 +847,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   });
   app.eventBus.on("pagerendered", restore);
   app.eventBus.on("annotationeditorlayerrendered", restore);
+  // The editor layer may exist before the native FreeText annotations do.
+  // Retry when those annotations are ready, including locally deleted notes.
+  app.eventBus.on("annotationlayerrendered", restore);
   app.eventBus.on("annotationeditormodechanged", restore);
   if (app.pdfDocument) load().then(restore).catch(report);
 };
