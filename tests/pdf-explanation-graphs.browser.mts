@@ -37,7 +37,9 @@ test('light graph player fits the viewport, zooms at the pointer with Ctrl+wheel
     }
     await page.setViewportSize({ width: 1366, height: 768 })
     await page.getByRole('button', { name: 'Ajustar gráfico al espacio', exact: true }).click()
-    const stage = (await page.locator('#stage').boundingBox())!, point = { x: stage.x + stage.width * .4, y: stage.y + stage.height * .6 }
+    // Chromium dispatches wheel coordinates in whole CSS pixels. Measure the
+    // anchor at that same point rather than at a fractional mouse coordinate.
+    const stage = (await page.locator('#stage').boundingBox())!, point = { x: Math.round(stage.x + stage.width * .4), y: Math.round(stage.y + stage.height * .6) }
     const worldPoint = () => page.evaluate(point => {
       const p = new DOMPoint(point.x,point.y).matrixTransform(document.querySelector<SVGSVGElement>('#scene')!.getScreenCTM()!.inverse())
       return { x: p.x, y: p.y }
