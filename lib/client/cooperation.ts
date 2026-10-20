@@ -690,10 +690,17 @@ export function startCooperationBackground() {
   requestDiscovery = () => { void refresh() }
   retryBackground = scheduleRetry
   connectedBackground = () => { attempts = 0 }
+  let observedUser = state.userId
+  const sessionChanged = () => {
+    if (state.userId === observedUser) return
+    observedUser = state.userId
+    if (observedUser) void refresh()
+  }
   const channel = new BroadcastChannel('cursado-library-changes')
   channel.onmessage = saved
   window.addEventListener('online', refresh); window.addEventListener('focus', refresh); window.addEventListener('cursado-workspace-saved', saved)
   window.addEventListener('offline', invalidateSyncStatus)
+  window.addEventListener('cursado-cooperation-changed', sessionChanged)
   if (navigator.onLine === false) void restoreCooperationOffline().catch(() => {})
   else void refresh()
   stopBackground = () => {
@@ -703,6 +710,7 @@ export function startCooperationBackground() {
     const activeSockets = [...sockets.values()]; sockets.clear()
     for (const socket of activeSockets) socket.close()
     window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); window.removeEventListener('cursado-workspace-saved', saved); window.removeEventListener('offline', invalidateSyncStatus)
+    window.removeEventListener('cursado-cooperation-changed', sessionChanged)
   }
   return release
 }
