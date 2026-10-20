@@ -50,7 +50,7 @@ test('real Cloudflare runtime: SQLite, R2 multipart, authenticated WebSockets, p
   const upload=await fetch(prepared.data.uploadUrl,{method:'PUT',headers:{Origin:origin,...prepared.data.headers},body:bytes})
   assert.equal(upload.status,200,await upload.text())
   const replay=await fetch(prepared.data.uploadUrl,{method:'PUT',headers:{Origin:origin,...prepared.data.headers},body:bytes})
-  assert.equal(replay.status,403)
+  assert.equal(replay.status,403,await replay.text())
   await api(`cooperation/spheres/${sphere.data.id}/operations`,cookieA,{id:crypto.randomUUID(),changes:[{key:'teoria/live/test.pdf',type:'blob',blob:{hash,size:bytes.length,mime:'application/pdf'}}]})
   const download=await fetch(`${base}/api/cooperation/spheres/${sphere.data.id}/files/${hash}`,{headers:{Cookie:cookieB}})
   assert.equal(download.status,200)

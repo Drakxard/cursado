@@ -45,13 +45,20 @@ export class SharedContentRoom extends DurableObject {
     return token
   }
   async receiveUpload(sphereId, fingerprint, request) {
-    if(request.headers.get('Origin')!==this.env.CURSADO_ORIGIN)return json({error:'Origen no permitido.'},403)
+    // Finish the incoming RPC stream before returning an early rejection. Leaving
+    // it unread disconnects large HTTP uploads before their 403 reaches the client.
+    const reject=async error=>{
+      const reader=request.body?.getReader()
+      if(reader)while(!(await reader.read()).done){}
+      return json({error},403)
+    }
+    if(request.headers.get('Origin')!==this.env.CURSADO_ORIGIN)return reject('Origen no permitido.')
     const token=new URL(request.url).searchParams.get('ticket') || ''
     const tokenHash=await hash(new TextEncoder().encode(token))
     const row=this.sql.exec('SELECT value FROM upload_tickets WHERE hash=? AND expires>?',tokenHash,Date.now()).toArray()[0]
-    if(!row)return json({error:'La autorización de subida venció o ya se utilizó.'},403)
+    if(!row)return reject('La autorización de subida venció o ya se utilizó.')
     const ticket=JSON.parse(row.value)
-    if(ticket.fingerprint!==fingerprint || request.headers.get('content-type')!==ticket.mime)return json({error:'Archivo no autorizado.'},403)
+    if(ticket.fingerprint!==fingerprint || request.headers.get('content-type')!==ticket.mime)return reject('Archivo no autorizado.')
     this.sql.exec('DELETE FROM upload_tickets WHERE hash=?',tokenHash)
     const result=await this.upload(sphereId,request,fingerprint,ticket.mime,ticket.size)
     return json(result,result.status || 200)
