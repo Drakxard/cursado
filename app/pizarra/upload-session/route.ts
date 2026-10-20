@@ -1,5 +1,5 @@
-import { createCooperationR2UploadSession } from '@/lib/cooperation-upload-session'
-import { withOptionalServicesConfig } from '@/lib/inscreen-user-config'
+import { createCooperationR2UploadSession, hasCooperationR2UploadConfig } from '@/lib/cooperation-upload-session'
+import { readInscreenUserConfig, withInscreenRuntimeConfig } from '@/lib/inscreen-user-config'
 
 export const runtime = 'nodejs'
 
@@ -19,7 +19,7 @@ async function handlePOST(request: Request) {
     // Membership is checked by the service that owns the Pizarra session.
     const authorization = await fetch(new URL(`/api/cooperation/spheres/${sphereId}/files/${hash}`, backend), {
       method: 'POST', headers: { Cookie: request.headers.get('cookie') || '', Origin: origin, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ size }), cache: 'no-store', redirect: 'error',
+      body: JSON.stringify({ size, mime }), cache: 'no-store', redirect: 'error',
     })
     const result = await authorization.json()
     if (!authorization.ok) return Response.json(result, { status: authorization.status })
@@ -28,13 +28,30 @@ async function handlePOST(request: Request) {
       if (!supportsReuse && !request.headers.get('x-inscreen-config-token')) return Response.json({ error: 'Esta pestaña usa una versión anterior de Cooperativo. Cerrá las otras pestañas de Cursado y recargá con Ctrl+Shift+R.' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } })
       return Response.json({ exists: true }, { headers: { 'Cache-Control': 'private, no-store' } })
     }
-    return Response.json(await createCooperationR2UploadSession({ objectKey: result.objectKey, bucket: result.bucket, hash, size, mime, workspaceId }), { headers: { 'Cache-Control': 'private, no-store' } })
+    const managedUpload = () => {
+      if (!result.uploadUrl) throw new Error('El servicio cooperativo no devolvió una autorización de subida.')
+      return Response.json({ uploadUrl: result.uploadUrl, headers: result.headers }, { headers: { 'Cache-Control': 'private, no-store' } })
+    }
+    const prepare = async () => {
+      if (!hasCooperationR2UploadConfig(result.bucket)) return managedUpload()
+      try {
+        const signed = await createCooperationR2UploadSession({ objectKey: result.objectKey, bucket: result.bucket, hash, size, mime, workspaceId })
+        return Response.json({ ...signed, ...(!signed.exists && result.uploadUrl ? { fallbackUploadUrl: result.uploadUrl, fallbackHeaders: result.headers } : {}) }, { headers: { 'Cache-Control': 'private, no-store' } })
+      } catch { return managedUpload() }
+    }
+    if (request.headers.get('x-inscreen-config-token')) {
+      try {
+        const config = readInscreenUserConfig(request)
+        return await withInscreenRuntimeConfig(config, prepare)
+      } catch { return managedUpload() }
+    }
+    return await prepare()
   } catch (error) {
     console.error('Cooperation upload session failed:', error)
-    return Response.json({ error: 'No se pudo preparar la subida a R2. Revisá la configuración R2 de User.Services o del servidor.' }, { status: 503 })
+    return Response.json({ error: 'No se pudo autorizar la subida cooperativa. Reintentá la sincronización.' }, { status: 503 })
   }
 }
 
 export function POST(request: Request) {
-  return withOptionalServicesConfig(request, () => handlePOST(request))
+  return handlePOST(request)
 }

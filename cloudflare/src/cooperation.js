@@ -11,6 +11,7 @@ export class SharedContentRoom extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS state (id TEXT PRIMARY KEY, value TEXT NOT NULL)')
     this.sql.exec('CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, seq INTEGER NOT NULL, value TEXT NOT NULL)')
     this.sql.exec('CREATE TABLE IF NOT EXISTS tickets (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL)')
+    this.sql.exec('CREATE TABLE IF NOT EXISTS upload_tickets (hash TEXT PRIMARY KEY, value TEXT NOT NULL, expires INTEGER NOT NULL)')
   }
   async checkStorage() {return this.sql.exec('SELECT 1 AS ready').one().ready === 1}
   read() {
@@ -36,6 +37,24 @@ export class SharedContentRoom extends DurableObject {
     this.sql.exec('DELETE FROM tickets WHERE expires<?',Date.now())
     this.sql.exec('INSERT INTO tickets VALUES (?,?,?)',await hash(new TextEncoder().encode(token)),JSON.stringify({id:userId,...profile}),Date.now()+60000)
     return token
+  }
+  async uploadTicket(userId, fingerprint, size, mime) {
+    const token=crypto.randomUUID()+crypto.randomUUID()
+    this.sql.exec('DELETE FROM upload_tickets WHERE expires<?',Date.now())
+    this.sql.exec('INSERT INTO upload_tickets VALUES (?,?,?)',await hash(new TextEncoder().encode(token)),JSON.stringify({userId,fingerprint,size,mime}),Date.now()+5*60*1000)
+    return token
+  }
+  async receiveUpload(sphereId, fingerprint, request) {
+    if(request.headers.get('Origin')!==this.env.CURSADO_ORIGIN)return json({error:'Origen no permitido.'},403)
+    const token=new URL(request.url).searchParams.get('ticket') || ''
+    const tokenHash=await hash(new TextEncoder().encode(token))
+    const row=this.sql.exec('SELECT value FROM upload_tickets WHERE hash=? AND expires>?',tokenHash,Date.now()).toArray()[0]
+    if(!row)return json({error:'La autorización de subida venció o ya se utilizó.'},403)
+    const ticket=JSON.parse(row.value)
+    if(ticket.fingerprint!==fingerprint || request.headers.get('content-type')!==ticket.mime)return json({error:'Archivo no autorizado.'},403)
+    this.sql.exec('DELETE FROM upload_tickets WHERE hash=?',tokenHash)
+    const result=await this.upload(sphereId,request,fingerprint,ticket.mime,ticket.size)
+    return json(result,result.status || 200)
   }
   async fetch(request) {
     const url=new URL(request.url), token=url.searchParams.get('ticket') || ''
@@ -82,7 +101,7 @@ export class SharedContentRoom extends DurableObject {
   snapshot() {return this.read()}
   snapshotResponse() {return json(this.read())}
   summary() {const state=this.read();return {deleted:!!state.resources['sphere.json']?.deleted,ready:!!state.resources['sphere.json']&&!state.resources['sphere.json'].deleted,name:state.resources['sphere.json']?.value?.name,color:state.resources['sphere.json']?.value?.color,bytes:Object.values(state.resources).filter(r=>!r.deleted).reduce((total,r)=>total+(r.blob?.size || new TextEncoder().encode(JSON.stringify(r.value)).length),0)}}
-  async upload(sphereId, request, expected, mime) {
+  async upload(sphereId, request, expected, mime, expectedSize) {
     if(!/^[a-f0-9]{64}$/.test(expected))return {error:'Archivo inválido.',status:422}
     const key=`${this.env.CONTENT_PREFIX}${sphereId}/${expected}`
     const upload=await this.env.CONTENT_FILES.createMultipartUpload(key,{httpMetadata:{contentType:mime || 'application/octet-stream'}})
@@ -98,11 +117,12 @@ export class SharedContentRoom extends DurableObject {
         const part=await reader.read();if(part.done)break
         size+=part.value.byteLength
         if(size>100*1024*1024){await reader.cancel();await upload.abort();return {error:'El archivo supera 100 MB.',status:413}}
+        if(expectedSize!==undefined && size>expectedSize){await reader.cancel();await upload.abort();return {error:'El tamaño del archivo no coincide.',status:422}}
         digest.update(part.value);chunks.push(part.value);buffered+=part.value.byteLength
         if(buffered>=8*1024*1024)await flush()
       }
       const actual=[...await digest.digest()].map(x=>x.toString(16).padStart(2,'0')).join('')
-      if(actual!==expected){await upload.abort();return {error:'El archivo no pasó la verificación.',status:422}}
+      if(actual!==expected || (expectedSize!==undefined && size!==expectedSize)){await upload.abort();return {error:'El archivo no pasó la verificación.',status:422}}
       if(buffered)await flush()
       if(!parts.length){await upload.abort();await this.env.CONTENT_FILES.put(key,new Uint8Array(),{httpMetadata:{contentType:mime || 'application/octet-stream'}})}
       else await upload.complete(parts)

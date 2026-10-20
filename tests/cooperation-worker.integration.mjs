@@ -42,8 +42,15 @@ test('real Cloudflare runtime: SQLite, R2 multipart, authenticated WebSockets, p
   await waitFor(()=>wsB.messages.find(m=>m.type==='changed'&&m.seq===1))
   // More than one multipart part, sent through real streaming DO RPC.
   const bytes=new Uint8Array(9*1024*1024).fill(83), hash=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex')
-  const upload=await fetch(`${base}/api/cooperation/spheres/${sphere.data.id}/files/${hash}`,{method:'PUT',headers:{Origin:origin,Cookie:cookieA,'Content-Type':'application/pdf'},body:bytes})
+  const prepared=await api(`cooperation/spheres/${sphere.data.id}/files/${hash}`,cookieA,{size:bytes.length,mime:'application/pdf'})
+  const preflight=await fetch(prepared.data.uploadUrl,{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'PUT','Access-Control-Request-Headers':'content-type'}})
+  assert.equal(preflight.status,204)
+  assert.equal(preflight.headers.get('access-control-allow-origin'),origin)
+  // No session cookie or personal S3 credentials are sent with the large body.
+  const upload=await fetch(prepared.data.uploadUrl,{method:'PUT',headers:{Origin:origin,...prepared.data.headers},body:bytes})
   assert.equal(upload.status,200,await upload.text())
+  const replay=await fetch(prepared.data.uploadUrl,{method:'PUT',headers:{Origin:origin,...prepared.data.headers},body:bytes})
+  assert.equal(replay.status,403)
   await api(`cooperation/spheres/${sphere.data.id}/operations`,cookieA,{id:crypto.randomUUID(),changes:[{key:'teoria/live/test.pdf',type:'blob',blob:{hash,size:bytes.length,mime:'application/pdf'}}]})
   const download=await fetch(`${base}/api/cooperation/spheres/${sphere.data.id}/files/${hash}`,{headers:{Cookie:cookieB}})
   assert.equal(download.status,200)

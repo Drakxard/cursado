@@ -8,6 +8,9 @@ export async function uploadCooperationFile(sphereId: string, hash: string, blob
   if (!session.ok) throw new Error(result.error || result.detail || 'No se pudo autorizar la subida cooperativa.')
   if (result.exists) return
   if (typeof result.uploadUrl !== 'string' || !result.uploadUrl) throw new Error('No se recibió una URL de subida. Cerrá las otras pestañas de Cursado y recargá esta pestaña.')
-  const response = await fetch(result.uploadUrl, { method: 'PUT', headers: result.headers, body: blob, credentials: 'omit' })
-  if (!response.ok) throw new Error(`No se pudo subir el archivo cooperativo a R2 (${response.status}).`)
+  let response: Response | undefined
+  try { response = await fetch(result.uploadUrl, { method: 'PUT', headers: result.headers, body: blob, credentials: 'omit' }) }
+  catch (error) { if (!result.fallbackUploadUrl) throw error }
+  if ((!response || !response.ok) && result.fallbackUploadUrl) response = await fetch(result.fallbackUploadUrl, { method: 'PUT', headers: result.fallbackHeaders, body: blob, credentials: 'omit' })
+  if (!response?.ok) throw new Error(`No se pudo subir el archivo cooperativo (${response?.status || 'sin conexión'}).`)
 }

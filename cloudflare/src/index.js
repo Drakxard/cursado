@@ -10,6 +10,18 @@ export default {
   async fetch(request, env, execution) {
     const url = new URL(request.url)
     if (url.pathname.startsWith('/api/cooperation/')) {
+      if (url.pathname.startsWith('/api/cooperation/upload/')) {
+        if(request.headers.get('origin')!==env.CURSADO_ORIGIN)return json({error:'Origen no permitido.'},403)
+        const parts=url.pathname.split('/'), id=parts[4], fingerprint=parts[5]
+        const headers={'Access-Control-Allow-Origin':env.CURSADO_ORIGIN,'Access-Control-Allow-Methods':'PUT, OPTIONS','Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'600','Vary':'Origin'}
+        if(parts.length!==6 || !/^[a-f0-9-]{36}$/.test(id || '') || !/^[a-f0-9]{64}$/.test(fingerprint || ''))return json({error:'Archivo inválido.'},404,headers)
+        if(request.method==='OPTIONS')return new Response(null,{status:204,headers})
+        if(request.method!=='PUT')return json({error:'Método no permitido.'},405,headers)
+        try {
+          const response=await env.CONTENT_ROOMS.getByName(id).receiveUpload(id,fingerprint,request)
+          return new Response(response.body,{status:response.status,headers:{...Object.fromEntries(response.headers),...headers}})
+        } catch {return json({error:'No se pudo completar la subida cooperativa.'},503,headers)}
+      }
       if (url.pathname.startsWith('/api/cooperation/notifications/socket/')) {
         const id=url.pathname.split('/').at(-1)
         if(!/^[a-f0-9]{32}$/.test(id || ''))return json({detail:'Canal inválido.'},404)

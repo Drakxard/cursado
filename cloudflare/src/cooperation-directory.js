@@ -90,11 +90,15 @@ export async function cooperationRequest(directory,request) {
   }
   if(parts[2]==='files' && /^[a-f0-9]{64}$/.test(parts[3] || '')) {
     if(request.method==='POST') {
-      const {size}=await request.json()
-      if(!Number.isSafeInteger(size) || size<0 || size>100*1024*1024)return json({detail:'Archivo inválido.'},422)
+      const {size,mime='application/octet-stream'}=await request.json()
+      if(!Number.isSafeInteger(size) || size<0 || size>100*1024*1024 || typeof mime!=='string' || !mime.trim() || mime.length>200 || /[\r\n]/.test(mime))return json({detail:'Archivo inválido.'},422)
       const objectKey=`${env.CONTENT_PREFIX}${sphere.id}/${parts[3]}`
       const existing=await env.CONTENT_FILES.head(objectKey)
-      return json({objectKey,bucket:'estudiodiario',exists:existing?.size===size})
+      if(existing?.size===size)return json({objectKey,bucket:'estudiodiario',exists:true})
+      const ticket=await room.uploadTicket(user.id,parts[3],size,mime)
+      const uploadUrl=new URL(`/api/cooperation/upload/${sphere.id}/${parts[3]}`,request.url)
+      uploadUrl.searchParams.set('ticket',ticket)
+      return json({objectKey,bucket:'estudiodiario',exists:false,uploadUrl:uploadUrl.href,headers:{'Content-Type':mime}})
     }
     if(request.method==='PUT') {
       const result=await room.upload(sphere.id,request,parts[3],request.headers.get('content-type'))

@@ -378,7 +378,8 @@ async function synchronizeMirror(mirror: Mirror) {
     }
   }
   if (mirror.outbox && !mirror.incoming) {
-    const configToken = getReadyInscreenConfigToken() || (await loadServicesFile(handle))?.inscreenToken
+    let configToken = getReadyInscreenConfigToken()
+    if (!configToken) { try { configToken = (await loadServicesFile(handle))?.inscreenToken || '' } catch { /* Personal storage is optional for cooperative transfers. */ } }
     const library = await readJson<{ workspaceId?: string }>(handle, 'manifests/workspace-library-sync.json', {})
     const uploadOptions = { configToken, workspaceId: library.workspaceId }
     mirror.transfer = { phase: 'uploading', completed: 0, total: mirror.outbox.changes.filter(change => change.blob).length }

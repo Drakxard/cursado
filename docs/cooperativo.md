@@ -86,6 +86,14 @@ servidor. Requiere `PIZARRA_BACKEND_URL` y el bucket debe coincidir con el del
 Worker. La configuración personal se envía solamente a la ruta de Vercel;
 no se reenvía a Cloudflare ni se comparte con los otros participantes.
 
+La configuración personal es opcional para Cooperativo. Un participante sin
+claves R2 recibe una URL del Worker con un permiso de subida de un solo uso,
+válido por cinco minutos y vinculado al hash, tamaño y tipo del archivo. El
+navegador envía los bytes directamente al Worker, que los verifica y guarda
+en el bucket compartido; el cuerpo del archivo no atraviesa Vercel. La sesión
+y la pertenencia aceptada al grupo se comprueban antes de emitir el permiso.
+Si una subida S3 personal falla, el cliente puede usar este mismo camino.
+
 Antes de firmar, el Worker comprueba si el archivo ya existe en la esfera
 con el mismo hash y tamaño. Si falta allí, se busca en la biblioteca R2 del
 dispositivo (`manifests/workspace-library/<workspaceId>/blobs/<hash>`). Se

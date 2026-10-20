@@ -4,9 +4,17 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { createR2S3Client } from './r2-client.ts'
 import { getInscreenRuntimeSecret } from './inscreen-user-config.ts'
 
-export async function createCooperationR2UploadSession(input: { objectKey: string; bucket: string; hash: string; size: number; mime: string; workspaceId?: string }) {
+function cooperationR2Config() {
   const secret = (key: 'R2_ENDPOINT' | 'R2_ACCESS_KEY_ID' | 'R2_SECRET_ACCESS_KEY' | 'R2_BUCKET_NAME') => getInscreenRuntimeSecret(key) || process.env[key]
   const R2_ENDPOINT = secret('R2_ENDPOINT'), R2_ACCESS_KEY_ID = secret('R2_ACCESS_KEY_ID'), R2_SECRET_ACCESS_KEY = secret('R2_SECRET_ACCESS_KEY'), R2_BUCKET_NAME = secret('R2_BUCKET_NAME')
+  return { R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME }
+}
+export function hasCooperationR2UploadConfig(bucket: string) {
+  const config = cooperationR2Config()
+  return Boolean(config.R2_ENDPOINT && config.R2_ACCESS_KEY_ID && config.R2_SECRET_ACCESS_KEY && config.R2_BUCKET_NAME === bucket)
+}
+export async function createCooperationR2UploadSession(input: { objectKey: string; bucket: string; hash: string; size: number; mime: string; workspaceId?: string }) {
+  const { R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME } = cooperationR2Config()
   if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || R2_BUCKET_NAME !== input.bucket) throw new Error('Falta configurar R2 para el bucket cooperativo.')
   const client = createR2S3Client({ region: 'auto', endpoint: R2_ENDPOINT, credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY } })
   try {

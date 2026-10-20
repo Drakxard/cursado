@@ -13,7 +13,7 @@ test('upload session forwards the Pizarra cookie and refuses rejected membership
   process.env.PIZARRA_BACKEND_URL = 'https://backend.test'
   const bundle = await build({ entryPoints: ['app/pizarra/upload-session/route.ts'], bundle: true, write: false, platform: 'node', format: 'esm', plugins: [{ name: 'signer', setup(builder) {
     builder.onResolve({ filter: /cooperation-upload-session$/ }, () => ({ path: 'signer', namespace: 'fixture' }))
-    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export async function createCooperationR2UploadSession(input) { return { uploadUrl: "https://r2.test/file", authorizedKey: input.objectKey } }' }))
+    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const hasCooperationR2UploadConfig=()=>globalThis.__cooperationTestR2Config!==false; export async function createCooperationR2UploadSession(input) { return { uploadUrl: "https://r2.test/file", authorizedKey: input.objectKey } }' }))
   } }] })
   const { POST } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
   let allowed = false, exists = false, calls = 0
@@ -22,7 +22,7 @@ test('upload session forwards the Pizarra cookie and refuses rejected membership
     assert.equal(new URL(String(url)).host, 'backend.test')
     assert.equal((options.headers as Record<string, string>).Cookie, 'session=secret')
     assert.equal((options.headers as Record<string, string>).Origin, 'https://cursado.vercel.app')
-    return allowed ? Response.json({ objectKey: 'authorized/file', bucket: 'estudiodiario', exists }) : Response.json({ detail: 'Sin acceso.' }, { status: 403 })
+    return allowed ? Response.json({ objectKey: 'authorized/file', bucket: 'estudiodiario', exists, uploadUrl: 'https://worker.test/managed-upload', headers: { 'Content-Type': 'application/pdf' } }) : Response.json({ detail: 'Sin acceso.' }, { status: 403 })
   }
   const request = (origin = 'https://cursado.vercel.app', supportsReuse = true) => new Request('https://cursado.vercel.app/pizarra/upload-session', { method: 'POST', headers: { Origin: origin, Cookie: 'session=secret' }, body: JSON.stringify({ sphereId: 'a'.repeat(36), hash: 'b'.repeat(64), size: 9000000, mime: 'application/pdf', supportsReuse }) })
   assert.equal((await POST(request('https://foreign.test'))).status, 403)
@@ -37,6 +37,17 @@ test('upload session forwards the Pizarra cookie and refuses rejected membership
   const outdated = await POST(request('https://cursado.vercel.app', false))
   assert.equal(outdated.status, 409)
   assert.match((await outdated.json()).error, /versión anterior/)
+  exists = false
+  ;(globalThis as any).__cooperationTestR2Config = false
+  t.after(() => { delete (globalThis as any).__cooperationTestR2Config })
+  const managed = await POST(request())
+  assert.equal(managed.status, 200)
+  assert.equal((await managed.json()).uploadUrl, 'https://worker.test/managed-upload')
+  const invalidPersonalConfig = request()
+  invalidPersonalConfig.headers.set('x-inscreen-config-token', 'invalid-personal-file')
+  const recovered = await POST(invalidPersonalConfig)
+  assert.equal(recovered.status, 200)
+  assert.equal((await recovered.json()).uploadUrl, 'https://worker.test/managed-upload')
 })
 
 test('large cooperative files go directly to R2; authorization receives metadata only', async t => {
@@ -64,6 +75,16 @@ test('large cooperative files go directly to R2; authorization receives metadata
   calls.length = 0
   globalThis.fetch = async () => Response.json({ detail: 'No tenés acceso.' }, { status: 403 })
   await assert.rejects(uploadCooperationFile('sphere', 'hash', blob, 'application/pdf'), /No tenés acceso/)
+  calls.length = 0
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options })
+    if (calls.length === 1) return Response.json({ uploadUrl: 'https://r2.test/file', fallbackUploadUrl: 'https://worker.test/authorized-upload', fallbackHeaders: { 'Content-Type': 'application/pdf' } })
+    return new Response(null, { status: calls.length === 2 ? 403 : 200 })
+  }
+  await uploadCooperationFile('sphere', 'hash', blob, 'application/pdf')
+  assert.equal(calls.length, 3)
+  assert.equal(calls[2].url, 'https://worker.test/authorized-upload')
+  assert.equal(calls[2].options.credentials, 'omit')
 })
 
 test('direct R2 URL binds checksum, size and MIME and expires in fifteen minutes', async t => {
