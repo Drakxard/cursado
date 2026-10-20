@@ -60,6 +60,15 @@ permanecen separadas de la colaboración por esferas.
 
 ## Verificación
 
+La sincronización ocurre al abrir o recuperar conexión, guardar cambios locales
+o recibir avisos por WebSocket. Un canal privado por usuario avisa de grupos,
+invitaciones y materias nuevas; las salas existentes avisan de nuevas versiones.
+No se consulta la API cada cuatro segundos. Si se corta un canal o falla una
+transferencia pendiente, se reintenta con espera creciente hasta 30 segundos.
+Los avisos que llegan durante una transferencia se procesan al terminarla.
+Una versión sin cambios no recarga la pantalla; los cambios remotos de la
+materia abierta se incorporan en segundo plano.
+
 ### Subida directa a R2
 
 El cliente solicita una URL firmada en `POST /pizarra/upload-session`; esa ruta

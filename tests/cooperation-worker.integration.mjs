@@ -13,6 +13,11 @@ test('real Cloudflare runtime: SQLite, R2 multipart, authenticated WebSockets, p
   }
   const a=await api('auth/guest',null,{name:`LiveA-${suffix}`,password:'test-only'}), b=await api('auth/guest',null,{name:`LiveB-${suffix}`,password:'test-only'})
   const cookieA=a.response.headers.get('set-cookie').split(';')[0], cookieB=b.response.headers.get('set-cookie').split(';')[0]
+  const noticeTicket=await api('cooperation/notifications/ticket',cookieB,{})
+  const notices=new WebSocket(socketUrl(noticeTicket.data.url),{headers:{Origin:origin}}), noticeMessages=[]
+  notices.on('message',bytes=>noticeMessages.push(JSON.parse(bytes.toString())))
+  await new Promise((resolve,reject)=>{notices.once('open',resolve);notices.once('error',reject)})
+  t.after(()=>notices.terminate())
   const group=await api('cooperation/groups',cookieA,{names:b.data.display_name})
   const sphere=await api('cooperation/spheres',cookieA,{groupId:group.data.id,name:'Live sphere',color:'#2563eb'})
   await api(`cooperation/spheres/${sphere.data.id}/accept`,cookieB,{})
@@ -27,6 +32,7 @@ test('real Cloudflare runtime: SQLite, R2 multipart, authenticated WebSockets, p
   }
   const wsA=await connect(cookieA),wsB=await connect(cookieB)
   async function waitFor(predicate) {for(let attempt=0;attempt<100;attempt++){const found=predicate();if(found)return found;await new Promise(resolve=>setTimeout(resolve,20))}throw Error('Missing WebSocket event')}
+  await waitFor(()=>noticeMessages.find(m=>m.type==='directory_changed'))
   assert.equal((await waitFor(()=>wsA.messages.find(m=>m.type==='presence'&&m.users.length===2))).users.length,2)
   wsA.socket.send(JSON.stringify({type:'editor',document:'study-test',payload:{type:'stroke_start',stroke_id:'one',point:{x:10,y:20},width:2,color:'#000000',user_id:'forged'}}))
   const live=await waitFor(()=>wsB.messages.find(m=>m.type==='editor'))

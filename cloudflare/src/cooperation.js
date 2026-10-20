@@ -57,6 +57,10 @@ export class SharedContentRoom extends DurableObject {
     for(const socket of sockets)try{socket.send(JSON.stringify({type:'presence',users:[...users.values()],you:socket.deserializeAttachment()?.userId}))}catch{}
   }
   broadcast(value) {for(const socket of this.ctx.getWebSockets())try{socket.send(JSON.stringify(value))}catch{}}
+  notifyDirectory() {
+    const state=this.read();state.seq++;this.write(state)
+    this.broadcast({type:'directory_changed',seq:state.seq})
+  }
   webSocketMessage(socket, raw) {
     if(typeof raw!=='string' || raw.length>8192)return
     try {

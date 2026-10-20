@@ -10,6 +10,11 @@ export default {
   async fetch(request, env, execution) {
     const url = new URL(request.url)
     if (url.pathname.startsWith('/api/cooperation/')) {
+      if (url.pathname.startsWith('/api/cooperation/notifications/socket/')) {
+        const id=url.pathname.split('/').at(-1)
+        if(!/^[a-f0-9]{32}$/.test(id || ''))return json({detail:'Canal inválido.'},404)
+        return env.CONTENT_ROOMS.getByName(`notifications:${id}`).fetch(request)
+      }
       if (url.pathname.startsWith('/api/cooperation/socket/')) {
         const id=url.pathname.split('/').at(-1)
         if(!/^[a-f0-9-]{36}$/.test(id || ''))return json({detail:'Sala inválida.'},404)

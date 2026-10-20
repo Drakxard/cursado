@@ -116,6 +116,18 @@ jobs:
       - run: npm run typecheck
       - name: Sincronización, exclusiones y ruta de API chat
         run: node --test --experimental-strip-types tests/cooperation*.test.mts tests/board-chat.test.mts
+      - name: Avisos y sincronización con el Worker real
+        shell: bash
+        run: |
+          npx --yes wrangler@4.151.0 dev --local --config cloudflare/wrangler.jsonc --port 8794 --var AUTH_PEPPER:integration-test-pepper-with-over-32-characters > "$RUNNER_TEMP/cooperation-worker.log" 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl --silent --fail http://127.0.0.1:8794/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --silent --fail http://127.0.0.1:8794/health > /dev/null
+          COOP_LOCAL_URL=http://127.0.0.1:8794 node --test tests/cooperation-worker.integration.mjs
       - name: Invitaciones, selector semanal y overlay de chat
         run: node --test --experimental-strip-types tests/cooperation-panel.browser.mts tests/board-api-chat.browser.mjs
       - run: npm run build
@@ -141,6 +153,7 @@ jobs:
           path: |
             test-results/
             ${{ runner.temp }}/cursado-board-cooperation.log
+            ${{ runner.temp }}/cooperation-worker.log
 
   explanation-regression:
     name: Regresión puntual de estrella y zoom

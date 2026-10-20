@@ -189,4 +189,23 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   await use(a, () => a.client.synchronizeCooperation())
   assert.equal((await a.fs.json('manifests/materials/Algebra/week-2.json')).materials[0].file_name, 'Excluido.pdf')
 
+  await t.test('a change arriving during an upload is drained and an unchanged snapshot does not reload the UI', async () => {
+    let queued = false
+    a.beforeUpload = async () => {
+      if (queued) return
+      queued = true
+      await a.fs.put('manifests/entries/Algebra/week-209.json', { entries: [{ id: 'during-upload', text: 'saved while uploading' }] })
+      void a.client.synchronizeCooperation()
+    }
+    await a.fs.put('teoria/Algebra/demand.pdf', new Blob(['demand upload'], { type: 'application/pdf' }))
+    await use(a, () => a.client.synchronizeCooperation())
+    const snapshot = await (await backend.request(`/api/cooperation/spheres/${binding.id}/snapshot`, { cookie: a.cookie })).json()
+    assert.equal(snapshot.resources['manifests/entries/Algebra/week-209.json'].value.entries[0].id, 'during-upload')
+    let applied = 0
+    const update = () => { applied++ }
+    window.addEventListener('cursado-cooperation-applied', update)
+    try { await use(a, () => a.client.synchronizeCooperation()); assert.equal(applied, 0) }
+    finally { window.removeEventListener('cursado-cooperation-applied', update) }
+  })
+
 })

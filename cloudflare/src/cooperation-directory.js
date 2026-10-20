@@ -1,6 +1,9 @@
 import { parseCooperationNames } from '../../lib/cooperation-model.ts'
 
 const json=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'private, no-store'}})
+async function notifyUsers(env, ids) {
+  await Promise.allSettled([...new Set(ids)].map(id=>env.CONTENT_ROOMS.getByName(`notifications:${id}`).notifyDirectory()))
+}
 export function initializeCooperation(sql) {
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_groups (id TEXT PRIMARY KEY, members TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL, created_at TEXT NOT NULL)')
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_members (group_id TEXT NOT NULL, user_id TEXT NOT NULL, accepted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(group_id,user_id))')
@@ -9,6 +12,12 @@ export function initializeCooperation(sql) {
 export async function cooperationRequest(directory,request) {
   const {user}=await directory.authenticated(request), sql=directory.sql, env=directory.env
   const url=new URL(request.url), parts=url.pathname.slice('/api/cooperation/'.length).split('/')
+  if(parts[0]==='notifications' && parts[1]==='ticket' && request.method==='POST') {
+    const token=await env.CONTENT_ROOMS.getByName(`notifications:${user.id}`).ticket(user.id)
+    const socket=new URL(`/api/cooperation/notifications/socket/${user.id}`,request.url)
+    socket.protocol='wss:';socket.searchParams.set('ticket',token)
+    return json({url:socket.href})
+  }
   if(parts[0]==='groups') {
     if(request.method==='GET') {
       const groups=await Promise.all(sql.exec(`SELECT g.*,m.accepted FROM cooperation_groups g JOIN cooperation_members m ON m.group_id=g.id WHERE m.user_id=?`,user.id).toArray().map(async group=>({
@@ -41,6 +50,7 @@ export async function cooperationRequest(directory,request) {
       sql.exec('INSERT INTO cooperation_groups VALUES (?,?,?,?)',id,members,user.id,new Date().toISOString())
       for(const member of users)sql.exec('INSERT INTO cooperation_members VALUES (?,?,?)',id,member.id,member.id===user.id?1:0)
     })
+    await notifyUsers(env,users.map(member=>member.id))
     return json({id},201)
   }
   if(parts[0]==='spheres' && parts.length===1 && request.method==='POST') {
@@ -49,6 +59,7 @@ export async function cooperationRequest(directory,request) {
     if(typeof body.name!=='string' || !body.name.trim() || body.name.length>150 || !/^#[a-fA-F0-9]{6}$/.test(body.color || ''))return json({detail:'Esfera inválida.'},422)
     const id=crypto.randomUUID()
     sql.exec('INSERT INTO cooperation_spheres(id,group_id,name,color,created_by) VALUES (?,?,?,?,?)',id,body.groupId,body.name,body.color,user.id)
+    await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',body.groupId).toArray().map(member=>member.user_id))
     return json({id},201)
   }
   if(parts[0]!=='spheres' || !/^[a-f0-9-]{36}$/.test(parts[1] || ''))return json({detail:'Ruta no encontrada.'},404)
@@ -58,6 +69,7 @@ export async function cooperationRequest(directory,request) {
   const room=env.CONTENT_ROOMS.getByName(sphere.id)
   if(parts[2]==='accept' && request.method==='POST') {
     sql.exec('UPDATE cooperation_members SET accepted=1 WHERE group_id=? AND user_id=?',sphere.group_id,user.id)
+    await notifyUsers(env,[user.id])
     return json({ok:true})
   }
   if(!member.accepted)return json({detail:'Aceptá la invitación antes de descargar contenido.'},403)
@@ -72,6 +84,7 @@ export async function cooperationRequest(directory,request) {
     if(!result.error) {
       const {bytes,name,color,ready}=await room.summary()
       sql.exec('UPDATE cooperation_spheres SET bytes=?,name=?,color=? WHERE id=?',ready?bytes:0,typeof name==='string'&&name.length<=150?name:sphere.name,/^#[a-fA-F0-9]{6}$/.test(color || '')?color:sphere.color,sphere.id)
+      if(Boolean(sphere.bytes)!==ready || typeof name==='string' && name!==sphere.name || typeof color==='string' && color!==sphere.color)await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',sphere.group_id).toArray().map(member=>member.user_id))
     }
     return json(result,result.status || 200)
   }

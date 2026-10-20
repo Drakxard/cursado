@@ -2918,14 +2918,16 @@ export function SubjectWheel({
     }
   }
 
-  const loadSubjectDayData = useCallback(async () => {
+  const loadSubjectDayData = useCallback(async (background = false) => {
     if (!isDialogOpen || !currentSubject) return
 
     const requestId = subjectDayDataRequestIdRef.current + 1
     subjectDayDataRequestIdRef.current = requestId
 
-    setIsEntriesLoading(true)
-    setIsMaterialsLoading(true)
+    if (!background) {
+      setIsEntriesLoading(true)
+      setIsMaterialsLoading(true)
+    }
     setEntriesError("")
 
     try {
@@ -3035,7 +3037,10 @@ export function SubjectWheel({
     void loadSubjectDayData()
   }, [loadSubjectDayData])
   useEffect(() => {
-    const refresh = () => { void loadSubjectDayData(); void refreshLocalWeekOptions(); if (currentSubject) void loadMaterialContainers(currentSubject.id) }
+    const refresh = (event: Event) => {
+      if (!currentSubject || (event as CustomEvent<SphereBinding>).detail?.subjectId !== currentSubject.id) return
+      void loadSubjectDayData(true); void refreshLocalWeekOptions(); void loadMaterialContainers(currentSubject.id)
+    }
     window.addEventListener('cursado-cooperation-applied', refresh)
     return () => window.removeEventListener('cursado-cooperation-applied', refresh)
   }, [loadSubjectDayData, refreshLocalWeekOptions, currentSubject, loadMaterialContainers])
