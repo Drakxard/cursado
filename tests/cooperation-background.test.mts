@@ -16,7 +16,7 @@ test('background sync is idle without events, batches saves, discovers invitatio
   ;(globalThis as any).__backgroundRoot = fs.root
   Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
   const sockets: any[] = [], requests: string[] = []
-  globalThis.WebSocket = class { onmessage; onclose; onopen; onerror; constructor(public url: string) { sockets.push(this) } close() { this.onclose?.() } } as any
+  globalThis.WebSocket = class { onmessage; onclose; onopen; onerror; url: string; constructor(url: string) { this.url = url; sockets.push(this) } close() { this.onclose?.() } } as any
   globalThis.BroadcastChannel = class { onmessage; close() {} } as any
   t.after(() => { backend.close(); globalThis.fetch = original.fetch; globalThis.window = original.window; globalThis.localStorage = original.storage; globalThis.WebSocket = original.socket; globalThis.BroadcastChannel = original.channel; delete (globalThis as any).__backgroundRoot })
   const response = await backend.request('/api/auth/guest', { body: { name: 'Demand', password: 'test-only' } })
