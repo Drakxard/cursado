@@ -61,7 +61,7 @@ export class AdaptiveImageCache {
     this.wanted = new Map(previewRequests(items, this.budget).map(item => [item.id, item]))
     for (const [id, image] of this.entries) {
       const request = this.wanted.get(id)
-      if (!request || image.width !== request.width || image.height !== request.height) { image.release(); this.entries.delete(id) }
+      if (!request) { image.release(); this.entries.delete(id) }
     }
     for (const id of this.failures.keys()) if (!this.wanted.has(id)) this.failures.delete(id)
     this.pump()
@@ -72,7 +72,8 @@ export class AdaptiveImageCache {
     for (const [id, request] of this.wanted) {
       if (this.running.size >= 2) break
       const signature = this.signature(request)
-      if (this.entries.has(id) || this.running.has(id) || this.failures.get(id) === signature) continue
+      const existing = this.entries.get(id)
+      if ((existing?.width === request.width && existing.height === request.height) || this.running.has(id) || this.failures.get(id) === signature) continue
       const generation = this.generation
       this.running.add(id)
       void (async () => {
@@ -85,8 +86,13 @@ export class AdaptiveImageCache {
           image = await this.decode(blob, request.width, request.height)
           const current = this.wanted.get(id)
           if (generation !== this.generation || !current || this.signature(current) !== signature) { image.release(); return }
-          if (this.bytes + image.width * image.height * 4 > this.budget) { image.release(); this.failures.set(id, signature); return }
+          // Keep the previous preview drawable until its replacement is ready.
+          // Mixed old/new sizes can temporarily use up to twice the steady budget.
+          const previous = this.entries.get(id)
+          const nextBytes = this.bytes - (previous ? previous.width * previous.height * 4 : 0) + image.width * image.height * 4
+          if (nextBytes > this.budget * 2) { image.release(); this.failures.set(id, signature); return }
           this.entries.set(id, image)
+          previous?.release()
         } catch {
           if (generation === this.generation) this.failures.set(id, signature)
         } finally {
