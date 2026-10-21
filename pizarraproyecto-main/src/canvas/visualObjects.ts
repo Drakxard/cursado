@@ -24,7 +24,7 @@ export function studyNoteText(study:StudyNote):string {
 }
 export type ShapeItem = Bounds & {
   id:string;kind:ShapeKind;color:string;strokeWidth:number;reverse?:boolean;backwards?:boolean;rotation?:number;
-  groupId?:string;zIndex?:number;visualType?:'sticky'|'connector'|'symbol'|'page'|'code'|'pdf-shortcut';code?:CodeData;
+  groupId?:string;zIndex?:number;visualType?:'sticky'|'connector'|'symbol'|'page'|'code'|'pdf-shortcut'|'review-marker';code?:CodeData;
   pdfReference?: BoardPdfReference;
   pdfPinned?: boolean;
   note?:NoteData;connector?:Connector;symbol?:AcademicSymbol;label?:string;labelFontSize?:number;matrix?:string[][]

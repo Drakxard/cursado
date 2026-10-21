@@ -11,6 +11,7 @@ import { createNote, defaultConnector, findAnchor, hitsConnector, isConnector, m
   pointsBounds, refKey, remapConnector, detachTargets, transformVisual, visualBounds } from './canvas/visualObjects'
 import type { ShapeItem, ShapeKind, Bounds, ObjectRef, TargetGeometry } from './canvas/visualObjects'
 import { paintShape } from './canvas/paintShape'
+import { createReviewMarker, adjacentReviewMarker } from './canvas/reviewMarkers'
 import StaticTable, { tableChrome, tableFontSize, tableSize, labelColumn, TABLE_ROW_HEADER, TABLE_TITLE_HEIGHT, TABLE_COL_HEADER } from './components/StaticTable'
 import type { SheetItem, SheetCell } from './components/StaticTable'
 import { academicTemplate } from './canvas/academicTemplates'
@@ -815,6 +816,7 @@ function App() {
   const [,refreshAudio]=useState(0)
   const audioRef=useRef<BoardAudio|null>(null)
   const audioCursorRef=useRef<Point|null>(null)
+  const reviewPlacementRef=useRef<string|null>(null)
   const audioDraftRef=useRef<HTMLDivElement>(null)
   const audioPointerRef=useRef<{pointerId:number;id:string;x:number;y:number;moved:boolean;transform?:Transform}|null>(null)
   if(!audioRef.current)audioRef.current=new BoardAudio({boardId:getActiveBoardId,load:loadAsset,commit:commitAudioNote,changed:()=>{}})
@@ -1263,6 +1265,7 @@ function App() {
   }
 
   async function switchBoard(id: string) {
+    finishReviewPlacement()
     finishPendingPen()
     setBoardSearchOpen(false)
     setBoardSearchQuery('')
@@ -2012,6 +2015,7 @@ function App() {
   }
 
   function undo() {
+    finishReviewPlacement()
     finishPendingPen()
     if (editingRef.current) commitText()
     if (!undoRef.current.length) return
@@ -2147,6 +2151,7 @@ function App() {
   }
 
   async function flushBoardForHistory(): Promise<void> {
+    finishReviewPlacement()
     await boardAudio.finish()
     finishPendingPen()
     if (!loadedRef.current) throw new Error('La pizarra todavía se está cargando.')
@@ -2615,7 +2620,7 @@ function App() {
     if(shape.rotation) point=rotateAround(point,{x:x+w/2,y:y+h/2},-shape.rotation)
     const tolerance=radius+shape.strokeWidth/2
     if(point.x<x-tolerance||point.x>x+w+tolerance||point.y<y-tolerance||point.y>y+h+tolerance)return false
-    if(shape.visualType==='sticky' || shape.visualType==='symbol' || shape.visualType==='pdf-shortcut')return true
+    if(shape.visualType==='sticky' || shape.visualType==='symbol' || shape.visualType==='pdf-shortcut' || shape.visualType==='review-marker')return true
     const seg=(x1:number,y1:number,x2:number,y2:number)=>distanceToSegment(point,{x:x1,y:y1},{x:x2,y:y2})<=tolerance
     if(kind==='line'||kind==='arrow'||kind==='double-arrow'){
       const leftY=shape.reverse?y:y+h,rightY=shape.reverse?y+h:y
@@ -2977,6 +2982,9 @@ function App() {
   },[])
 
   function pointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if(reviewPlacementRef.current&&e.button===0&&!e.ctrlKey&&!e.metaKey){
+      e.preventDefault();moveReviewPlacement(toWorld(e.clientX,e.clientY));finishReviewPlacement();return
+    }
     if(boardAudio.draft&&!boardAudio.draft.placed&&e.button===0){e.preventDefault();boardAudio.move(toWorld(e.clientX,e.clientY));boardAudio.place();return}
     if(loadedRef.current&&!selectionPicking&&tool!=='eraser'&&e.button===0&&!e.ctrlKey&&!e.metaKey){
       const hit=hitSelectionAt(toWorld(e.clientX,e.clientY))
@@ -3143,6 +3151,7 @@ function App() {
 
   function pointerMove(e: ReactPointerEvent<HTMLCanvasElement>) {
     audioCursorRef.current={x:e.clientX,y:e.clientY}
+    if(moveReviewPlacement(toWorld(e.clientX,e.clientY))){redraw();return}
     if(boardAudio.move(toWorld(e.clientX,e.clientY))){redraw();return}
     const audio=audioPointerRef.current
     if(audio?.pointerId===e.pointerId){
@@ -3496,6 +3505,7 @@ function App() {
   }, [])
 
   function selectTool(next: Tool) {
+    finishReviewPlacement()
     if (nativeBoardMode() && next !== 'pan') return
     setSelectionPicking(false)
     finishPendingPen()
@@ -3504,6 +3514,38 @@ function App() {
     setTreePanel(null)
     setTool(next)
     if (next !== 'select') {setTableEditorId(null);selectElement(null)}
+  }
+
+  function moveReviewPlacement(point:Point) {
+    const marker=shapesRef.current.find(item=>item.id===reviewPlacementRef.current)
+    if(!marker){reviewPlacementRef.current=null;return false}
+    marker.x=point.x-marker.width/2;marker.y=point.y-marker.height/2
+    return true
+  }
+
+  function finishReviewPlacement() {
+    if(!reviewPlacementRef.current)return
+    reviewPlacementRef.current=null;scheduleSave()
+  }
+
+  function insertReviewMarker() {
+    finishReviewPlacement();finishPendingPen()
+    const cursor=audioCursorRef.current,point=cursor?toWorld(cursor.x,cursor.y):boardCenter()
+    const marker=createReviewMarker(createId(),point)
+    rememberChange();shapesRef.current.push(marker)
+    selectTool('select');selectElement({kind:'shape',id:marker.id})
+    reviewPlacementRef.current=marker.id
+    redraw();scheduleSave()
+  }
+
+  function navigateReviewMarker(id:string,direction:-1|1) {
+    finishReviewPlacement()
+    const marker=adjacentReviewMarker(shapesRef.current,id,direction)
+    if(!marker)return
+    const canvas=canvasRef.current,cam=cameraRef.current
+    cam.x=(canvas?.clientWidth??innerWidth)/2-(marker.x+marker.width/2)*cam.zoom
+    cam.y=(canvas?.clientHeight??innerHeight)/2-(marker.y+marker.height/2)*cam.zoom
+    selectElement({kind:'shape',id:marker.id});redraw();scheduleSave()
   }
 
   function insertNote() {
@@ -4561,6 +4603,7 @@ function App() {
   }
 
   function deleteSelected() {
+    finishReviewPlacement()
     const group = groupRef.current
     if (!group.length) return
     rememberChange()
@@ -4821,6 +4864,9 @@ function App() {
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return
       if(e.isComposing||apiChat)return
+      if(e.key==='!'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat&&!editingRef.current&&!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&!treePanel&&!materialLibrary.reader&&!nativeBoardMode()&&loadedRef.current&&!boardAudio.draft){
+        e.preventDefault();insertReviewMarker();return
+      }
       if(e.key==='¿'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat&&!editingRef.current&&!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&!treePanel&&!materialLibrary.reader&&!nativeBoardMode()&&loadedRef.current){
         e.preventDefault();finishPendingPen()
         if(boardAudio.draft)void boardAudio.finish().catch(()=>{})
@@ -4834,6 +4880,9 @@ function App() {
       if((e.key==='ArrowLeft'||e.key==='ArrowRight')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
         const focusedAudio=target?.closest<HTMLElement>('[data-audio-id]')?.dataset.audioId
         const selected=groupRef.current.length===1?groupRef.current[0]:null
+        if(selected?.kind==='shape'&&shapesRef.current.some(item=>item.id===selected.id&&item.visualType==='review-marker')&&!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&!treePanel&&!materialLibrary.reader){
+          e.preventDefault();navigateReviewMarker(String(selected.id),e.key==='ArrowLeft'?-1:1);return
+        }
         const item=mediaRef.current.find(item=>item.kind==='audio'&&(item.id===focusedAudio||(selected?.kind==='media'&&item.id===selected.id)))
         if(item){e.preventDefault();boardAudio.seek(item,e.key==='ArrowLeft'?-5:5);return}
       }
@@ -4848,6 +4897,7 @@ function App() {
       if (nativeBoardMode() && !((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) return
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&!libraryOpen){e.preventDefault();setBoardSearchOpen(true);return}
       if(e.key==='Escape' && !e.repeat) {
+        finishReviewPlacement()
         if(editingRef.current || imageCrop || studyAssistant || importStatus || recognizing)return
         e.preventDefault()
         if(cartesianDragRef.current){finishCartesianResize(true);return}

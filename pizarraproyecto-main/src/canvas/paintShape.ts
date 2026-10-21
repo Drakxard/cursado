@@ -7,6 +7,14 @@ export function paintShape(ctx: CanvasRenderingContext2D, shape: ShapeItem, reso
       const center = {x:x+w/2,y:y+h/2}
       ctx.translate(center.x,center.y);ctx.rotate(shape.rotation);ctx.translate(-center.x,-center.y)
     }
+    if(shape.visualType==='review-marker') {
+      ctx.translate(x,y);ctx.scale(w/56,h/56)
+      ctx.strokeStyle=dark?'#f8fafc':color;ctx.fillStyle=dark?'#1e293b':'#fff';ctx.lineWidth=3.5;ctx.lineCap='round'
+      ctx.beginPath();ctx.arc(28,28,25,0,Math.PI*2);ctx.fill();ctx.stroke()
+      ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(28,15);ctx.lineTo(28,30);ctx.stroke()
+      ctx.fillStyle=dark?'#f8fafc':color;ctx.beginPath();ctx.arc(28,40,2.8,0,Math.PI*2);ctx.fill()
+      ctx.restore();return
+    }
     if(shape.visualType==='pdf-shortcut') {
       ctx.fillStyle=dark?'#1e293b':'#eff6ff';ctx.strokeStyle=dark?'#93c5fd':'#2563eb';ctx.lineWidth=1.5
       ctx.beginPath();ctx.roundRect(x,y,w,h,Math.min(12,h/4));ctx.fill();ctx.stroke()

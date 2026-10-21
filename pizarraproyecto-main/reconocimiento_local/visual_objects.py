@@ -41,7 +41,7 @@ def validate_visual_content(content: dict):
         if not isinstance(item, dict) or not item.get('visualType'):
             continue
         kind = item['visualType']
-        require(kind in ('sticky', 'connector', 'symbol', 'page', 'code', 'pdf-shortcut'), 'Tipo de objeto visual desconocido.')
+        require(kind in ('sticky', 'connector', 'symbol', 'page', 'code', 'pdf-shortcut', 'review-marker'), 'Tipo de objeto visual desconocido.')
         require(isinstance(item.get('id'), str) and 1 <= len(item['id']) <= 150 and counts[item['id']] == 1,
                 'El objeto visual necesita un identificador único.')
         require(number(item.get('x')) and number(item.get('y')) and number(item.get('width'), .001, 1_000_000)
@@ -111,7 +111,7 @@ def validate_visual_content(content: dict):
                     and connection.get('endCap') in ('none', 'arrow', 'circle', 'diamond')
                     and connection.get('style') in ('solid', 'dash', 'dot')
                     and text(connection.get('label'), 120), 'El estilo del conector no es válido.')
-        else:
+        elif kind == 'symbol':
             require(item.get('symbol') in ('and', 'or', 'not', 'xor', 'matrix', 'vector', 'resistor', 'capacitor', 'ground', 'voltage', 'code', 'cartesian'),
                     'El símbolo académico no es válido.')
             if item.get('matrix') is not None:
