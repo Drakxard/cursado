@@ -9,6 +9,8 @@ export default function AppUpdate(){
   useEffect(()=>{const refresh=()=>setAvailable(offlineUpdateReady());window.addEventListener('pizarra-offline-ready',refresh);refresh();return()=>window.removeEventListener('pizarra-offline-ready',refresh)},[])
   useEffect(()=>{
     if(!available)return
+    // The next opening receives the new version without restarting an open topic.
+    if(window.parent!==window && new URLSearchParams(location.search).has('topicBoard'))return
     let timer:ReturnType<typeof setTimeout>,disposed=false,blocked=false,revision=0
     const pointers=new Set<number>()
     const idle=()=>!disposed&&document.visibilityState==='visible'&&!pointers.size&&

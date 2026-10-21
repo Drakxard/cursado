@@ -2,6 +2,17 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
+    <style>
+      html { background: #fff; color-scheme: light; }
+      html[data-board-theme="dark"] { background: #171b24; color-scheme: dark; }
+      html[data-board-theme="rest"] { background: #eee5d3; }
+    </style>
+    <script>
+      try {
+        var boardTheme = localStorage.getItem('pizarra-theme');
+        if (boardTheme === 'dark' || boardTheme === 'rest') document.documentElement.dataset.boardTheme = boardTheme;
+      } catch (_) {}
+    </script>
     <link rel="icon" type="image/svg+xml" href="/pizarra/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#171b25" />

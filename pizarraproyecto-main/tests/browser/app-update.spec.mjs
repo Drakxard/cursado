@@ -27,6 +27,23 @@ test.beforeAll(async()=>{
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));site=`http://127.0.0.1:${server.address().port}/pizarra/`
 })
 test.afterAll(async()=>{await new Promise(resolve=>server.close(resolve))})
+
+test('an embedded topic defers automatic reload until its next opening',async({page})=>{
+  test.setTimeout(60000);generation='current'
+  const host=new URL('/opening-host',site).href
+  await page.route(host,route=>route.fulfill({contentType:'text/html',body:`<iframe title="Topic" src="${site}?topicBoard=opening-update"></iframe>`}))
+  await page.goto(host)
+  const child=page.frameLocator('iframe[title="Topic"]')
+  await child.locator('body').evaluate(()=>navigator.serviceWorker.ready)
+  await expect.poll(()=>child.locator('body').evaluate(()=>Boolean(navigator.serviceWorker.controller))).toBe(true)
+  generation='next'
+  await child.locator('body').evaluate(async()=>{await(await navigator.serviceWorker.getRegistration()).update()})
+  await expect.poll(()=>child.locator('body').evaluate(()=>caches.has('cursado-pizarra-app-next'))).toBe(true)
+  await page.waitForTimeout(3000)
+  await expect(child.locator('script[type="module"]')).toHaveAttribute('src',mainScript)
+  await page.locator('iframe').evaluate(frame=>{frame.src=frame.src})
+  await expect(child.locator('script[type="module"]')).toHaveAttribute('src','/pizarra/assets/index-next.js')
+})
 async function saved(page){return page.evaluate(async()=>{
   const db=await new Promise(resolve=>{const r=indexedDB.open('pizarra-dispositivo',1);r.onsuccess=()=>resolve(r.result)})
   const records=await new Promise(resolve=>{const r=db.transaction('boards').objectStore('boards').getAll();r.onsuccess=()=>resolve(r.result)})

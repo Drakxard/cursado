@@ -16,7 +16,8 @@ export const getTopicWorkspaceRoot = () => workspace?.rootHandle ?? navigationRo
 export function sendTopicLive(payload: Record<string, unknown>) { if (!workspace?.cooperationSubjectId) return; parent.postMessage({ type: 'topic-board:ephemeral', boardId: workspace.boardId, payload }, location.origin) }
 export const isTopicWorkspace = () => workspace !== null || (nativeBoardMode() && new URLSearchParams(location.search).has('topicBoard'))
 export function notifyTopicWorkspace(type: 'ready' | 'closed' | 'error', error?: string) {
-  if (workspace) parent.postMessage({ type: `topic-board:${type}`, boardId: workspace.boardId, error }, location.origin)
+  const boardId = workspace?.boardId ?? (nativeBoardMode() ? new URLSearchParams(location.search).get('topicBoard') : null)
+  if (boardId) parent.postMessage({ type: `topic-board:${type}`, boardId, error }, location.origin)
 }
 async function boardDirectory(root: FileSystemDirectoryHandle) {
   const progress = await root.getDirectoryHandle('progreso', { create: true })

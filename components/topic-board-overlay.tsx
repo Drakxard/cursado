@@ -21,6 +21,12 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
   const [error, setError] = useState("")
   const [closing, setClosing] = useState(false)
   const [readerOpen, setReaderOpen] = useState(false)
+  const [background] = useState(() => {
+    try {
+      const theme = localStorage.getItem('pizarra-theme')
+      return theme === 'dark' ? '#171b24' : theme === 'rest' ? '#eee5d3' : '#ffffff'
+    } catch { return '#ffffff' }
+  })
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null
     const previousOverflow = document.body.style.overflow
@@ -71,12 +77,13 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
     setError("")
     frame.current?.contentWindow?.postMessage({ type: "topic-board:close", boardId }, location.origin)
   }
-  return <div role="dialog" aria-modal="true" aria-label={`Pizarra de ${name}`} className="fixed inset-0 z-[150] flex flex-col bg-white text-slate-900">
+  return <div role="dialog" aria-modal="true" aria-label={`Pizarra de ${name}`} className="fixed inset-0 z-[150] flex flex-col text-slate-900" style={{background}}>
     {!readerOpen && <button type="button" aria-label={backLabel} title={backLabel} disabled={closing} onClick={close}
       className="absolute left-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-xl border bg-white text-xl shadow-sm">{closing ? "…" : "←"}</button>}
-    {error && <p role="alert" className="bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>}
-    {!ready && !error && <p role="status" className="px-4 py-2 text-sm text-slate-500">Abriendo pizarra…</p>}
+    {error && <p role="alert" className="absolute bottom-4 left-4 z-10 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>}
+    {!ready && !error && <p role="status" className="absolute bottom-4 left-4 z-10 px-4 py-2 text-sm text-slate-500">Abriendo pizarra…</p>}
     <iframe ref={frame} title={`Pizarra de ${name}`} src={`/pizarra/?topicBoard=${encodeURIComponent(boardId)}`} className="min-h-0 w-full flex-1 border-0"
+      style={{visibility:ready ? 'visible' : 'hidden',background}}
       onLoad={() => {
         try {
           if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle, pdfReferences, cooperationSubjectId, cooperationWeekNumber }, location.origin)

@@ -23,7 +23,6 @@ export async function prepareNativeBoards() {
     const snapshot = await (await read(`progreso/pizarras/${topic}.json`)).json()
     current = {id:`local:important-${topic}`,name:snapshot.name,folderId:null,scene:snapshot.content,assets:snapshot.assets}
     documents.set(current.id,{id:current.id,name:current.name,path:`progreso/pizarras/${topic}.json`,folderId:null})
-    parent.postMessage({type:'topic-board:ready',boardId:topic},location.origin)
     return
   }
   const index = manifest.files.find(file => file.path === 'boards/library.json')

@@ -995,7 +995,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   useEffect(() => {
     try { window.localStorage.setItem('pizarra-theme', theme) } catch { /* modo privado */ }
     document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light'
-    return () => { document.documentElement.style.colorScheme = '' }
+    document.documentElement.dataset.boardTheme = theme
+    document.documentElement.style.backgroundColor = theme === 'dark' ? '#171b24' : theme === 'rest' ? '#eee5d3' : '#ffffff'
   }, [theme])
   const [tool, setTool] = useState<Tool>(nativeBoardMode() ? 'pan' : 'pen')
   const [color, setColor] = useState('#202020')
@@ -2217,6 +2218,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
 
   useEffect(() => {
     let cancelled = false
+    let firstPaint: number | undefined
     async function restore() {
       try {
         const data = await loadBoard()
@@ -2239,26 +2241,33 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           }
         }
         pendingReplicaRef.current = await hasPendingShared()
+        if (cancelled) return
         const returnView=consumeBoardView()
         if(returnView){const rect=canvasRef.current?.getBoundingClientRect();cameraRef.current={zoom:returnView.zoom,x:(rect?.width??innerWidth)/2-returnView.center.x*returnView.zoom,y:(rect?.height??innerHeight)/2-returnView.center.y*returnView.zoom}}
         loadedRef.current = true
-        notifyTopicWorkspace('ready')
         setLiveBoardId(getActiveBoardId())
         void refreshLibrary().catch(console.error)
-        setSaveStatus(await hasPendingShared() ? 'local' : usingOfflineCopy() ? 'copy' : 'saved')
+        setSaveStatus(pendingReplicaRef.current ? 'local' : usingOfflineCopy() ? 'copy' : 'saved')
         setZoomLabel(Math.round(cameraRef.current.zoom * 100))
         redraw()
         hydrateMedia(mediaRef.current)
+        firstPaint = requestAnimationFrame(() => {
+          if (cancelled) return
+          redraw()
+          notifyTopicWorkspace('ready')
+        })
       } catch (error) {
         if (!cancelled) {
           console.error(error)
           setSaveStatus('error')
+          notifyTopicWorkspace('error', error instanceof Error ? error.message : String(error))
         }
       }
     }
     void restore()
     return () => {
       cancelled = true
+      if (firstPaint !== undefined) cancelAnimationFrame(firstPaint)
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       if (viewportFrameRef.current !== null) {
         cancelAnimationFrame(viewportFrameRef.current)
@@ -2550,15 +2559,19 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       if (!canvas) return
       const rect = canvas.getBoundingClientRect()
       const dpr = window.devicePixelRatio || 1
-      canvas.width = Math.round(rect.width * dpr)
-      canvas.height = Math.round(rect.height * dpr)
+      const width = Math.round(rect.width * dpr), height = Math.round(rect.height * dpr)
+      if (canvas.width !== width) canvas.width = width
+      if (canvas.height !== height) canvas.height = height
       const foreground = foregroundCanvasRef.current
       if (foreground) {
-        foreground.width = canvas.width
-        foreground.height = canvas.height
+        if (foreground.width !== width) foreground.width = width
+        if (foreground.height !== height) foreground.height = height
       }
       const cursorCanvas = cursorCanvasRef.current
-      if(cursorCanvas) { cursorCanvas.width=canvas.width;cursorCanvas.height=canvas.height }
+      if(cursorCanvas) {
+        if (cursorCanvas.width !== width) cursorCanvas.width = width
+        if (cursorCanvas.height !== height) cursorCanvas.height = height
+      }
       if(followRef.current) followView(followRef.current)
       redraw()
     }

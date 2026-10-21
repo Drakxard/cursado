@@ -1,5 +1,6 @@
 "use client"
 import { HoldActionButton } from "./hold-action-button"
+import { InlinePdfName } from "./inline-pdf-name"
 
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
@@ -219,15 +220,6 @@ type SynthesisPlaybackItem = {
 type PendingSynthesisSave = {
   subjectId: string
   weekNumber: number
-}
-
-type MaterialEditDraft = {
-  fileName: string
-  materialType: SubjectDayMaterialType
-  sessionDate: string
-  weekNumber: string
-  isCheckupDone: boolean
-  containerId: string
 }
 
 type MaterialUploadContextSnapshot = {
@@ -1953,15 +1945,7 @@ export function SubjectWheel({
   const [currentDateKey, setCurrentDateKey] = useState(getTodayDateString())
   const [showAllSubjectsForDay, setShowAllSubjectsForDay] = useState(false)
   const [allCompletedSubjectIds, setAllCompletedSubjectIds] = useState<string[]>([])
-  const [editingMaterial, setEditingMaterial] = useState<SubjectDayMaterial | null>(null)
-  const [materialEditDraft, setMaterialEditDraft] = useState<MaterialEditDraft>({
-    fileName: "",
-    materialType: "theory",
-    sessionDate: getTodayDateString(),
-    weekNumber: "0",
-    isCheckupDone: false,
-    containerId: "",
-  })
+  const [renamingMaterialId, setRenamingMaterialId] = useState<number | null>(null)
   const [subjectMaterialContainers, setSubjectMaterialContainers] = useState<SubjectMaterialContainer[]>([])
   const [isCreateContainerOpen, setIsCreateContainerOpen] = useState(false)
   const [containerNameDraft, setContainerNameDraft] = useState("")
@@ -1977,8 +1961,6 @@ export function SubjectWheel({
   const [deleteContainerTarget, setDeleteContainerTarget] = useState<SubjectMaterialContainer | null>(null)
   const containerLongPressTimerRef = useRef<number | null>(null)
   const suppressContainerClickRef = useRef(false)
-  const [isMaterialEditSaving, setIsMaterialEditSaving] = useState(false)
-  const [materialEditError, setMaterialEditError] = useState("")
   const [entries, setEntries] = useState<SubjectDayEntry[]>([])
   const [materials, setMaterials] = useState<SubjectDayMaterial[]>([])
   const [pendingMaterials, setPendingMaterials] = useState<PendingSubjectDayMaterial[]>([])
@@ -2342,7 +2324,7 @@ export function SubjectWheel({
       const isTagSearch = Boolean(target?.closest("[data-material-tag-search='true']"))
       const isEditable = Boolean(target?.closest("input, textarea, select, [contenteditable='true']"))
       if (isEditable && !isTagSearch) return
-      if (isCreateContainerOpen || isShortcutDialogOpen || editingMaterial || droppedTextPdfDraft) return
+      if (isCreateContainerOpen || isShortcutDialogOpen || renamingMaterialId !== null || droppedTextPdfDraft) return
       event.preventDefault()
       event.stopPropagation()
       setContainerNameDraft("")
@@ -2351,7 +2333,7 @@ export function SubjectWheel({
     }
     window.addEventListener("keydown", onPlus, true)
     return () => window.removeEventListener("keydown", onPlus, true)
-  }, [droppedTextPdfDraft, editingMaterial, isCreateContainerOpen, isDialogOpen, isShortcutDialogOpen])
+  }, [droppedTextPdfDraft, renamingMaterialId, isCreateContainerOpen, isDialogOpen, isShortcutDialogOpen])
 
   const saveNewContainer = async () => {
     if (!currentSubject || !containerNameDraft.trim()) return
@@ -3281,6 +3263,7 @@ export function SubjectWheel({
   }
 
   const resetSubjectUiState = ({ preserveStackedReturnState = false }: { preserveStackedReturnState?: boolean } = {}) => {
+    setRenamingMaterialId(null)
     subjectDayDataRequestIdRef.current += 1
     clearPendingFeaturedSave()
     pendingFeaturedUpdateRef.current = null
@@ -5446,123 +5429,15 @@ export function SubjectWheel({
     void openContinueModal(pendingReturn.continueMode, pendingReturn.continueMaterialId ?? undefined)
   }, [currentSubject, hasResolvedSubjectDayData, isDialogOpen, openContinueModal])
 
-  const openMaterialEditDialog = (material: SubjectDayMaterial) => {
-    setEditingMaterial(material)
-    setMaterialEditDraft({
-      fileName: material.file_name,
-      materialType: material.material_type,
-      sessionDate: material.session_date,
-      weekNumber: String(material.week_number),
-      isCheckupDone: material.is_checkup_done,
-      containerId: String(
-        material.container_id ??
-        subjectMaterialContainers.find((container) => container.kind === material.material_type)?.id ??
-        ""
-      ),
+  const renameMaterial = async (material: SubjectDayMaterial, fileName: string) => {
+    const response = await fetch(`/api/subject-day-materials/${material.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName }),
     })
-    setMaterialEditError("")
-  }
-
-  const closeMaterialEditDialog = () => {
-    if (isMaterialEditSaving) return
-    setEditingMaterial(null)
-    setMaterialEditError("")
-  }
-
-  const saveMaterialEdit = async () => {
-    if (!editingMaterial) return
-
-    const fileName = materialEditDraft.fileName.trim()
-    const sessionDate = materialEditDraft.sessionDate.trim()
-    const weekNumber = Number.parseInt(materialEditDraft.weekNumber, 10)
-    const selectedContainer = subjectMaterialContainers.find(
-      (container) => container.id === Number(materialEditDraft.containerId)
-    )
-    const nextMaterialType: SubjectDayMaterialType =
-      selectedContainer?.kind === "theory" ? "theory" : "practice"
-
-    if (!fileName) {
-      setMaterialEditError("El nombre no puede estar vacio.")
-      return
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(sessionDate) || Number.isNaN(parseDateKey(sessionDate).getTime())) {
-      setMaterialEditError("La fecha debe tener formato YYYY-MM-DD.")
-      return
-    }
-    if (!Number.isInteger(weekNumber) || weekNumber < 0) {
-      setMaterialEditError("La semana debe ser un numero valido.")
-      return
-    }
-
-    const previousMaterial = editingMaterial
-    const optimisticMaterial: SubjectDayMaterial = {
-      ...previousMaterial,
-      file_name: fileName,
-      material_type: nextMaterialType,
-      container_id: selectedContainer?.id ?? previousMaterial.container_id,
-      session_date: sessionDate,
-      week_number: weekNumber,
-      weekday_index: getWeekdayIndexFromDateKey(sessionDate),
-      is_checkup_done: materialEditDraft.isCheckupDone,
-    }
-
-    setIsMaterialEditSaving(true)
-    setMaterialEditError("")
-    setMaterials((previousMaterials) =>
-      sortSubjectDayMaterials(
-        previousMaterials.map((material) => (material.id === optimisticMaterial.id ? optimisticMaterial : material))
-      )
-    )
-    if (currentContinueMaterial?.id === optimisticMaterial.id) {
-      setContinuePayload((previous) => (previous ? { ...previous, mode: optimisticMaterial.material_type, material: optimisticMaterial } : previous))
-    }
-
-    try {
-      const response = await fetch(`/api/subject-day-materials/${previousMaterial.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName,
-          materialType: nextMaterialType,
-          containerId: selectedContainer?.id ?? previousMaterial.container_id,
-          sessionDate,
-          weekNumber,
-          isCheckupDone: materialEditDraft.isCheckupDone,
-        }),
-      })
-      const payload = await response.json()
-      if (!response.ok) {
-        throw new Error(getErrorMessage(payload, "No se pudo editar el objeto."))
-      }
-
-      const updatedMaterial = payload as SubjectDayMaterial
-      setMaterials((previousMaterials) =>
-        sortSubjectDayMaterials(
-          previousMaterials.map((material) => (material.id === updatedMaterial.id ? updatedMaterial : material))
-        )
-      )
-      if (currentContinueMaterial?.id === updatedMaterial.id) {
-        setContinuePayload((previous) => (previous ? { ...previous, mode: updatedMaterial.material_type, material: updatedMaterial } : previous))
-      }
-      if (selectedPracticeMaterialId === updatedMaterial.id && updatedMaterial.material_type !== "practice") {
-        setSelectedPracticeMaterialId(null)
-      }
-      setEditingMaterial(null)
-      if (currentSubject) void loadMaterialContainers(currentSubject.id)
-    } catch (error) {
-      console.error("Failed to edit material:", error)
-      setMaterials((previousMaterials) =>
-        sortSubjectDayMaterials(
-          previousMaterials.map((material) => (material.id === previousMaterial.id ? previousMaterial : material))
-        )
-      )
-      if (currentContinueMaterial?.id === previousMaterial.id) {
-        setContinuePayload((previous) => (previous ? { ...previous, mode: previousMaterial.material_type, material: previousMaterial } : previous))
-      }
-      setMaterialEditError(error instanceof Error ? error.message : "No se pudo editar el objeto.")
-    } finally {
-      setIsMaterialEditSaving(false)
-    }
+    const payload = await response.json()
+    if (!response.ok) throw new Error(getErrorMessage(payload, "No se pudo renombrar el PDF."))
+    const updated = payload as SubjectDayMaterial
+    setMaterials(previous => sortSubjectDayMaterials(previous.map(item => item.id === material.id ? { ...item, file_name: updated.file_name } : item)))
+    setContinuePayload(previous => previous?.material?.id === material.id ? { ...previous, material: { ...previous.material, file_name: updated.file_name } } : previous)
   }
 
   const toggleMaterialCheckup = async (materialToUpdate: SubjectDayMaterial, checked: boolean) => {
@@ -7096,7 +6971,7 @@ export function SubjectWheel({
                   event.preventDefault(); event.stopPropagation()
                   void guardCooperationElement(currentSubject.id, material.id, () => window.open(anchor.href, '_blank', 'noopener,noreferrer'))
                 }}
-                draggable={!isMaterialEditSaving && !("is_pending_upload" in material)}
+                draggable={renamingMaterialId !== material.id && !("is_pending_upload" in material)}
                 onDragStart={(event) => {
                   if ("is_pending_upload" in material) {
                     event.preventDefault()
@@ -7164,6 +7039,8 @@ export function SubjectWheel({
                         </div>
                       ) : (
                         <div className="flex min-w-0 items-center gap-2">
+                          {renamingMaterialId === material.id ? <InlinePdfName name={material.file_name}
+                            onSave={name => renameMaterial(material, name)} onClose={() => setRenamingMaterialId(current => current === material.id ? null : current)} /> : <>
                           <a
                             href={buildMaterialViewerHref(
                               material,
@@ -7182,13 +7059,19 @@ export function SubjectWheel({
                             <HoldActionButton
                               type="button"
                               data-workspace-write={isNativeReadOnly() || undefined}
-                              onClick={() => openMaterialEditDialog(material)}
-                              onHold={() => window.open(`/sintesis?${new URLSearchParams({ subjectId: material.subject_id, weekNumber: String(material.week_number), materialId: String(material.id) })}`, '_blank', 'noopener,noreferrer')}
+                              onClick={() => setRenamingMaterialId(material.id)}
+                              onHold={() => {
+                                const href = `/sintesis?${new URLSearchParams({ subjectId: material.subject_id, weekNumber: String(material.week_number), materialId: String(material.id) })}`
+                                const opened = window.open(href, '_blank')
+                                if (opened) opened.opener = null
+                                else router.push(href)
+                              }}
                               title="Renombrar PDF. Mantener pulsado para abrir Síntesis"
                               aria-label={`Renombrar ${material.file_name}`}
                               className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
                             ><Pencil className="h-4 w-4" /></HoldActionButton>
                           ) : null}
+                          </>}
                         </div>
                       )}
                       <div className="mt-2 flex flex-wrap gap-1">
@@ -8167,115 +8050,6 @@ export function SubjectWheel({
           <DialogFooter>
             <Button type="button" onClick={() => setWorkspaceNoticeMessage("")}>
               Entendido
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(editingMaterial)} onOpenChange={(open) => (!open ? closeMaterialEditDialog() : undefined)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Editar objeto</DialogTitle>
-            <DialogDescription>
-              Ajusta las propiedades del PDF sin reemplazar el archivo.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground" htmlFor="material-edit-name">
-                Nombre
-              </label>
-              <Input
-                id="material-edit-name"
-                value={materialEditDraft.fileName}
-                onChange={(event) =>
-                  setMaterialEditDraft((previous) => ({ ...previous, fileName: event.target.value }))
-                }
-                disabled={isMaterialEditSaving}
-                autoFocus
-              />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Contenedor</label>
-                <Select
-                  value={materialEditDraft.containerId}
-                  onValueChange={(value) =>
-                    setMaterialEditDraft((previous) => ({
-                      ...previous,
-                      containerId: value,
-                    }))
-                  }
-                  disabled={isMaterialEditSaving}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {subjectMaterialContainers.map((container) => (
-                      <SelectItem key={container.id} value={String(container.id)}>
-                        {container.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground" htmlFor="material-edit-week">
-                  Semana
-                </label>
-                <Input
-                  id="material-edit-week"
-                  type="number"
-                  min={0}
-                  value={materialEditDraft.weekNumber}
-                  onChange={(event) =>
-                    setMaterialEditDraft((previous) => ({ ...previous, weekNumber: event.target.value }))
-                  }
-                  disabled={isMaterialEditSaving}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground" htmlFor="material-edit-date">
-                Fecha
-              </label>
-              <Input
-                id="material-edit-date"
-                type="date"
-                value={materialEditDraft.sessionDate}
-                onChange={(event) =>
-                  setMaterialEditDraft((previous) => ({ ...previous, sessionDate: event.target.value }))
-                }
-                disabled={isMaterialEditSaving}
-              />
-            </div>
-
-            <label className="flex items-center justify-between gap-4 rounded-xl border border-border px-3 py-3">
-              <span className="text-sm font-medium text-foreground">CheckUp hecho</span>
-              <Switch data-workspace-write={isNativeReadOnly() || undefined}
-                checked={materialEditDraft.isCheckupDone}
-                onCheckedChange={(checked) =>
-                  setMaterialEditDraft((previous) => ({ ...previous, isCheckupDone: checked }))
-                }
-                disabled={isMaterialEditSaving}
-              />
-            </label>
-
-            {materialEditError ? <p className="text-sm text-red-600">{materialEditError}</p> : null}
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={closeMaterialEditDialog} disabled={isMaterialEditSaving}>
-              Cancelar
-            </Button>
-            <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" onClick={() => void saveMaterialEdit()} disabled={isMaterialEditSaving}>
-              {isMaterialEditSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Guardar
             </Button>
           </DialogFooter>
         </DialogContent>

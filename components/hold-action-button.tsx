@@ -7,12 +7,15 @@ export function HoldActionButton({onHold,onClick,...props}:ButtonHTMLAttributes<
   useEffect(()=>cancel,[])
   return <button {...props} onPointerDown={event=>{
     if(event.button!==0)return
+    // The PDF row is draggable. Do not let its native drag cancel this gesture.
+    event.preventDefault();event.stopPropagation();event.currentTarget.focus({preventScroll:true})
     cancel();pointer.current=event.pointerId;held.current=false;start.current={x:event.clientX,y:event.clientY}
     event.currentTarget.setPointerCapture(event.pointerId)
     timer.current=setTimeout(()=>{timer.current=null;held.current=true;onHold()},600)
   }} onPointerMove={event=>{if(pointer.current===event.pointerId&&Math.hypot(event.clientX-start.current.x,event.clientY-start.current.y)>5){cancel();held.current=true}}}
   onPointerUp={()=>{cancel();pointer.current=null}} onPointerCancel={()=>{cancel();pointer.current=null;held.current=true}}
   onLostPointerCapture={cancel} onBlur={cancel}
+  draggable={false} onDragStart={event=>{event.preventDefault();event.stopPropagation()}}
   onKeyDown={event=>{if(event.key==='Enter'&&event.shiftKey){event.preventDefault();onHold()}}}
   onContextMenu={event=>event.preventDefault()} onClick={event=>{if(held.current){event.preventDefault();held.current=false;return}onClick?.(event)}} />
 }
