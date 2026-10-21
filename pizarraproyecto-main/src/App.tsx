@@ -3814,7 +3814,13 @@ function App() {
   function togglePdfPin() {
     const item=selectedPdfShortcut()
     if(!item)return
-    rememberChange();item.pdfPinned=!item.pdfPinned
+    rememberChange()
+    const pinned=!item.pdfPinned
+    for(const shortcut of shapesRef.current){
+      if(shortcut.visualType==='pdf-shortcut')shortcut.pdfPinned=false
+    }
+    item.pdfPinned=pinned
+    lastPinnedPdfRef.current=pinned?{boardId:getActiveBoardId(),id:item.id}:null
     refreshSelection(n=>n+1);redraw();scheduleSave()
   }
 
@@ -4727,7 +4733,7 @@ function App() {
       if(e.isComposing||apiChat)return
       if(e.key==='<'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat&&!editingRef.current&&!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&!treePanel) {
         if(materialLibrary.reader){e.preventDefault();materialLibrary.closeReader();return}
-        const pinned=shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference)
+        const pinned=shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).slice(-1)
         const last=lastPinnedPdfRef.current
         const item=pinned.find(item=>last?.boardId===getActiveBoardId()&&item.id===last.id)??pinned[0]
         if(item?.pdfReference){e.preventDefault();lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:item.id};materialLibrary.openReader(item.pdfReference)}
@@ -5183,7 +5189,7 @@ function App() {
           onClick={togglePdfPin}><PdfPinIcon/></button>
       })()}
       <RightMathDock getSelection={getMathSelectionForDock} addGraphToBoard={(formulas,settings)=>insertBoardGraph(formulas,undefined,settings)}
-        pinnedPdfs={[...new Map(shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).map(item=>[item.id,{id:item.id,name:item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')}])).values()]}
+        pinnedPdfs={shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).slice(-1).map(item=>({id:item.id,name:item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')}))}
         onOpenPdf={id=>{const reference=shapesRef.current.find(item=>item.id===id)?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id};materialLibrary.openReader(reference)}}}
         onRevealPdf={revealPdfShortcut}
         getSelectedMatrix={()=>{

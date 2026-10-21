@@ -27,7 +27,10 @@ export function trackHomeWrites(current: Window) {
     return task
   }
   current.fetch = tracked
-  return () => { if (current.fetch === tracked) current.fetch = original }
+  return () => {
+    // A previously accessible iframe may have navigated to another origin.
+    try { if (current.fetch === tracked) current.fetch = original } catch { /* Its old document is already detached. */ }
+  }
 }
 
 async function waitForWrites() {

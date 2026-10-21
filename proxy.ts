@@ -25,6 +25,7 @@ export function proxy(request: NextRequest) {
     if (request.nextUrl.pathname.startsWith("/api/google/drive/")) return NextResponse.next()
 
     if (
+      (request.nextUrl.pathname === "/api/board-chat" && request.method.toUpperCase() === "POST") ||
       (request.nextUrl.pathname === "/api/pdf-translate" && request.method.toUpperCase() === "POST") ||
       (request.nextUrl.pathname === "/api/pdf-explanation" && ["GET", "POST"].includes(request.method.toUpperCase())) ||
       (request.nextUrl.pathname === "/api/synthesis-voice" && request.method.toUpperCase() === "POST") ||

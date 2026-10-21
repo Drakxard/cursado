@@ -13,6 +13,18 @@ const proxyModule = { exports: {} as { proxy?: (request: unknown) => Response } 
 new Function("require", "module", "exports", compiled.outputFiles[0].text)(require, proxyModule, proxyModule.exports)
 const proxy = proxyModule.exports.proxy!
 
+test("board chat reaches the server with local workspace storage", () => {
+  const response = proxy(new NextRequest("https://app.test/api/board-chat", { method: "POST" }))
+  assert.equal(response.headers.get("x-middleware-next"), "1")
+  for (const [path, method] of [
+    ["/api/board-chat", "GET"],
+    ["/api/board-chat", "DELETE"],
+    ["/api/board-chat/unknown", "POST"],
+  ]) {
+    assert.equal(proxy(new NextRequest(`https://app.test${path}`, { method })).status, 501)
+  }
+})
+
 test("TTS pasa al servidor en modo local únicamente mediante POST", () => {
   const allowed = proxy(new NextRequest("https://app.test/api/tts", { method: "POST" }))
   assert.equal(allowed.headers.get("x-middleware-next"), "1")

@@ -137,6 +137,22 @@ test('a single PDF shortcut can be pinned, opened from the dock, located by long
   await page.screenshot({path:'test-results/pdf-pinned-mobile.png'})
 })
 
+test('pinning another PDF replaces the dock target and persists after reload',async({page})=>{
+  await drop(page)
+  await page.getByRole('button',{name:/^Fijar PDF/}).click()
+  await drop(page,220,400,{...reference,materialId:42,fileName:'Otra.pdf'})
+  await page.getByRole('button',{name:'Fijar PDF Otra',exact:true}).click()
+  await expect(page.locator('.pinned-pdf-button')).toHaveCount(1)
+  await expect(page.getByRole('button',{name:'Abrir PDF fijado Otra',exact:true})).toBeVisible()
+  await expect.poll(async()=>(await saved(page)).shapes.map(item=>item.pdfPinned)).toEqual([false,true])
+  await page.reload()
+  const pinned=page.getByRole('button',{name:'Abrir PDF fijado Otra',exact:true})
+  await expect(pinned).toBeVisible()
+  await expect(page.locator('.pinned-pdf-button')).toHaveCount(1)
+  await pinned.click()
+  await expect(page.locator('.board-pdf-reader[aria-hidden="false"] iframe')).toHaveAttribute('src',/materialId=42/)
+})
+
 test('multiple selected PDF shortcuts move together, do not open a reader, and cannot be pinned as a selection',async({page})=>{
   await drop(page)
   await drop(page,220,400,{...reference,materialId:42,fileName:'Otra.pdf'})

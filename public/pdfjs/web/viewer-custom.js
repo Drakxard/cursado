@@ -251,10 +251,9 @@
     };
   }
 
-  function hasUnsyncedAnnotations() {
+  function hasUnsyncedAnnotations(currentHash = getAnnotationContentHash()) {
     const annotationStorage = state.app?.pdfDocument?.annotationStorage;
     if (!annotationStorage || annotationStorage.size === 0) return false;
-    const currentHash = getAnnotationContentHash();
     return Boolean(
       state.app?._annotationStorageModified ||
       (currentHash && currentHash !== state.lastSyncedAnnotationHash)
@@ -292,9 +291,10 @@
   }
 
   function monitorAnnotationChanges() {
-    refreshSyncButtons();
-    if (!canSyncCurrentDocument() || !hasUnsyncedAnnotations()) return;
     const currentHash = getAnnotationContentHash();
+    const unsynced = hasUnsyncedAnnotations(currentHash);
+    refreshSyncButtons(unsynced);
+    if (!canSyncCurrentDocument() || !unsynced) return;
     if (!currentHash || currentHash === state.lastObservedAnnotationHash) return;
     state.lastObservedAnnotationHash = currentHash;
     state.autosyncRetryCount = 0;
@@ -1050,10 +1050,9 @@
     button.setAttribute("aria-label", accessibleLabel);
   }
 
-  function refreshSyncButtons() {
+  function refreshSyncButtons(hasUnsyncedChanges = hasUnsyncedAnnotations()) {
     if (!state.app) return;
 
-    const hasUnsyncedChanges = hasUnsyncedAnnotations();
     state.hasUnsyncedChanges = hasUnsyncedChanges;
     if (hasUnsyncedChanges) {
       state.isSynced = false;
