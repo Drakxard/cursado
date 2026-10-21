@@ -12,3 +12,8 @@ export function adjacentReviewMarker(shapes:ShapeItem[],id:string,direction:-1|1
   if(index<0||!markers.length)return null
   return markers[(index+direction+markers.length)%markers.length]
 }
+
+export function savedReviewView(marker:ShapeItem){
+  const view=marker.reviewView
+  return view&&Number.isFinite(view.center?.x)&&Number.isFinite(view.center?.y)&&Number.isFinite(view.zoom)&&view.zoom>=.01&&view.zoom<=5?view:null
+}

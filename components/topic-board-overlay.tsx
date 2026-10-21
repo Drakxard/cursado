@@ -33,7 +33,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
         } catch (reason) { setError(String(reason)) }
       }
       if (event.data.type === "topic-board:ready") {
-        setReady(true); frame.current?.focus()
+        setReady(true); setClosing(false); frame.current?.focus()
         if (cooperationSubjectId) frame.current?.contentWindow?.postMessage({ type: 'topic-board:live', boardId, payload: { type: 'presence', ...cooperationPresence(cooperationSubjectId) } }, location.origin)
       }
       if (event.data.type === 'topic-board:ephemeral' && cooperationSubjectId) sendCooperationEditor(cooperationSubjectId, boardId, event.data.payload)

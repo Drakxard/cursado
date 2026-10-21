@@ -506,15 +506,18 @@ export async function handleLocalApiRequest(request: Request) {
       if (method === "PATCH") {
         const body = await parseRequestJson<{
           isCheckupDone?: boolean
+          fileName?: string
           containerId?: number | null
           materialType?: "theory" | "practice"
         }>(request)
+        if (body?.fileName !== undefined && (typeof body.fileName !== 'string' || !body.fileName.trim() || body.fileName.length > 500)) return errorResponse('Invalid fileName')
         const material = await updateLocalMaterial(materialId, {
+          file_name: body?.fileName?.trim(),
           is_checkup_done: typeof body?.isCheckupDone === "boolean" ? body.isCheckupDone : undefined,
           container_id: Number.isInteger(Number(body?.containerId)) ? Number(body.containerId) : undefined,
           material_type: body?.materialType === "theory" || body?.materialType === "practice" ? body.materialType : undefined,
         })
-        if (material && (body?.containerId !== undefined || body?.materialType !== undefined)) void processLocalDriveSyncQueue()
+        if (material && (body?.containerId !== undefined || body?.materialType !== undefined || body?.fileName !== undefined)) void processLocalDriveSyncQueue()
         return material ? jsonResponse(material) : errorResponse("Material not found", 404)
       }
       if (method === "DELETE") {

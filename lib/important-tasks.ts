@@ -50,3 +50,9 @@ export async function writeImportantTasks(root: FileSystemDirectoryHandle, tasks
   await writer.close()
   if (typeof window !== "undefined") window.dispatchEvent(new Event("cursado-workspace-saved"))
 }
+
+export function importantCountdownStyle(days: number) {
+  return days === 1 ? {kind:'urgent' as const,from:'#f97316',to:'#ef4444'}
+    : days >= 3 ? {kind:'calm' as const,from:'#22c55e',to:'#059669'}
+    : {kind:'soon' as const,from:'#facc15',to:'#fb923c'}
+}

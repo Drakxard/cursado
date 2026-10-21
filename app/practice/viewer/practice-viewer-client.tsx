@@ -12,7 +12,8 @@ import { createObjectUrlForWorkspaceFile, getLocalMaterialById } from "@/lib/loc
 import { uploadSubjectDayMaterial } from "@/lib/materials-client"
 import { createPracticeAudioEntry } from "@/lib/practice-entry-client"
 import { isLocalStorageMode } from "@/lib/storage-mode"
-import { fetchSubjectShortcuts } from "@/lib/subject-shortcuts-client"
+import { getLocalSubjectShortcuts, updateLocalSubjectShortcut, createLocalSubjectShortcut } from "@/lib/local-workspace-data"
+import { fetchSubjectShortcuts, updateSubjectShortcut, createSubjectShortcut } from "@/lib/subject-shortcuts-client"
 import { getSubjectShortcutUrl } from "@/lib/subject-shortcuts"
 import { getSubjectById } from "@/lib/subjects"
 import { normalizeTagName } from "@/lib/tag-utils"
@@ -84,6 +85,7 @@ type FragmentUploadPayload = {
 }
 
 type ViewerMessage =
+  | { type: "configureNotebookLm" }
   | { type: "startAnchoredAudio"; payload?: PendingAnchor }
   | { type: "cancelAnchoredAudio" }
   | { type: "playAnchoredAudio"; entryId?: number }
@@ -325,6 +327,9 @@ function EditablePracticeViewerClient({
   const [uploadFeedback, setUploadFeedback] = useState("")
   const [resolvedMaterial, setResolvedMaterial] = useState<MaterialContext | undefined>(material)
   const [viewerSourceError, setViewerSourceError] = useState("")
+  const [notebookDraft,setNotebookDraft]=useState<string|null>(null)
+  const [notebookError,setNotebookError]=useState("")
+  const [notebookSaving,setNotebookSaving]=useState(false)
   const [viewerShortcuts, setViewerShortcuts] = useState<SubjectShortcutButton[]>([])
   const { rootHandle } = useLocalWorkspace()
   const playbackUrlCacheRef = useRef(new Map<string, string>())
@@ -377,10 +382,14 @@ function EditablePracticeViewerClient({
     const sectionKey = activeContext ? `day:${activeContext.sessionDate}` : ""
     postToViewer({
       type: "viewerSubjectShortcuts",
-      shortcuts: viewerShortcuts
-        .map((shortcut) => ({ ...shortcut, effectiveUrl: getSubjectShortcutUrl(shortcut, sectionKey) }))
-        .filter((shortcut) => Boolean(shortcut.effectiveUrl?.trim()))
-        .map((shortcut) => ({ id: shortcut.id, label: shortcut.label, url: shortcut.effectiveUrl })),
+      shortcuts: [
+        ...viewerShortcuts.filter(shortcut=>shortcut.integrationRole!=="notebooklm"&&shortcut.label.toLowerCase()!=="nlm")
+          .map((shortcut) => ({ ...shortcut, effectiveUrl: getSubjectShortcutUrl(shortcut, sectionKey) }))
+          .filter((shortcut) => Boolean(shortcut.effectiveUrl?.trim()))
+          .map((shortcut) => ({ id: shortcut.id, label: shortcut.label, url: shortcut.effectiveUrl })),
+        {id:"notebooklm",label:"nlm",url:viewerShortcuts.filter(shortcut=>shortcut.integrationRole==="notebooklm"||shortcut.label.toLowerCase()==="nlm")
+          .map(shortcut=>getSubjectShortcutUrl(shortcut,`week:${activeContext?.weekNumber}`))[0]||"https://notebook.google.com/",notebooklm:true},
+      ],
     })
   }, [activeContext, postToViewer, viewerShortcuts])
 
@@ -508,7 +517,7 @@ function EditablePracticeViewerClient({
     }
 
     let cancelled = false
-    void fetchSubjectShortcuts(subjectId)
+    void (isLocalMode?getLocalSubjectShortcuts(subjectId):fetchSubjectShortcuts(subjectId))
       .then((shortcuts) => {
         if (!cancelled) setViewerShortcuts(shortcuts.buttons)
       })
@@ -891,6 +900,11 @@ function EditablePracticeViewerClient({
         return
       }
 
+      if(event.data.type === "configureNotebookLm" && activeContext){
+        const shortcut=viewerShortcuts.find(item=>item.integrationRole==="notebooklm"||item.label.toLowerCase()==="nlm")
+        setNotebookError("");setNotebookDraft(shortcut?getSubjectShortcutUrl(shortcut,`week:${activeContext.weekNumber}`)||"":"")
+        return
+      }
       if (event.data.type === "viewerReady") {
         syncPositionsToViewer(hasMaterial ? positions : [])
         publishViewerMaterialTags()
@@ -1107,6 +1121,8 @@ function EditablePracticeViewerClient({
       }
     },
     [
+      activeContext,
+      viewerShortcuts,
       activeEntryId,
       assignViewerMaterialTag,
       closeRecorder,
@@ -1258,6 +1274,32 @@ function EditablePracticeViewerClient({
 
   return (
     <main className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#d4d4d7] text-white">
+      {notebookDraft!==null&&activeContext&&<div role="dialog" aria-modal="true" aria-label="Configurar NotebookLM" style={{position:'fixed',inset:0,zIndex:10000,background:'#0008',display:'grid',placeItems:'center'}}>
+        <form className="rounded-xl bg-white p-6 text-black shadow-xl" onSubmit={event=>{
+          event.preventDefault();if(notebookSaving)return
+          void (async()=>{
+            setNotebookSaving(true);setNotebookError('')
+            try{
+              const url=notebookDraft.trim()
+              if(url&&!/^https?:$/.test(new URL(url).protocol))throw new Error('Us? un enlace http o https.')
+              let shortcuts=await (isLocalMode?getLocalSubjectShortcuts(activeContext.subjectId):fetchSubjectShortcuts(activeContext.subjectId))
+              let shortcut=shortcuts.buttons.find(item=>item.integrationRole==='notebooklm'||item.label.toLowerCase()==='nlm')
+              if(!shortcut){shortcuts=await (isLocalMode?createLocalSubjectShortcut:createSubjectShortcut)({subjectId:activeContext.subjectId,label:'nlm'});shortcut=shortcuts.buttons.find(item=>item.label.toLowerCase()==='nlm')}
+              if(!shortcut)throw new Error('No se pudo crear el acceso.')
+              const saved=await (isLocalMode?updateLocalSubjectShortcut:updateSubjectShortcut)({subjectId:activeContext.subjectId,id:shortcut.id,url,sectionScoped:true,sectionKey:`week:${activeContext.weekNumber}`})
+              setViewerShortcuts(saved.buttons);setNotebookDraft(null)
+            }catch(error){setNotebookError(error instanceof Error?error.message:'No se pudo guardar el enlace.')}
+            finally{setNotebookSaving(false)}
+          })()
+        }}>
+          <h2>NotebookLM · Semana {activeContext.weekNumber}</h2>
+          <label>Enlace<input autoFocus aria-label="Enlace de NotebookLM" className="my-4 block w-full border p-2" value={notebookDraft} onChange={event=>setNotebookDraft(event.target.value)} /></label>
+          {notebookError&&<p role="alert">{notebookError}</p>}
+          <button type="submit" disabled={notebookSaving}>Guardar</button>{' '}
+          <button type="button" disabled={notebookSaving} onClick={()=>setNotebookDraft(null)}>Cancelar</button>
+        </form>
+      </div>}
+
       {canRenderViewer ? (
         <iframe
           key={viewerIdentity}

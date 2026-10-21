@@ -41,7 +41,7 @@ def validate_visual_content(content: dict):
         if not isinstance(item, dict) or not item.get('visualType'):
             continue
         kind = item['visualType']
-        require(kind in ('sticky', 'connector', 'symbol', 'page', 'code', 'pdf-shortcut', 'review-marker'), 'Tipo de objeto visual desconocido.')
+        require(kind in ('sticky', 'connector', 'symbol', 'page', 'code', 'pdf-shortcut', 'review-marker', 'important-countdown', 'board-shortcut'), 'Tipo de objeto visual desconocido.')
         require(isinstance(item.get('id'), str) and 1 <= len(item['id']) <= 150 and counts[item['id']] == 1,
                 'El objeto visual necesita un identificador único.')
         require(number(item.get('x')) and number(item.get('y')) and number(item.get('width'), .001, 1_000_000)
@@ -51,7 +51,17 @@ def validate_visual_content(content: dict):
                 'El color del objeto visual no es válido.')
         if item.get('label') is not None:
             require(text(item['label'], 2000), 'El texto del elemento es demasiado largo.')
-        if kind == 'pdf-shortcut':
+        if kind == 'review-marker' and 'reviewView' in item:
+            view = item['reviewView']
+            require(isinstance(view, dict) and point(view.get('center')) and number(view.get('zoom'), .01, 5),
+                    'La vista guardada no es válida.')
+        if kind == 'important-countdown':
+            require(text(item.get('importantTaskId'), 200) and bool(item['importantTaskId']), 'Falta la tarea del contador.')
+        elif kind == 'board-shortcut':
+            reference = item.get('boardReference')
+            require(isinstance(reference, dict) and text(reference.get('boardId'), 200) and bool(reference['boardId'])
+                    and text(reference.get('name'), 500), 'Falta la pizarra de destino.')
+        elif kind == 'pdf-shortcut':
             reference = item.get('pdfReference')
             require(isinstance(reference, dict), 'Falta la referencia del PDF.')
             material_id = reference.get('materialId')

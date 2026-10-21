@@ -19,3 +19,12 @@ export function boardPdfReference(value: unknown): BoardPdfReference | null {
 export function parseBoardPdfDrag(value: string): BoardPdfReference | null {
   try { return boardPdfReference(JSON.parse(value)) } catch { return null }
 }
+
+export const BOARD_IMPORTANT_MIME = 'application/x-cursado-important'
+export const BOARD_LINK_MIME = 'application/x-cursado-board-link'
+export function parseBoardLinkDrag(text:string):{boardId:string;name:string}|null {
+  try { const value=JSON.parse(text);return typeof value.boardId==='string'&&value.boardId.length>0&&value.boardId.length<=200&&typeof value.name==='string'&&value.name.length<=500?{boardId:value.boardId,name:value.name}:null } catch{return null}
+}
+export function parseImportantDrag(text:string):{taskId:string}|null {
+  try { const value=JSON.parse(text);return typeof value.taskId==='string'&&value.taskId.length>0&&value.taskId.length<=200?{taskId:value.taskId}:null } catch{return null}
+}

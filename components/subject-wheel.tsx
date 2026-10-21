@@ -1,4 +1,5 @@
 "use client"
+import { HoldActionButton } from "./hold-action-button"
 
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
@@ -7178,16 +7179,15 @@ export function SubjectWheel({
                             {material.file_name}
                           </a>
                           {/\.pdf$/i.test(material.file_name) ? (
-                            <a
-                              href={`/sintesis?${new URLSearchParams({ subjectId: material.subject_id, weekNumber: String(material.week_number), materialId: String(material.id) })}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title="Abrir en Síntesis en otra pestaña"
-                              aria-label={`Editar ${material.file_name} en Síntesis en otra pestaña`}
+                            <HoldActionButton
+                              type="button"
+                              data-workspace-write={isNativeReadOnly() || undefined}
+                              onClick={() => openMaterialEditDialog(material)}
+                              onHold={() => window.open(`/sintesis?${new URLSearchParams({ subjectId: material.subject_id, weekNumber: String(material.week_number), materialId: String(material.id) })}`, '_blank', 'noopener,noreferrer')}
+                              title="Renombrar PDF. Mantener pulsado para abrir Síntesis"
+                              aria-label={`Renombrar ${material.file_name}`}
                               className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </a>
+                            ><Pencil className="h-4 w-4" /></HoldActionButton>
                           ) : null}
                         </div>
                       )}

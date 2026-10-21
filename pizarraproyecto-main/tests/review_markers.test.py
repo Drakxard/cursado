@@ -18,4 +18,15 @@ class ReviewMarkerValidation(unittest.TestCase):
         with self.assertRaises(HTTPException):
             validate_visual_content({'shapes':[marker]})
 
+    def test_saved_view_and_linked_shapes(self):
+        base={'id':'one','kind':'rounded','x':0,'y':0,'width':160,'height':54,'strokeWidth':1.5,'color':'#202020'}
+        marker={**base,'visualType':'review-marker','reviewView':{'center':{'x':100,'y':200},'zoom':1.7}}
+        validate_visual_content({'shapes':[marker]})
+        for view in [None,{}, {'center':{'x':float('nan'),'y':2},'zoom':1}, {'center':{'x':1,'y':2},'zoom':0}]:
+            with self.assertRaises(HTTPException):validate_visual_content({'shapes':[{**marker,'reviewView':view}]})
+        validate_visual_content({'shapes':[{**base,'visualType':'important-countdown','importantTaskId':'exam'}]})
+        validate_visual_content({'shapes':[{**base,'visualType':'board-shortcut','boardReference':{'boardId':'local:two','name':'Otra'}}]})
+        for kind in ['important-countdown','board-shortcut']:
+            with self.assertRaises(HTTPException):validate_visual_content({'shapes':[{**base,'visualType':kind}]})
+
 if __name__=='__main__':unittest.main()

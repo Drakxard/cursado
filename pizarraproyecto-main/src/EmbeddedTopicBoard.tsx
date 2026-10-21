@@ -1,3 +1,4 @@
+import {hasBoardReturn,isBoardNavigating} from './boardNavigation'
 import { useEffect, useState } from 'react'
 import App from './App'
 import { flushNavigationSaves } from './homeNavigation'
@@ -13,13 +14,19 @@ export default function EmbeddedTopicBoard() {
       if (closing || !initialized) return
       closing = true
       try {
+        if(isBoardNavigating()){parent.postMessage({type:'topic-board:ready',boardId},location.origin);return}
+        if(hasBoardReturn()){
+          await new Promise<void>((resolve,reject)=>window.dispatchEvent(new CustomEvent('board-link:back',{detail:{resolve,reject}})))
+          parent.postMessage({type:'topic-board:ready',boardId},location.origin)
+          return
+        }
         await flushNavigationSaves()
         await saveTopicWorkspace()
         notifyTopicWorkspace('closed')
       } catch (reason) {
         const message = String(reason)
         if (alive) setError(message)
-        notifyTopicWorkspace('error', message)
+        parent.postMessage({type:'topic-board:error',boardId,error:message},location.origin)
       } finally { closing = false }
     }
     const receive = (event: MessageEvent) => {

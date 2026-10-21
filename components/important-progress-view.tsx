@@ -88,7 +88,7 @@ function CalendarGestures({ children, onMonthChange }: { children: ReactNode; on
   >{children}</div>
 }
 
-function TopicChip({ topic, onRemove, onOpen }: { topic: string; onRemove: () => void; onOpen: () => void }) {
+function TopicChip({ topic, boardId, onRemove, onOpen }: { topic: string; boardId?:string; onRemove: () => void; onOpen: () => void }) {
   const held = useRef(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const origin = useRef({ x: 0, y: 0 })
@@ -138,7 +138,7 @@ function TopicChip({ topic, onRemove, onOpen }: { topic: string; onRemove: () =>
       }
     }}
     onBlur={cancel}
-  >{topic}</button>
+  >{boardId&&<span draggable={!isNativeReadOnly()} title="Arrastrar acceso a esta pizarra" aria-label={`Arrastrar pizarra ${topic}`} className="mr-2 cursor-grab" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onDragStart={event=>{cancel();held.current=true;event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-cursado-board-link',JSON.stringify({boardId:`local:important-${boardId}`,name:topic}))}}>▧</span>}{topic}</button>
 }
 
 const parseDateInput = (input?: string): Date | null => {
@@ -248,7 +248,7 @@ interface Table {
   tasks: TaskItem[]
 }
 
-import { importantTaskProgress, readImportantTasks, writeImportantTasks, type ImportantTask } from "@/lib/important-tasks"
+import { importantCountdownStyle, importantTaskProgress, readImportantTasks, writeImportantTasks, type ImportantTask } from "@/lib/important-tasks"
 import { useLocalWorkspace } from "@/components/local-workspace-provider"
 
 // UI copied from progreso/components/progress-tracker.tsx; only local persistence and study navigation are adapted.
@@ -551,13 +551,13 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   }
 
   const getIconAndColor = (daysRemaining: number) => {
-    if (daysRemaining === 1) {
+    if (importantCountdownStyle(daysRemaining).kind === "urgent") {
       return {
         icon: Flame,
         bgColor: "from-orange-500 to-red-500",
         iconColor: "text-yellow-200",
       }
-    } else if (daysRemaining >= 3) {
+    } else if (importantCountdownStyle(daysRemaining).kind === "calm") {
       return {
         icon: TreePine,
         bgColor: "from-green-500 to-emerald-600",
@@ -830,6 +830,9 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                 <div
                   className={`absolute top-0 right-0 z-20 flex items-center gap-1 bg-gradient-to-r ${bgColor} text-white px-2 py-1 rounded-bl-lg text-xs font-bold shadow-lg cursor-pointer`}
                   data-row-activation-stop="true"
+                  draggable={currentTable.title === "Importantes" && !isNativeReadOnly()}
+                  title="Arrastrar a la pizarra"
+                  onDragStart={event=>{event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-cursado-important',JSON.stringify({taskId:task.id}))}}
                   onClick={() => {
                     const today = new Date()
                     today.setHours(0, 0, 0, 0)
@@ -972,7 +975,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                   </div>
                   <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
                   {(task.topics || []).map((topic, index) => (
-                    <TopicChip key={task.topicBoardIds?.[index] ?? index} topic={topic} onRemove={() => setDeleteTarget({ kind: "topic", taskId: task.id, boardId: task.topicBoardIds?.[index] ?? "", label: topic })} onOpen={() => {
+                    <TopicChip key={task.topicBoardIds?.[index] ?? index} topic={topic} boardId={task.topicBoardIds?.[index]} onRemove={() => setDeleteTarget({ kind: "topic", taskId: task.id, boardId: task.topicBoardIds?.[index] ?? "", label: topic })} onOpen={() => {
                       const boardId = task.topicBoardIds?.[index]
                       if (boardId) setSelectedTopicBoard({ boardId, name: `${task.text} · ${topic}` })
                     }} />

@@ -6,7 +6,7 @@ import ImportantProgressView from "@/components/important-progress-view"
 import "./progress-original/theme.css"
 const editing = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=slider], [role=spinbutton]"))
 
-export function StudyImportantTasks({ children }: { children: ReactNode }) {
+export function StudyImportantTasks({ children, boardLibrary = false }: { children: ReactNode; boardLibrary?: boolean }) {
   const [open, setOpen] = useState(false)
   const [tabsOpen, setTabsOpen] = useState(false)
   const touch = useRef<{ x: number; y: number } | null>(null)
@@ -57,6 +57,7 @@ export function StudyImportantTasks({ children }: { children: ReactNode }) {
         else if (!open && dx > 0 && isNativeReadOnly()) setTabsOpen(true)
       }
     }}>
+    {boardLibrary && !open && <button type="button" className="fixed bottom-4 left-4 z-40 rounded-xl border bg-background px-4 py-2 text-foreground shadow" onClick={() => setOpen(true)}>Importantes</button>}
     <div hidden={open} inert={open}>{children}</div>
     <div hidden={!open} inert={!open} className="progress-original"><ImportantProgressView active={open} onBack={() => setOpen(false)} /></div>
   </div>

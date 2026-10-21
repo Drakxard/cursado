@@ -3429,13 +3429,14 @@ export async function listLocalPinnedSubjectMaterials(subjectId: string) {
 
 export async function updateLocalMaterial(
   materialId: number,
-  patch: Partial<Pick<SubjectDayMaterial, "is_checkup_done" | "container_id" | "material_type">>
+  patch: Partial<Pick<SubjectDayMaterial, "is_checkup_done" | "container_id" | "material_type" | "file_name">>
 ) {
   const material = await findMaterialById(materialId)
   if (!material) return null
   const manifest = await readMaterialManifest(material.subject_id, material.week_number)
   const updatedMaterial: SubjectDayMaterial = {
     ...material,
+    file_name: patch.file_name ?? material.file_name,
     is_checkup_done: patch.is_checkup_done ?? material.is_checkup_done,
     container_id: patch.container_id === undefined ? material.container_id : patch.container_id,
     material_type: patch.material_type ?? material.material_type,
@@ -3446,7 +3447,7 @@ export async function updateLocalMaterial(
     material.week_number,
     manifest.materials.map((candidate) => (candidate.id === materialId ? updatedMaterial : candidate))
   )
-  if (patch.container_id !== undefined || patch.material_type !== undefined) {
+  if (patch.container_id !== undefined || patch.material_type !== undefined || patch.file_name !== undefined) {
     await enqueueLocalMaterialDriveUpload(updatedMaterial, "", true)
   }
   return updatedMaterial

@@ -30,5 +30,5 @@ export function SubjectWheelLoader({
   boardLibrary?: boolean
 }) {
   const wheel = <DynamicSubjectWheel authSession={authSession} initialSearchParams={initialSearchParams} boardLibrary={boardLibrary} />
-  return boardLibrary ? wheel : <StudyImportantTasks>{wheel}</StudyImportantTasks>
+  return <StudyImportantTasks boardLibrary={boardLibrary}>{wheel}</StudyImportantTasks>
 }

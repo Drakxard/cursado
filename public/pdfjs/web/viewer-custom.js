@@ -546,6 +546,9 @@
   function renderSubjectShortcuts() {
     const container = state.subjectShortcutContainer;
     if (!container) return;
+    const signature = JSON.stringify(state.subjectShortcuts);
+    if (container.dataset.shortcuts === signature) return;
+    container.dataset.shortcuts = signature;
     container.replaceChildren();
 
     for (const shortcut of state.subjectShortcuts) {
@@ -569,6 +572,25 @@
       link.title = `Abrir ${label}`;
       link.setAttribute("aria-label", `Abrir ${label}`);
       link.textContent = label;
+      if(shortcut.notebooklm) {
+        let timer=null,held=false,start=null;
+        const cancel=()=>{clearTimeout(timer);timer=null;};
+        link.title="Abrir NotebookLM. Mantener pulsado para configurar esta semana";
+        link.addEventListener("pointerdown",event=>{
+          if(event.button!==0)return;
+          cancel();held=false;start={x:event.clientX,y:event.clientY};
+          link.setPointerCapture(event.pointerId);
+          timer=setTimeout(()=>{held=true;window.parent.postMessage({type:"configureNotebookLm"},location.origin);},600);
+        });
+        link.addEventListener("pointermove",event=>{if(start&&Math.hypot(event.clientX-start.x,event.clientY-start.y)>5){cancel();held=true;}});
+        link.addEventListener("pointerup",()=>{cancel();start=null;});
+        link.addEventListener("pointercancel",()=>{cancel();start=null;held=true;});
+        link.addEventListener("lostpointercapture",cancel);
+        link.addEventListener("blur",cancel);
+        link.addEventListener("keydown",event=>{if(event.key==="Enter"&&event.shiftKey){event.preventDefault();window.parent.postMessage({type:"configureNotebookLm"},location.origin);}});
+        link.addEventListener("contextmenu",event=>event.preventDefault());
+        link.addEventListener("click",event=>{if(held){event.preventDefault();held=false;}});
+      }
       container.appendChild(link);
     }
 

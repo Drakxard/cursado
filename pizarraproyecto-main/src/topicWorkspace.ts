@@ -8,10 +8,11 @@ import { mergeCooperation, type Json } from '../../lib/cooperation-model'
 
 type TopicWorkspace = { cooperationWeekNumber?: number; cooperationSubjectId?: string; pdfReferences?: BoardPdfReference[]; boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
 type TopicSnapshot = { version: 1; boardId: string; name: string; content: BoardContentWithExtras; assets: Record<string, string> }
+let navigationRoot:FileSystemDirectoryHandle|null=null
 let workspace: TopicWorkspace | null = null
 let presented: BoardContentWithExtras | null = null
 let saved: BoardContentWithExtras | null = null
-export const getTopicWorkspaceRoot = () => workspace?.rootHandle ?? null
+export const getTopicWorkspaceRoot = () => workspace?.rootHandle ?? navigationRoot
 export function sendTopicLive(payload: Record<string, unknown>) { if (!workspace?.cooperationSubjectId) return; parent.postMessage({ type: 'topic-board:ephemeral', boardId: workspace.boardId, payload }, location.origin) }
 export const isTopicWorkspace = () => workspace !== null || (nativeBoardMode() && new URLSearchParams(location.search).has('topicBoard'))
 export function notifyTopicWorkspace(type: 'ready' | 'closed' | 'error', error?: string) {
@@ -21,7 +22,7 @@ async function boardDirectory(root: FileSystemDirectoryHandle) {
   const progress = await root.getDirectoryHandle('progreso', { create: true })
   return progress.getDirectoryHandle('pizarras', { create: true })
 }
-export async function initializeTopicWorkspace(input: TopicWorkspace) {
+export async function initializeTopicWorkspace(input: TopicWorkspace, preserveSession = false) {
   if (!/^[a-zA-Z0-9-]{1,100}$/.test(input.boardId)) throw new Error('Identificador de tema inválido.')
   const directory = await boardDirectory(input.rootHandle)
   let snapshot: TopicSnapshot | null = null
@@ -60,10 +61,11 @@ export async function initializeTopicWorkspace(input: TopicWorkspace) {
   }
   await writeDeviceBoard({ key: id, id, name: input.name, folder_id: null, version: cached?.version ?? 0,
     updated_at: new Date().toISOString(), storage: 'private', content })
+  navigationRoot=input.rootHandle
   workspace = input
   presented = structuredClone(content)
   saved = structuredClone(content)
-  setStorageSession(null, false)
+  if(!preserveSession)setStorageSession(null, false)
   selectBoard(id, false)
   await saveTopicWorkspace()
 }
@@ -118,3 +120,7 @@ export async function receiveTopicWorkspace(local: BoardContentWithExtras): Prom
   saved = structuredClone(snapshot.content)
   return merged
 }
+
+export function topicNavigationContext(){return {workspace,presented,saved}}
+export function restoreTopicNavigationContext(context:ReturnType<typeof topicNavigationContext>){workspace=context.workspace;presented=context.presented;saved=context.saved}
+export function suspendTopicNavigation(){workspace=null;presented=null;saved=null}
