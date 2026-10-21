@@ -21,13 +21,15 @@ acceso no fija automáticamente la copia; eliminarlo también retira su icono.
 Arrastrar un acceso perteneciente a la selección múltiple conserva el grupo.
 Soltar esa selección no abre un PDF accidentalmente.
 
-El lector precarga inicialmente dos PDF distintos. Los PDF visitados conservan
-su iframe y su estado durante la sesión de esa pizarra, hasta ocho lectores.
-Al superar ese límite se descarta el menos recientemente visitado. Recargar
-la página o cambiar de pizarra reinicia esta memoria. No se precargan todos
-los accesos ni se promete conservar lectores que el navegador descarte.
+No se precargan lectores PDF. Solo el último PDF abierto conserva su iframe y
+su estado al cerrarlo. Abrir otro PDF desmonta el lector anterior; volver al
+último conserva su página y zoom mientras no se haya abierto otro. Recargar
+la página o cambiar de pizarra reinicia esta memoria.
+
+Deshacer conserva los últimos cinco cambios del lienzo. Esos cinco cambios
+también pueden rehacerse; realizar un cambio nuevo descarta la rama de rehacer.
 
 GitHub Actions ejecuta las pruebas de `pdf-shortcuts.spec.mjs`, incluidas
 fijación, pulsación prolongada, guardado, movimiento grupal, alternancia entre
-cinco lectores y límite de retención. La validación del servidor se comprueba
+lectores, retención de un solo PDF y cinco cambios de deshacer. La validación del servidor se comprueba
 con `tests/pdf_shortcuts.test.py`.

@@ -1,5 +1,6 @@
 import {test,expect} from '@playwright/test'
 async function record(page,id){return page.evaluate(async id=>{
+  id=id||localStorage.getItem('pizarra_activa');if(!id)return null
   const db=await new Promise(resolve=>{const r=indexedDB.open('pizarra-dispositivo',1);r.onsuccess=()=>resolve(r.result)})
   const result=await new Promise(resolve=>{const r=db.transaction('boards').objectStore('boards').get(id||localStorage.getItem('pizarra_activa'));r.onsuccess=()=>resolve(r.result)})
   db.close();return result

@@ -3,11 +3,8 @@ import type { BoardPdfReference } from '../../lib/board-library-contract'
 import { getTopicWorkspaceRoot } from './topicWorkspace'
 import { isNativeReadOnly, openNativePdf } from '../../lib/native-workspace'
 
-// Retain visited iframe documents (PDF.js, page and zoom), rather than just bytes.
-const MAX_RETAINED_READERS = 8
-const INITIAL_PRELOAD_READERS = 2
-
-export function useBoardLibrary(boardId: string, candidates: () => BoardPdfReference[]) {
+// Keep only the last opened reader, including its page and zoom while closed.
+export function useBoardLibrary(boardId: string) {
   const native = isNativeReadOnly()
   const [nativeError, setNativeError] = useState('')
   const nativeRequest = useRef<AbortController | null>(null)
@@ -18,25 +15,13 @@ export function useBoardLibrary(boardId: string, candidates: () => BoardPdfRefer
   const readerFrames = useRef(new Map<number, HTMLIFrameElement>())
   const [prepared, setPrepared] = useState<BoardPdfReference[]>([])
   const [ready, setReady] = useState<Set<number>>(new Set())
-  const visited = useRef<BoardPdfReference[]>([])
   const session = useMemo(()=>crypto.randomUUID(),[boardId])
   const frames = useRef({reader,boardId,session})
   frames.current = {reader,boardId,session}
-  useEffect(()=>{visited.current=[];setSplitOpen(false);setReader(null);setPrepared([]);setReady(new Set())},[boardId])
+  useEffect(()=>{setSplitOpen(false);setReader(null);setPrepared([]);setReady(new Set())},[boardId])
   useEffect(() => {
     setNativeError('')
     return () => { nativeRequest.current?.abort(); nativeRequest.current = null }
-  }, [boardId])
-  useEffect(() => {
-    if (native) return
-    const prepare = () => setPrepared(previous => {
-      const warm = [...new Map(candidates().map(item=>[item.materialId,item])).values()].slice(0,INITIAL_PRELOAD_READERS)
-      const wanted = [...new Map([...visited.current, ...warm].map(item => [item.materialId, item])).values()].slice(0, MAX_RETAINED_READERS)
-      return JSON.stringify(previous) === JSON.stringify(wanted) ? previous : wanted
-    })
-    prepare()
-    const timer = window.setInterval(prepare, 1000)
-    return () => window.clearInterval(timer)
   }, [boardId])
   useEffect(()=>{
     const retained=new Set(prepared.map(item=>item.materialId))
@@ -106,9 +91,8 @@ export function useBoardLibrary(boardId: string, candidates: () => BoardPdfRefer
   </>
   return {splitOpen,setSplitOpen,reader,openReader:(reference:BoardPdfReference)=>{
     if (native) { openNativeReader(reference); return }
-    visited.current=[reference,...visited.current.filter(item=>item.materialId!==reference.materialId)].slice(0,MAX_RETAINED_READERS)
-    if(!readerFrames.current.has(reference.materialId))setReady(previous=>{const next=new Set(previous);next.delete(reference.materialId);return next})
-    setPrepared(previous=>[reference,...visited.current.filter(item=>item.materialId!==reference.materialId),...previous.filter(item=>!visited.current.some(visited=>visited.materialId===item.materialId))].slice(0,MAX_RETAINED_READERS))
+    if(!readerFrames.current.has(reference.materialId))setReady(new Set())
+    setPrepared([reference])
     setReader(reference)
   },panels,
     closeReader:()=>readerFrames.current.get(reader?.materialId ?? -1)?.contentWindow?.postMessage({type:'board-library:escape-reader',session,boardId},location.origin)}

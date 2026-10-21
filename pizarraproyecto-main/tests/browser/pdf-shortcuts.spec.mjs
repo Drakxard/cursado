@@ -72,12 +72,11 @@ test('Escape closes menus before changing tools, closes the split and returns fr
   const library=page.frameLocator('iframe[title="Biblioteca de Estudio"]')
   await expect(library.locator('body')).toHaveAttribute('data-initialized','yes')
   const before=await saved(page)
-  await expect(page.locator('.board-pdf-reader[aria-hidden="true"] iframe')).toHaveCount(1)
-  await expect(page.frameLocator('iframe[title="Lector de PDF de la pizarra"]').locator('body')).toHaveAttribute('data-initialized','yes')
-  await page.frameLocator('iframe[title="Lector de PDF de la pizarra"]').locator('body').evaluate(body=>body.dataset.preloaded='yes')
+  await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(0)
   await page.mouse.click(270,326)
   const reader=page.frameLocator('iframe[title="Lector de PDF de la pizarra"]')
   await expect(reader.locator('body')).toHaveAttribute('data-initialized','yes')
+  await reader.locator('body').evaluate(body=>body.dataset.retained='yes')
   await page.evaluate(()=>{
     const params=new URL(document.querySelector('.board-pdf-reader iframe').src).searchParams
     window.postMessage({type:'board-library:reader-closed',session:params.get('session'),boardId:params.get('boardId')},location.origin)
@@ -89,10 +88,10 @@ test('Escape closes menus before changing tools, closes the split and returns fr
   expect(bounds.width).toBe(1366)
   await reader.locator('button').focus();await page.keyboard.press('Escape')
   await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
-  await expect(reader.locator('body')).toHaveAttribute('data-preloaded','yes')
+  await expect(reader.locator('body')).toHaveAttribute('data-retained','yes')
   await page.mouse.click(270,326)
   await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
-  await expect(reader.locator('body')).toHaveAttribute('data-preloaded','yes')
+  await expect(reader.locator('body')).toHaveAttribute('data-retained','yes')
   await reader.locator('button').focus();await page.keyboard.press('Escape')
   await expect(page.locator('.app')).toHaveAttribute('data-library-split','true')
   expect((await saved(page)).camera).toMatchObject({x:before.camera.x,y:before.camera.y,zoom:before.camera.zoom})
@@ -169,45 +168,41 @@ test('multiple selected PDF shortcuts move together, do not open a reader, and c
   await expect.poll(async()=>(await saved(page)).shapes.map(item=>[item.x,item.y])).toEqual(before.map(item=>[item.x,item.y]))
 })
 
-test('five visited PDFs retain their iframe documents and reading state while cycling through them',async({page})=>{
-  for(let i=0;i<5;i++)await drop(page,220,180+i*90,{...reference,materialId:41+i,fileName:`PDF ${i+1}.pdf`})
-  await expect.poll(async()=>(await saved(page)).shapes.length).toBe(5)
-  for(let i=0;i<5;i++){
+test('only the last PDF reader is retained, with no preload and no inactive documents',async({page})=>{
+  for(let i=0;i<3;i++)await drop(page,220,180+i*90,{...reference,materialId:41+i,fileName:`PDF ${i+1}.pdf`})
+  await expect.poll(async()=>(await saved(page)).shapes.length).toBe(3)
+  await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(0)
+  for(let i=0;i<3;i++){
     await page.mouse.click(270,206+i*90)
     const frame=page.frameLocator('.board-pdf-reader[aria-hidden="false"] iframe')
     await expect(frame.locator('body')).toHaveAttribute('data-initialized','yes')
-    await frame.locator('body').evaluate((body,i)=>{body.dataset.readingState=`page-${i+10};zoom-150`},i)
+    await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(1)
+    await frame.locator('body').evaluate(body=>{body.dataset.readingState='page-10;zoom-150'})
     await closeReader(page)
-  }
-  await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(5)
-  for(let i=0;i<5;i++){
+    await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(1)
     await page.mouse.click(270,206+i*90)
-    const frame=page.frameLocator('.board-pdf-reader[aria-hidden="false"] iframe')
-    await expect(frame.locator('body')).toHaveAttribute('data-reading-state',`page-${i+10};zoom-150`)
-    if(i===0){
-      await page.frameLocator('.board-pdf-reader iframe[src*="materialId=42"]').locator('body').evaluate(()=>{
-        const params=new URLSearchParams(location.search)
-        parent.postMessage({type:'board-library:reader-closed',session:params.get('session'),boardId:params.get('boardId')},location.origin)
-      })
-      await expect(page.locator('.board-pdf-reader[aria-hidden="false"] iframe')).toHaveAttribute('src',/materialId=41$/)
-    }
+    await expect(frame.locator('body')).toHaveAttribute('data-reading-state','page-10;zoom-150')
     await closeReader(page)
   }
+  await page.mouse.click(270,206)
+  const first=page.frameLocator('.board-pdf-reader[aria-hidden="false"] iframe')
+  await expect(first.locator('body')).toHaveAttribute('data-initialized','yes')
+  await expect(first.locator('body')).not.toHaveAttribute('data-reading-state')
+  await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(1)
 })
 
-test('reader retention is bounded and evicts the least recently visited PDF',async({page})=>{
-  test.setTimeout(60000)
-  for(let i=0;i<9;i++)await drop(page,220+(i%2)*480,180+Math.floor(i/2)*90,{...reference,materialId:41+i,fileName:`PDF ${i+1}.pdf`})
-  await expect.poll(async()=>(await saved(page)).shapes.length).toBe(9)
-  const open=async i=>{
-    await page.mouse.click(270+(i%2)*480,206+Math.floor(i/2)*90)
-    await expect(page.locator('.board-pdf-reader[aria-hidden="false"] iframe')).toHaveAttribute('src',new RegExp(`materialId=${41+i}$`))
-    await closeReader(page)
+test('undo retains only five changes and those changes can be redone',async({page})=>{
+  for(let i=0;i<7;i++)await drop(page,220,180,{...reference,materialId:41+i,fileName:`PDF ${i+1}.pdf`})
+  await expect.poll(async()=>(await saved(page)).shapes.length).toBe(7)
+  for(let i=0;i<5;i++){
+    await page.keyboard.press('Control+z')
+    await expect.poll(async()=>(await saved(page)).shapes.length).toBe(6-i)
   }
-  for(let i=0;i<9;i++)await open(i)
-  const ids=()=>page.locator('.board-pdf-reader iframe').evaluateAll(frames=>frames.map(frame=>Number(new URL(frame.src).searchParams.get('materialId'))).sort((a,b)=>a-b))
-  await expect.poll(ids).toEqual([42,43,44,45,46,47,48,49])
-  await open(1)
-  await open(0)
-  await expect.poll(ids).toEqual([41,42,44,45,46,47,48,49])
+  await expect(page.getByRole('button',{name:'Deshacer',exact:true})).toBeVisible()
+  await page.keyboard.press('Control+z')
+  await expect(page.getByRole('button',{name:'Rehacer',exact:true})).toBeVisible()
+  for(let i=0;i<5;i++){
+    await page.keyboard.press('Control+y')
+    await expect.poll(async()=>(await saved(page)).shapes.length).toBe(3+i)
+  }
 })

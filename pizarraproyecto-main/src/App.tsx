@@ -782,7 +782,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const mediaRef = useRef<Rotatable<MediaItem>[]>([])
   const shapesRef = useRef<ShapeItem[]>([])
   const [libraryLinkDragging,setLibraryLinkDragging]=useState(false)
-  const materialLibrary = useBoardLibrary(getActiveBoardId(), () => shapesRef.current.flatMap(shape => shape.pdfReference ? [shape.pdfReference] : []))
+  const materialLibrary = useBoardLibrary(getActiveBoardId())
   useEffect(()=>{
     let stopped=false,busy=false
     const refresh=async()=>{if(busy)return;busy=true;try{await refreshCountdowns();if(!stopped)redraw()}catch{ /* Keep the last successful task snapshot on a transient read failure. */ }finally{busy=false}}
@@ -2014,7 +2014,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   function rememberChange() {
     finishPendingPen()
     undoRef.current.push(snapshot())
-    if (undoRef.current.length > 100) undoRef.current.shift()
+    if (undoRef.current.length > 5) undoRef.current.shift()
     redoRef.current = []
   }
 
