@@ -3,7 +3,7 @@ import type { BoardPdfReference } from '../../lib/board-library-contract'
 import { getTopicWorkspaceRoot } from './topicWorkspace'
 import { isNativeReadOnly, openNativePdf } from '../../lib/native-workspace'
 
-// Keep only the last opened reader, including its page and zoom while closed.
+// Retain only reading coordinates while closed, never a hidden PDF document.
 export function useBoardLibrary(boardId: string) {
   const native = isNativeReadOnly()
   const [nativeError, setNativeError] = useState('')
@@ -13,23 +13,16 @@ export function useBoardLibrary(boardId: string) {
   const [reader,setReader] = useState<BoardPdfReference | null>(null)
   const libraryFrame = useRef<HTMLIFrameElement>(null)
   const readerFrames = useRef(new Map<number, HTMLIFrameElement>())
-  const [prepared, setPrepared] = useState<BoardPdfReference[]>([])
+  const readingPositions = useRef(new Map<number, string>())
   const [ready, setReady] = useState<Set<number>>(new Set())
   const session = useMemo(()=>crypto.randomUUID(),[boardId])
   const frames = useRef({reader,boardId,session})
   frames.current = {reader,boardId,session}
-  useEffect(()=>{setSplitOpen(false);setReader(null);setPrepared([]);setReady(new Set())},[boardId])
+  useEffect(()=>{setSplitOpen(false);setReader(null);readingPositions.current.clear();setReady(new Set())},[boardId])
   useEffect(() => {
     setNativeError('')
     return () => { nativeRequest.current?.abort(); nativeRequest.current = null }
   }, [boardId])
-  useEffect(()=>{
-    const retained=new Set(prepared.map(item=>item.materialId))
-    setReady(previous=>{
-      const next=new Set([...previous].filter(id=>retained.has(id)))
-      return next.size===previous.size?previous:next
-    })
-  },[prepared])
   useEffect(()=>{
     const receive = (event: MessageEvent) => {
       if (event.origin !== location.origin || event.data?.session !== session || event.data?.boardId !== boardId) return
@@ -40,7 +33,12 @@ export function useBoardLibrary(boardId: string) {
       if(event.data.type === 'board-library:ready') {
         const target = readerEntry ? readerEntry[1] : libraryFrame.current
         target?.contentWindow?.postMessage({type:'board-library:init',session,boardId,
-          rootHandle:getTopicWorkspaceRoot(),reference:readerEntry ? prepared.find(item => item.materialId === readerEntry[0]) : null},location.origin)
+          rootHandle:getTopicWorkspaceRoot(),reference:readerEntry ? frames.current.reader : null,
+          readingPosition:readerEntry ? readingPositions.current.get(readerEntry[0]) : undefined},location.origin)
+      }
+      if(event.data.type === 'board-library:reading-position' && readerEntry && typeof event.data.hash === 'string' && event.data.hash.length <= 512) {
+        readingPositions.current.set(readerEntry[0], event.data.hash)
+        if(readingPositions.current.size > 50) readingPositions.current.delete(readingPositions.current.keys().next().value!)
       }
       if(event.data.type === 'board-library:reader-rendered' && readerEntry) setReady(previous => new Set([...previous, readerEntry[0]]))
       if(event.data.type === 'board-library:escape' && isLibrary && !frames.current.reader) {
@@ -48,13 +46,13 @@ export function useBoardLibrary(boardId: string) {
         document.querySelector<HTMLCanvasElement>('.app canvas')?.focus()
       }
       if(event.data.type === 'board-library:reader-closed' && readerEntry && readerEntry[0]===frames.current.reader?.materialId) {
-        setReader(null)
+        setReader(null);setReady(new Set())
         document.querySelector<HTMLCanvasElement>('.app canvas')?.focus()
       }
     }
     window.addEventListener('message',receive)
     return ()=>window.removeEventListener('message',receive)
-  },[boardId,session,prepared])
+  },[boardId,session])
   useEffect(()=>{
     const topicBoard = new URLSearchParams(location.search).get('topicBoard')
     if(topicBoard && window.parent !== window) parent.postMessage({type:'topic-board:reader-state',boardId:topicBoard,open:Boolean(reader)},location.origin)
@@ -79,7 +77,7 @@ export function useBoardLibrary(boardId: string) {
     {splitOpen && <iframe ref={libraryFrame} className="board-material-library" title="Biblioteca de Estudio"
       src={`/biblioteca/pizarra?session=${session}&boardId=${encodeURIComponent(boardId)}`} />}
     {/* Keep iframe DOM order stable: moving an iframe reloads its document in Chromium. */}
-    {[...new Map([...(reader ? [reader] : []), ...prepared].map(item => [item.materialId, item])).values()].sort((a,b)=>a.materialId-b.materialId).map(reference => {
+    {(reader ? [reader] : []).map(reference => {
       const visible = reader?.materialId === reference.materialId && ready.has(reference.materialId)
       return <div key={`${boardId}:${reference.materialId}`} className="board-pdf-reader" role={visible ? 'dialog' : undefined}
         aria-modal={visible || undefined} aria-hidden={!visible} inert={!visible} aria-label={`Leer ${reference.fileName.replace(/\.pdf$/i,'')}`}
@@ -92,8 +90,10 @@ export function useBoardLibrary(boardId: string) {
   return {splitOpen,setSplitOpen,reader,openReader:(reference:BoardPdfReference)=>{
     if (native) { openNativeReader(reference); return }
     if(!readerFrames.current.has(reference.materialId))setReady(new Set())
-    setPrepared([reference])
     setReader(reference)
   },panels,
-    closeReader:()=>readerFrames.current.get(reader?.materialId ?? -1)?.contentWindow?.postMessage({type:'board-library:escape-reader',session,boardId},location.origin)}
+    closeReader:()=>{
+      if(!ready.has(reader?.materialId ?? -1)) {setReader(null);setReady(new Set());return}
+      readerFrames.current.get(reader?.materialId ?? -1)?.contentWindow?.postMessage({type:'board-library:escape-reader',session,boardId},location.origin)
+    }}
 }

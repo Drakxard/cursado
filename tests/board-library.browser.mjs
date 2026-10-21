@@ -162,21 +162,22 @@ test('topic arrow keeps the board open on a save failure and closes after a succ
   await expect(page.locator('iframe[title^="Pizarra de"]')).toHaveCount(0)
 })
 
-test('pin follows the PDF, < toggles the retained reader, API chat captures visible board layers',{timeout:150000},async t=>{
+test('pin follows the PDF, < reloads the reader with its zoom, API chat captures visible board layers',{timeout:150000},async t=>{
   const {page,context,errors}=await setup(t)
   // Isolate board behavior from subject-catalog migrations, while keeping real PDF.js.
   await context.route('**/board-test.pdf',route=>route.fulfill({contentType:'application/pdf',body:Buffer.from(pdfBytes())}))
   await context.route(url=>url.pathname==='/biblioteca/pizarra'&&url.searchParams.get('mode')==='reader',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><style>html,body,iframe{margin:0;width:100%;height:100%;border:0}</style><script>
-    const params=new URLSearchParams(location.search),session=params.get('session'),boardId=params.get('boardId');let frame;
+    const params=new URLSearchParams(location.search),session=params.get('session'),boardId=params.get('boardId');let frame,position;
     const send=type=>parent.postMessage({type,session,boardId},location.origin);
     addEventListener('message',e=>{
       if(e.origin!==location.origin)return;
       if(e.source===parent&&e.data.session===session&&e.data.boardId===boardId){
-        if(e.data.type==='board-library:init'&&!frame){frame=document.createElement('iframe');frame.title='Visor PDF: fixture';frame.src='/pdfjs/web/viewer.html?file=%2Fboard-test.pdf&viewerMode=inline&boardReader=1';document.body.append(frame)}
+        if(e.data.type==='board-library:init'&&!frame){position=e.data.readingPosition;frame=document.createElement('iframe');frame.title='Visor PDF: fixture';frame.src='/pdfjs/web/viewer.html?file=%2Fboard-test.pdf&viewerMode=inline&boardReader=1';document.body.append(frame)}
         if(e.data.type==='board-library:escape-reader')frame?.contentWindow.postMessage({type:'requestViewerEscape'},location.origin);
       }
       if(e.source===frame?.contentWindow){
-        if(e.data.type==='viewerPageRendered')send('board-library:reader-rendered');
+        if(e.data.type==='viewerPageRendered'){if(position){frame.contentWindow.postMessage({type:'restoreViewerReadingPosition',hash:position},location.origin);position=null}send('board-library:reader-rendered')}
+        if(e.data.type==='viewerReadingPosition'&&!position)parent.postMessage({type:'board-library:reading-position',session,boardId,hash:e.data.hash},location.origin);
         if(e.data.type==='viewerRequestClose')send('board-library:reader-closed');
       }
     });addEventListener('DOMContentLoaded',()=>send('board-library:ready'));
@@ -216,9 +217,14 @@ test('pin follows the PDF, < toggles the retained reader, API chat captures visi
   const pdf=board.frameLocator('iframe[title="Lector de PDF de la pizarra"]').frameLocator('iframe[title^="Visor PDF:"]')
   await pdf.locator('.page[data-page-number="1"] canvas').waitFor({timeout:45000}).catch(async error=>{for(const frame of page.frames())console.error(frame.url(),(await frame.locator('body').innerText().catch(()=>'' )).slice(-1500));console.error(errors);throw error})
   await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
+  await pdf.locator('body').evaluate(()=>{window.PDFViewerApplication.pdfViewer.currentScaleValue='1.5'})
+  await expect.poll(()=>pdf.locator('body').evaluate(()=>window.PDFViewerApplication.pdfViewer.currentScale)).toBe(1.5)
+  await page.waitForTimeout(200)
   await pdf.locator('body').press('<')
   await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
+  await expect(board.locator('.board-pdf-reader iframe')).toHaveCount(0)
   await canvas.press('<');await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
+  await expect.poll(()=>pdf.locator('body').evaluate(()=>window.PDFViewerApplication?.pdfViewer?.currentScale)).toBe(1.5)
   await pdf.locator('body').press('<');await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
   await canvas.press('t');await canvas.click({position:{x:150,y:160}})
   const textEditor=board.locator('textarea.text-editor')

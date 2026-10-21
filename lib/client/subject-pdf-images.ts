@@ -51,6 +51,7 @@ export async function renderRelatedPdfImages(file: File, result: PdfSearchResult
       // Bound raster size even on very large screens or unusually sized pages.
       const viewport = page.getViewport({ scale: width / base.width })
       const canvas = documentCanvas(viewport.width, viewport.height)
+      try {
       await page.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport }).promise
       const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("No se pudo preparar la imagen del PDF.")), "image/webp", 0.94))
       const image = { blob, width: canvas.width, height: canvas.height, page: number }
@@ -59,8 +60,7 @@ export async function renderRelatedPdfImages(file: File, result: PdfSearchResult
       // Weak references share pages between results without retaining blobs
       // after their views have released them. Bound the metadata as well.
       if (renderedPages.size > 128) renderedPages.delete(renderedPages.keys().next().value!)
-      canvas.width = canvas.height = 0
-      page.cleanup()
+      } finally { canvas.width = canvas.height = 0; page.cleanup() }
     }
     signal.throwIfAborted()
     return images

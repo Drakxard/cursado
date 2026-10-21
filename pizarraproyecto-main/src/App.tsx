@@ -50,7 +50,7 @@ import { canResumePen, PEN_RECOVERY_MS } from './canvas/penRecovery'
 import type { PenBreak } from './canvas/penRecovery'
 import type { Ref, CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { PointerEvent as ReactPointerEvent, DragEvent as ReactDragEvent, ChangeEvent, MouseEvent as ReactMouseEvent } from 'react'
-import * as pdfjs from 'pdfjs-dist'
+import { AdaptiveImageCache } from './canvas/imageCache'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { nativeBoardMode } from './nativeWorkspace'
 import {
@@ -77,7 +77,7 @@ import { StrokeTileIndex, visibleWorldRect, rectsIntersect } from './spatial_vie
 import BoardGraphWidget from './BoardGraphWidget'
 import type {BoardGraphItem, GraphFormula, GraphSettings} from './GraphPlot'
 
-pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
+
 
 function ToolbarEraserIcon() {
   return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -818,12 +818,9 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const inlineNoteRef=useRef<StickyNoteEditorHandle>(null)
   const [tableRevision, refreshTables] = useState(0)
   const [excelNotice, setExcelNotice] = useState('')
-  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
-  const mediaLoadingRef = useRef(new Set<string>())
-  const mediaQueuedRef = useRef(new Set<string>())
-  const mediaQueueRef = useRef<string[]>([])
-  const mediaFailedRef = useRef(new Set<string>())
-  const mediaRunningRef = useRef(0)
+  const imageCacheRef = useRef<AdaptiveImageCache | null>(null)
+  if (!imageCacheRef.current) imageCacheRef.current = new AdaptiveImageCache(loadAsset, () => redraw())
+  const importControllerRef = useRef<AbortController | null>(null)
   const [,refreshAudio]=useState(0)
   const audioRef=useRef<BoardAudio|null>(null)
   const audioCursorRef=useRef<Point|null>(null)
@@ -877,6 +874,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const cartesianDragRef=useRef<{boardId:string;item:ShapeItem;handle:CartesianHandle;start:Point;capture:HTMLElement;changed:boolean}|null>(null)
   const loadedRef = useRef(false)
   const dirtyRef = useRef(false)
+  const editRevisionRef = useRef(0)
+  const topicPeersRef = useRef(false)
   const syncConflictRef = useRef(false)
   const [liveBoardId, setLiveBoardId] = useState<string | null>(null)
   const [liveUsers, setLiveUsers] = useState<LiveUser[]>([])
@@ -890,7 +889,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const liveStrokeProgressRef = useRef<{id:string;sent:number;lastSent:number}|null>(null)
 
   function sendLive(value: Record<string,unknown>) {
-    if (isTopicWorkspace()) sendTopicLive(value)
+    if (isTopicWorkspace() && topicPeersRef.current) sendTopicLive(value)
     const socket = liveSocketRef.current
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value))
   }
@@ -1491,61 +1490,11 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     })
   }
 
-  // Máximo aproximado de píxeles decodificados retenidos en memoria: 160 MiB.
-  // Se descargan únicamente los recursos cerca de la pantalla. La versión
-  // original permanece en el almacenamiento de activos del servidor.
-  function trimImageCache() {
-    const cache = imageCacheRef.current
-    const visibleIds = new Set(mediaRef.current.filter(item => rectsIntersect(visibleBounds(), rotatedRect(item,item.rotation))).map(item => item.assetId))
-    let bytes = 0
-    for (const image of cache.values()) bytes += image.naturalWidth * image.naturalHeight * 4
-    for (const [id, image] of cache) {
-      if (bytes <= 160 * 1024 * 1024) break
-      if (visibleIds.has(id)) continue
-      cache.delete(id)
-      bytes -= image.naturalWidth * image.naturalHeight * 4
-    }
-  }
-
-  function runMediaQueue() {
-    while (mediaRunningRef.current < 3 && mediaQueueRef.current.length) {
-      const id = mediaQueueRef.current.shift()!
-      mediaQueuedRef.current.delete(id)
-      if (imageCacheRef.current.has(id) || mediaLoadingRef.current.has(id) || mediaFailedRef.current.has(id)) continue
-      // Puede haberse desplazado la cámara desde que el activo entró en la cola.
-      if (!mediaRef.current.some(item => item.assetId === id && rectsIntersect(visibleBounds(), item))) continue
-      mediaRunningRef.current++
-      mediaLoadingRef.current.add(id)
-      void (async () => {
-        try {
-          const blob = await loadAsset(id)
-          if (!blob) { mediaFailedRef.current.add(id); return }
-          const image = await imageFromBlob(blob)
-          imageCacheRef.current.set(id, image)
-          trimImageCache()
-        } catch (error) {
-          mediaFailedRef.current.add(id)
-          console.error('No se pudo cargar el recurso visible:', error)
-        } finally {
-          mediaLoadingRef.current.delete(id)
-          mediaRunningRef.current--
-          redraw()
-          runMediaQueue()
-        }
-      })()
-    }
-  }
-
   function enqueueVisibleMedia(items: MediaItem[]) {
-    for (const item of items) {
-      if(item.kind==='audio')continue
-      const id = item.assetId
-      if (imageCacheRef.current.has(id) || mediaLoadingRef.current.has(id) ||
-          mediaQueuedRef.current.has(id) || mediaFailedRef.current.has(id)) continue
-      mediaQueueRef.current.push(id)
-      mediaQueuedRef.current.add(id)
-    }
-    runMediaQueue()
+    const pixels = cameraRef.current.zoom * (window.devicePixelRatio || 1)
+    imageCacheRef.current!.reconcile(items.filter(item => item.kind !== 'audio').map(item => ({
+      id: item.assetId, width: item.width * pixels, height: item.height * pixels,
+    })))
   }
 
   function redraw() {
@@ -1682,13 +1631,13 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         continue
       }
       renderables.push({z:(item as GroupedItem).zIndex??-300000,index:renderIndex++,bounds:rotatedRect(item,item.rotation),paint:(surface)=>{
-        const image=imageCacheRef.current.get(item.assetId)
+        const image=imageCacheRef.current!.get(item.assetId)
         surface.save()
         if(item.rotation){
           const center={x:item.x+item.width/2,y:item.y+item.height/2}
           surface.translate(center.x,center.y);surface.rotate(item.rotation);surface.translate(-center.x,-center.y)
         }
-        if(image?.complete&&image.naturalWidth){surface.drawImage(image,item.x,item.y,item.width,item.height)}
+        if(image){surface.drawImage(image,item.x,item.y,item.width,item.height)}
         else {surface.fillStyle='#f4f4f5';surface.fillRect(item.x,item.y,item.width,item.height);surface.fillStyle='#555';surface.font='16px system-ui';surface.fillText('Cargando archivo...',item.x+16,item.y+30)}
         surface.restore()
       }})
@@ -1738,7 +1687,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       item.paint(surface)
     }
     for(const [band,layer] of contentCanvasesRef.current)if(!surfaces.has(band)){
-      layer.remove();contentCanvasesRef.current.delete(band)
+      layer.width=layer.height=0;layer.remove();contentCanvasesRef.current.delete(band)
     }
     // Los avances del lápiz y los marcadores de selección no son contenido
     // persistido y deben estar visibles sobre los objetos interactivos.
@@ -2059,13 +2008,15 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     let stopped = false, timer: ReturnType<typeof setTimeout> | undefined
     const refresh = async () => {
       if (stopped || !isTopicWorkspace()) return
-      if (!loadedRef.current || savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
+      if (!loadedRef.current || dirtyRef.current || savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
+      const revision = editRevisionRef.current
       const local = { ...snapshot(), camera: cameraRef.current }
       try {
-        const merged = await receiveTopicWorkspace(local)
-        if (stopped || !merged) return
+        const merged = await receiveTopicWorkspace(local, () => !stopped && revision === editRevisionRef.current && !dirtyRef.current && !savingRef.current && pointerRef.current === null && !editingRef.current && !activeStroke.current)
+        if (stopped) return
+        if (!merged) { timer = setTimeout(() => void refresh(), 80); return }
         // If drawing began during disk I/O, retry against the current draft.
-        if (savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
+        if (revision !== editRevisionRef.current || dirtyRef.current || savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
         strokesRef.current = merged.strokes; textsRef.current = merged.texts; mediaRef.current = merged.media
         shapesRef.current = (merged.shapes || []) as ShapeItem[]; tablesRef.current = (merged.tables || []) as SheetItem[]
         graphsRef.current = (merged.graphs || []) as BoardGraphItem[]; videosRef.current = (merged.videos || []) as YouTubeItem[]
@@ -2080,6 +2031,12 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       const msg = event.data.payload
       if (!msg) return
       if (msg.type === 'presence' && Array.isArray(msg.users)) {
+        const hadPeers = topicPeersRef.current
+        topicPeersRef.current = msg.users.some((user: LiveUser) => user.id !== msg.you)
+        if (!hadPeers && topicPeersRef.current && dirtyRef.current) {
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+          saveTimerRef.current = setTimeout(() => { saveTimerRef.current = null; void persistBoard() }, 80)
+        }
         setLiveConnected(msg.connected !== false); setLiveUsers(msg.users); setLiveSelf(msg.you || null); liveSelfRef.current = msg.you || null
         const present = new Set(msg.users.map((user: LiveUser) => user.id))
         for (const [key, cursor] of remoteCursorsRef.current) if (!present.has(cursor.userId)) remoteCursorsRef.current.delete(key)
@@ -2190,6 +2147,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   }
 
   function scheduleSave() {
+    editRevisionRef.current++
     setBoardSearchRevision(value=>value+1)
 
     if (nativeBoardMode()) return
@@ -2202,7 +2160,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null
       void persistBoard()
-    }, privateBoard() ? 400 : 80)
+    }, isTopicWorkspace() ? (topicPeersRef.current ? 80 : 1800) : privateBoard() ? 400 : 80)
   }
 
   useEffect(()=>beforeAppUpdate(flushBoardForHistory,()=>loadedRef.current&&pointerRef.current===null&&
@@ -2226,6 +2184,17 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     document.addEventListener('visibilitychange',onVisibility)
     return()=>{window.removeEventListener('pagehide',flush);document.removeEventListener('visibilitychange',onVisibility)}
   },[])
+
+  async function imageDimensions(blob: Blob): Promise<{ width: number; height: number }> {
+    const url = URL.createObjectURL(blob), image = new Image()
+    try {
+      return await new Promise((resolve, reject) => {
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight })
+        image.onerror = () => reject(new Error('No se pudo leer la imagen.'))
+        image.src = url
+      })
+    } finally { image.src = ''; URL.revokeObjectURL(url) }
+  }
 
   async function imageFromBlob(blob: Blob): Promise<HTMLImageElement> {
     const url = URL.createObjectURL(blob)
@@ -2298,6 +2267,20 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     }
   }, [])
 
+  useEffect(() => {
+    const canvases = [canvasRef.current, foregroundCanvasRef.current, cursorCanvasRef.current]
+    return () => {
+      imageCacheRef.current?.clear()
+      importControllerRef.current?.abort()
+      undoRef.current = []; redoRef.current = []
+      for (const canvas of canvases) {
+        if (canvas) canvas.width = canvas.height = 0
+      }
+      for (const layer of contentCanvasesRef.current.values()) { layer.width = layer.height = 0; layer.remove() }
+      contentCanvasesRef.current.clear()
+    }
+  }, [])
+
   /* SYNC_PIZARRA_V1 */
   // El servidor notifica las versiones nuevas. HTTP conserva la fuente de verdad.
   // La camara es local durante la sesion: un pellizco en tablet NO mueve la PC.
@@ -2341,7 +2324,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         // No modificar cameraRef.current: cada pantalla puede navegar libremente.
         setGraphs([...graphsRef.current])
         refreshTables(n => n + 1)
-        mediaFailedRef.current.clear()
+        imageCacheRef.current!.retry()
         redraw()
         hydrateMedia(mediaRef.current)
         undoRef.current = []
@@ -2381,7 +2364,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           else await acceptBoardLiveVersion(boardId,snapshot.version,snapshot.content)
         } finally {applying=false}
         // Retry visible resources even when the object list hasn't changed.
-        mediaFailedRef.current.clear();hydrateMedia(mediaRef.current)
+        imageCacheRef.current!.retry();hydrateMedia(mediaRef.current)
         verifyScene=false
         lastVerified=Date.now()
       } catch (cause) {
@@ -4224,25 +4207,26 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(originalW*baseScale*rasterScale))
     canvas.height = Math.max(1, Math.round(originalH*baseScale*rasterScale))
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('No se pudo preparar el SVG para pegarlo.')
-    ctx.drawImage(image,0,0,canvas.width,canvas.height)
-    return new Promise<Blob>((resolve,reject)=>{
-      canvas.toBlob(result=>result?resolve(result):reject(new Error('No se pudo convertir el SVG a PNG.')), 'image/png')
-    })
+    try {
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('No se pudo preparar el SVG para pegarlo.')
+      ctx.drawImage(image,0,0,canvas.width,canvas.height)
+      return await new Promise<Blob>((resolve,reject)=>{
+        canvas.toBlob(result=>result?resolve(result):reject(new Error('No se pudo convertir el SVG a PNG.')), 'image/png')
+      })
+    } finally { canvas.width = canvas.height = 0; image.src = '' }
   }
 
   async function addImage(file: File, dropPoint?: Point) {
     // Se rasteriza SVG en el navegador antes de almacenarlo: el backend actual
     // admite PNG, JPEG y WebP, y así no ejecutamos código SVG desde la biblioteca.
     const blob = isSvgFile(file) ? await svgToPng(file) : file.slice(0, file.size, imageMime(file))
-    const image = await imageFromBlob(blob)
+    const image = await imageDimensions(blob)
     const assetId = createId()
     await saveAsset(assetId, blob)
-    imageCacheRef.current.set(assetId, image)
-    const scale = Math.min(1, 750 / image.naturalWidth)
-    const w = image.naturalWidth * scale
-    const h = image.naturalHeight * scale
+    const scale = Math.min(1, 750 / image.width)
+    const w = image.width * scale
+    const h = image.height * scale
     const origin = dropPoint ?? boardCenter()
     rememberChange()
     const item: MediaItem = {
@@ -4275,13 +4259,11 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   async function applyImageCrop(file:File,region:ImageCrop) {
     const target=imageCrop
     if(!target||target.boardId!==getActiveBoardId())throw new Error('Cambiaste de pizarra. Volvé a abrir el recorte.')
-    const image=await imageFromBlob(file)
     const current=()=>mediaRef.current.find(item=>item.id===target.itemId)
     if(target.boardId!==getActiveBoardId()||current()?.assetId!==target.assetId)throw new Error('La imagen cambió o se borró. Volvé a abrir el recorte.')
     const assetId=createId();await saveAsset(assetId,file)
     if(target.boardId!==getActiveBoardId()||current()?.assetId!==target.assetId)throw new Error('La imagen cambió mientras preparabas el recorte.')
     rememberChange()
-    imageCacheRef.current.set(assetId,image)
     mediaRef.current=mediaRef.current.map(item=>item.id===target.itemId?{...item,...croppedGeometry(item,region),assetId,name:file.name,...(item.kind==='pdf-page'?{pageText:undefined}:{})}:item)
     selectElement({kind:'media',id:target.itemId});redraw();scheduleSave()
     await flushBoardForHistory()
@@ -4289,54 +4271,79 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
 
 
   async function addPDF(file: File, dropPoint?: Point) {
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    const pdf = await pdfjs.getDocument({ data: bytes }).promise
-    const documentId = createId()
-    const origin = dropPoint ?? boardCenter()
-    let top = origin.y
-    let firstPage: string | null = null
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-      setImportStatus(`Importando PDF: página ${pageNumber} de ${pdf.numPages}`)
-      const page = await pdf.getPage(pageNumber)
-      const textContent=await page.getTextContent().catch(()=>null)
-      const pageText=textContent?.items.map(item=>'str' in item?item.str+('hasEOL' in item&&item.hasEOL?'\n':' '):'').join('').slice(0,16000)
-      const baseViewport = page.getViewport({ scale: 1 })
-      const scale = Math.min(1.5, 1800 / Math.max(baseViewport.width, baseViewport.height))
-      const viewport = page.getViewport({ scale })
-      const pageCanvas = document.createElement('canvas')
-      pageCanvas.width = Math.ceil(viewport.width)
-      pageCanvas.height = Math.ceil(viewport.height)
-      const ctx = pageCanvas.getContext('2d')
-      if (!ctx) throw new Error('No se pudo crear el canvas del PDF')
-      await page.render({ canvas: pageCanvas, canvasContext: ctx, viewport }).promise
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        pageCanvas.toBlob(value => value ? resolve(value) : reject(new Error('No se pudo convertir la página')), 'image/png')
-      })
-      const assetId = createId()
-      await saveAsset(assetId, blob)
-      // La página se guarda, pero no se decodifica hasta que aparezca en pantalla.
-      const w = baseViewport.width
-      const h = baseViewport.height
-      if(!firstPage)rememberChange()
-      const item:MediaItem={
-        id: createId(), assetId,
-        x: dropPoint ? origin.x : origin.x - w / 2,
-        y: top, width: w, height: h,
-        name: file.name || 'Documento pegado.pdf', kind: 'pdf-page', documentId, pageNumber, pageText,
+    const controller = new AbortController()
+    importControllerRef.current = controller
+    const { signal } = controller
+    let task: import('pdfjs-dist').PDFDocumentLoadingTask | undefined
+    const abort = () => { void task?.destroy().catch(() => {}) }
+    signal.addEventListener('abort', abort, { once: true })
+    try {
+      const pdfjs = await import('pdfjs-dist')
+      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
+      signal.throwIfAborted()
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      signal.throwIfAborted()
+      task = pdfjs.getDocument({ data: bytes })
+      const pdf = await task.promise
+      const documentId = createId()
+      const origin = dropPoint ?? boardCenter()
+      let top = origin.y
+      let firstPage: string | null = null
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+        setImportStatus(`Importando PDF: página ${pageNumber} de ${pdf.numPages}`)
+        signal.throwIfAborted()
+        const page = await pdf.getPage(pageNumber)
+        const pageCanvas = document.createElement('canvas')
+        try {
+          const textContent=await page.getTextContent().catch(()=>null)
+          const pageText=textContent?.items.map(item=>'str' in item?item.str+('hasEOL' in item&&item.hasEOL?'\n':' '):'').join('').slice(0,16000)
+          const baseViewport = page.getViewport({ scale: 1 })
+          const scale = Math.min(1.5, 1800 / Math.max(baseViewport.width, baseViewport.height))
+          const viewport = page.getViewport({ scale })
+          pageCanvas.width = Math.ceil(viewport.width)
+          pageCanvas.height = Math.ceil(viewport.height)
+          const ctx = pageCanvas.getContext('2d')
+          if (!ctx) throw new Error('No se pudo crear el canvas del PDF')
+          await page.render({ canvas: pageCanvas, canvasContext: ctx, viewport }).promise
+          const blob = await new Promise<Blob>((resolve, reject) => {
+            pageCanvas.toBlob(value => value ? resolve(value) : reject(new Error('No se pudo convertir la página')), 'image/png')
+          })
+          const assetId = createId()
+          signal.throwIfAborted()
+          await saveAsset(assetId, blob)
+          signal.throwIfAborted()
+          // La página se guarda, pero no se decodifica hasta que aparezca en pantalla.
+          const w = baseViewport.width
+          const h = baseViewport.height
+          if(!firstPage)rememberChange()
+          const item:MediaItem={
+            id: createId(), assetId,
+            x: dropPoint ? origin.x : origin.x - w / 2,
+            y: top, width: w, height: h,
+            name: file.name || 'Documento pegado.pdf', kind: 'pdf-page', documentId, pageNumber, pageText,
+          }
+          mediaRef.current.push(item)
+          firstPage ??= item.id
+          setTool('select')
+          redraw()
+          scheduleSave()
+          // Start saving this page now, independently of rendering the rest.
+          if(!privateBoard())void persistBoard()
+          top += h + PAGE_GAP
+        } finally { pageCanvas.width = pageCanvas.height = 0; page.cleanup() }
+        // Permitir actualizar el indicador mientras se procesa el PDF.
+        await new Promise<void>(resolve => setTimeout(resolve, 0))
       }
-      mediaRef.current.push(item)
-      firstPage ??= item.id
-      setTool('select')
-      redraw()
-      scheduleSave()
-      // Start saving this page now, independently of rendering the rest.
-      if(!privateBoard())void persistBoard()
-      top += h + PAGE_GAP
-      page.cleanup()
-      // Permitir actualizar el indicador mientras se procesa el PDF.
-      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      signal.throwIfAborted()
+      if(firstPage)selectElement({kind:'media',id:firstPage})
+    } catch (error) {
+      if (signal.aborted) throw signal.reason
+      throw error
+    } finally {
+      signal.removeEventListener('abort', abort)
+      try { await task?.destroy() }
+      finally { if (importControllerRef.current === controller) importControllerRef.current = null }
     }
-    if(firstPage)selectElement({kind:'media',id:firstPage})
   }
 
   async function importFiles(files: File[], at?: Point) {
@@ -4364,6 +4371,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           else if (isPDFFile(file)) await addPDF(file, position)
           else await addImage(file, position)
         } catch (error) {
+          if (error instanceof DOMException && error.name === 'AbortError') break
           console.error('Error al importar', file.name, error)
           errors.push(file.name || `archivo ${i + 1}`)
         }

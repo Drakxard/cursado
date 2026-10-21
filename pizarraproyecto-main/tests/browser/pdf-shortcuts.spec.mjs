@@ -28,7 +28,7 @@ test.beforeEach(async({page})=>{
   await page.route('**/biblioteca/pizarra?**',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><button id="escape">Cerrar con Escape</button><script>
     const p=new URLSearchParams(location.search),session=p.get('session'),boardId=p.get('boardId'),reader=p.get('mode')==='reader';
     addEventListener('message',e=>{if(e.source!==parent||e.origin!==location.origin||e.data.session!==session||e.data.boardId!==boardId)return;
-      if(e.data.type==='board-library:init'){document.body.dataset.initialized='yes';if(reader)parent.postMessage({type:'board-library:reader-rendered',session,boardId},location.origin);}
+      if(e.data.type==='board-library:init'){document.body.dataset.initialized='yes';document.body.dataset.restored=e.data.readingPosition||'';if(reader)parent.postMessage({type:'board-library:reader-rendered',session,boardId},location.origin);}
       if(e.data.type==='board-library:escape-reader')parent.postMessage({type:'board-library:reader-closed',session,boardId},location.origin);
     });
     addEventListener('keydown',e=>{if(e.key==='Escape')parent.postMessage({type:reader?'board-library:reader-closed':'board-library:escape',session,boardId},location.origin)});
@@ -76,7 +76,7 @@ test('Escape closes menus before changing tools, closes the split and returns fr
   await page.mouse.click(270,326)
   const reader=page.frameLocator('iframe[title="Lector de PDF de la pizarra"]')
   await expect(reader.locator('body')).toHaveAttribute('data-initialized','yes')
-  await reader.locator('body').evaluate(body=>body.dataset.retained='yes')
+  await reader.locator('body').evaluate(()=>parent.postMessage({type:'board-library:reading-position',session:new URLSearchParams(location.search).get('session'),boardId:new URLSearchParams(location.search).get('boardId'),hash:'#page=2&zoom=150,0,123'},location.origin))
   await page.evaluate(()=>{
     const params=new URL(document.querySelector('.board-pdf-reader iframe').src).searchParams
     window.postMessage({type:'board-library:reader-closed',session:params.get('session'),boardId:params.get('boardId')},location.origin)
@@ -88,11 +88,14 @@ test('Escape closes menus before changing tools, closes the split and returns fr
   expect(bounds.width).toBe(1366)
   await reader.locator('button').focus();await page.keyboard.press('Escape')
   await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
-  await expect(reader.locator('body')).toHaveAttribute('data-retained','yes')
-  await page.mouse.click(270,326)
-  await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
-  await expect(reader.locator('body')).toHaveAttribute('data-retained','yes')
-  await reader.locator('button').focus();await page.keyboard.press('Escape')
+  await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(0)
+  for(let cycle=0;cycle<10;cycle++) {
+    await page.mouse.click(270,326)
+    await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
+    await expect(reader.locator('body')).toHaveAttribute('data-restored','#page=2&zoom=150,0,123')
+    await reader.locator('button').focus();await page.keyboard.press('Escape')
+    await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(0)
+  }
   await expect(page.locator('.app')).toHaveAttribute('data-library-split','true')
   expect((await saved(page)).camera).toMatchObject({x:before.camera.x,y:before.camera.y,zoom:before.camera.zoom})
   await library.locator('button').focus();await page.keyboard.press('Escape')
@@ -168,7 +171,7 @@ test('multiple selected PDF shortcuts move together, do not open a reader, and c
   await expect.poll(async()=>(await saved(page)).shapes.map(item=>[item.x,item.y])).toEqual(before.map(item=>[item.x,item.y]))
 })
 
-test('only the last PDF reader is retained, with no preload and no inactive documents',async({page})=>{
+test('only the active PDF reader is mounted and coordinates survive switching documents',async({page})=>{
   for(let i=0;i<3;i++)await drop(page,220,180+i*90,{...reference,materialId:41+i,fileName:`PDF ${i+1}.pdf`})
   await expect.poll(async()=>(await saved(page)).shapes.length).toBe(3)
   await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(0)
@@ -177,18 +180,29 @@ test('only the last PDF reader is retained, with no preload and no inactive docu
     const frame=page.frameLocator('.board-pdf-reader[aria-hidden="false"] iframe')
     await expect(frame.locator('body')).toHaveAttribute('data-initialized','yes')
     await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(1)
-    await frame.locator('body').evaluate(body=>{body.dataset.readingState='page-10;zoom-150'})
+    await frame.locator('body').evaluate(()=>parent.postMessage({type:'board-library:reading-position',session:new URLSearchParams(location.search).get('session'),boardId:new URLSearchParams(location.search).get('boardId'),hash:'#page=10&zoom=150,0,123'},location.origin))
     await closeReader(page)
-    await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(1)
+    await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(0)
     await page.mouse.click(270,206+i*90)
-    await expect(frame.locator('body')).toHaveAttribute('data-reading-state','page-10;zoom-150')
+    await expect(frame.locator('body')).toHaveAttribute('data-restored','#page=10&zoom=150,0,123')
     await closeReader(page)
   }
   await page.mouse.click(270,206)
   const first=page.frameLocator('.board-pdf-reader[aria-hidden="false"] iframe')
   await expect(first.locator('body')).toHaveAttribute('data-initialized','yes')
-  await expect(first.locator('body')).not.toHaveAttribute('data-reading-state')
+  await expect(first.locator('body')).toHaveAttribute('data-restored','#page=10&zoom=150,0,123')
   await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(1)
+})
+
+test('closing a loading reader unmounts it without waiting for PDF initialization',async({page})=>{
+  await page.route('**/biblioteca/pizarra?**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><p>Loading fixture</p>'}))
+  await drop(page)
+  await expect.poll(async()=>(await saved(page)).shapes.length).toBe(1)
+  await page.mouse.click(270,326)
+  await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(1)
+  await page.locator('.app canvas').first().focus()
+  await page.keyboard.press('<')
+  await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(0)
 })
 
 test('undo retains only five changes and those changes can be redone',async({page})=>{

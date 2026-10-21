@@ -107,7 +107,9 @@ test('two contributors edit shared content, navigate, follow cameras and retain 
   await b.getByRole('button',{name:'Opciones del lápiz'}).click()
   await b.evaluate(()=>{
     const layer=document.querySelector('.board-graph-layer')
-    const matrix=new DOMMatrix(getComputedStyle(layer).transform)
+    // The scene owns the camera transform; include all transformed ancestors.
+    const scene=layer.closest('.board-scene')??layer
+    const matrix=new DOMMatrix(getComputedStyle(scene).transform)
     const widget=document.createElement('button');widget.textContent='Widget de prueba'
     widget.style.cssText=`position:absolute;left:${(500-matrix.e)/matrix.a}px;top:${(300-matrix.f)/matrix.d}px;width:100px;height:60px;z-index:8;pointer-events:auto`
     widget.onpointermove=e=>e.stopPropagation()

@@ -4417,6 +4417,13 @@
       return;
     }
 
+    if (event.data.type === "restoreViewerReadingPosition" && state.query?.boardReader) {
+      if (typeof event.data.hash === "string" && event.data.hash.length <= 512 && /^#?page=\d+&zoom=/.test(event.data.hash)) {
+        state.app?.pdfLinkService?.setHash(event.data.hash.replace(/^#/, ""));
+      }
+      return;
+    }
+
     if (event.data.type === "requestViewerEscape") {
       handleViewerEscape();
       return;
@@ -4739,6 +4746,9 @@
     updateDraftOverlay();
 
     const { eventBus } = app;
+    if (state.query?.boardReader) eventBus.on("updateviewarea", ({ location: view } = {}) => {
+      if (view?.pdfOpenParams) postToParent({ type: "viewerReadingPosition", hash: view.pdfOpenParams });
+    });
     eventBus.on("pagerendered", () => {
       postToParent({ type: "viewerPageRendered" });
       refreshLayers();

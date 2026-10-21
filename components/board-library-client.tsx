@@ -20,13 +20,27 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
   const [error,setError] = useState('')
   const [resolved,setResolved] = useState(false)
   const viewerHost = useRef<HTMLDivElement>(null)
+  const pendingReadingPosition = useRef<string | null>(null)
   const send = (type:string) => parent.postMessage({type,session,boardId},location.origin)
   useEffect(()=>{
     if(!session || !boardId || window.parent === window) {setError('Abrí la biblioteca desde una pizarra.');return}
     const receive = (event:MessageEvent) => {
-      if(event.origin===location.origin && event.source===viewerHost.current?.querySelector('iframe')?.contentWindow && event.data?.type==='viewerPageRendered') {send('board-library:reader-rendered');return}
+      if(event.origin===location.origin && event.source===viewerHost.current?.querySelector('iframe')?.contentWindow) {
+        if(event.data?.type==='viewerPageRendered') {
+          if(pendingReadingPosition.current) {
+            event.source?.postMessage({type:'restoreViewerReadingPosition',hash:pendingReadingPosition.current}, {targetOrigin:location.origin})
+            pendingReadingPosition.current=null
+          }
+          send('board-library:reader-rendered');return
+        }
+        if(event.data?.type==='viewerReadingPosition' && !pendingReadingPosition.current && typeof event.data.hash==='string' && event.data.hash.length<=512) {
+          parent.postMessage({type:'board-library:reading-position',session,boardId,hash:event.data.hash},location.origin)
+          return
+        }
+      }
       if(event.origin!==location.origin || event.source!==parent || event.data?.session!==session || event.data?.boardId!==boardId) return
       if(event.data.type==='board-library:init') {
+        pendingReadingPosition.current=typeof event.data.readingPosition==='string' ? event.data.readingPosition : null
         if(event.data.rootHandle?.kind==='directory') {setReadyWorkspaceHandle(event.data.rootHandle);setProvidedRoot(event.data.rootHandle)}
         setReference(boardPdfReference(event.data.reference));setInitialized(true)
       }

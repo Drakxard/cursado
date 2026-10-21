@@ -64,7 +64,7 @@ export async function initializeTopicWorkspace(input: TopicWorkspace, preserveSe
   navigationRoot=input.rootHandle
   workspace = input
   presented = structuredClone(content)
-  saved = structuredClone(content)
+  saved = presented
   if(!preserveSession)setStorageSession(null, false)
   selectBoard(id, false)
   await saveTopicWorkspace()
@@ -99,10 +99,13 @@ export async function saveTopicWorkspace() {
   await writer.write(JSON.stringify({ version: 1, boardId: workspace.boardId, name: workspace.name, content, assets, cooperationWeekNumber: workspace.cooperationWeekNumber, cooperationSubjectId: workspace.cooperationSubjectId }))
   await writer.close()
   saved = structuredClone(content)
+  // Recognize saved local edits without consuming remote changes before display.
+  // Baselines are immutable: share their checkpoint when no remote merge occurred.
+  presented = content === board.content ? saved : structuredClone(board.content)
   parent.postMessage({ type: 'topic-board:saved', boardId: workspace.boardId }, location.origin)
 }
 
-export async function receiveTopicWorkspace(local: BoardContentWithExtras): Promise<BoardContentWithExtras | null> {
+export async function receiveTopicWorkspace(local: BoardContentWithExtras, isCurrent = () => true): Promise<BoardContentWithExtras | null> {
   if (!workspace) return null
   const directory = await boardDirectory(workspace.rootHandle)
   const snapshot = JSON.parse(await (await (await directory.getFileHandle(`${workspace.boardId}.json`)).getFile()).text()) as TopicSnapshot
@@ -116,8 +119,9 @@ export async function receiveTopicWorkspace(local: BoardContentWithExtras): Prom
     const bytes = Uint8Array.from(atob(data.slice(comma + 1)), c => c.charCodeAt(0))
     await (await deviceDB).put('assets', new Blob([bytes], { type: data.slice(5, data.indexOf(';')) }), `device:${media.assetId}`)
   }
+  if (!isCurrent()) return null
   presented = structuredClone(merged)
-  saved = structuredClone(snapshot.content)
+  saved = merged === snapshot.content ? presented : structuredClone(snapshot.content)
   return merged
 }
 

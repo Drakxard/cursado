@@ -9,8 +9,9 @@ import { renderRelatedPdfImages, retainPdfImageUrl } from "@/lib/client/subject-
 import { ExternalLink } from "lucide-react"
 import { getReadyWorkspaceHandle, loadWorkspaceHandle, requestWorkspacePermission } from "@/lib/local-workspace-client"
 
-export function SubjectPdfFragment({ result, subjectId, onBack, onUndo, onSearchAgain, active = true, onPrepared }: {
+export function SubjectPdfFragment({ result, subjectId, onBack, onUndo, onSearchAgain, active = true, onPrepared, initialScrollTop, onScrollPosition }: {
   result: PdfSearchResult; subjectId: string; onBack: () => void; onUndo: () => void; onSearchAgain: () => void; active?: boolean; onPrepared?: () => void
+  initialScrollTop?: number; onScrollPosition?: (top: number) => void
 }) {
   const [source, setSource] = useState<{ images: { url: string; width: number; height: number; page: number }[]; originalUrl: string; fileId: string | null; target: PdfRegion | null } | null>(null)
   const [error, setError] = useState<Error | null>(null)
@@ -24,6 +25,7 @@ export function SubjectPdfFragment({ result, subjectId, onBack, onUndo, onSearch
     const container = scroller.current
     const target = source.target
     const position = () => {
+      if (initialScrollTop !== undefined) { container.scrollTop = initialScrollTop; return }
       const page = container.querySelector<HTMLElement>(`[data-pdf-image-page="${target?.page ?? source.images[0]?.page}"]`)
       if (page) container.scrollTop = page.offsetTop + page.clientHeight * Math.max(0, (target?.y1 ?? 0) - 0.025)
     }
@@ -32,7 +34,7 @@ export function SubjectPdfFragment({ result, subjectId, onBack, onUndo, onSearch
     const observer = new ResizeObserver(position)
     observer.observe(container)
     return () => observer.disconnect()
-  }, [source, active])
+  }, [source, active, initialScrollTop])
   useEffect(() => { if (!loading) onPrepared?.() }, [loading, onPrepared])
   useEffect(() => {
     if (!active) return
@@ -67,11 +69,12 @@ export function SubjectPdfFragment({ result, subjectId, onBack, onUndo, onSearch
       })
       const originalUrl = URL.createObjectURL(original.file)
       urls.push(originalUrl)
-      await Promise.all(images.map(async image => {
+      for (const image of images) {
+        controller.signal.throwIfAborted()
         const decoded = new Image()
-        decoded.src = image.url
-        await decoded.decode()
-      }))
+        try { decoded.src = image.url; await decoded.decode() }
+        finally { decoded.src = '' }
+      }
       controller.signal.throwIfAborted()
       setSource({ images, originalUrl, fileId: original.fileId, target: pdfStatementRegion(result) })
       setLoading(false)
@@ -96,7 +99,7 @@ export function SubjectPdfFragment({ result, subjectId, onBack, onUndo, onSearch
       {error instanceof PdfSourceError && ["changed", "invalid"].includes(error.code) && <button type="button" className="ml-2 rounded-lg border px-4 py-2" onClick={onSearchAgain}>Volver a buscar</button>}
     </div>}
     <input ref={input} type="file" accept="application/pdf,.pdf" className="hidden" aria-label="Seleccionar PDF original" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) setSelected(file) }} />
-    {source && !error && <div ref={scroller} data-pdf-image-scroll data-pdf-ready={positioned ? "true" : undefined}
+    {source && !error && <div ref={scroller} data-pdf-image-scroll data-pdf-ready={positioned ? "true" : undefined} onScroll={event => onScrollPosition?.(event.currentTarget.scrollTop)}
       style={{ overflowY: "auto", minHeight: 0, flex: 1, height: "100%", width: "100%", boxSizing: "border-box", position: "relative", opacity: positioned ? 1 : 0, paddingBottom: "calc(100vh - 24px)" }}>
       {source.images.map(image => <img key={image.page} src={image.url} alt={`Página ${image.page} de ${result.fileName}`} data-pdf-image-page={image.page}
         width={image.width} height={image.height} draggable={false} style={{ display: "block", width: "100%", height: "auto" }} />)}

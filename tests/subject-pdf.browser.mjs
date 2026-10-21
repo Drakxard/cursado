@@ -203,7 +203,7 @@ async function waitForPdfFrame(page) {
   await page.waitForFunction(() => [...document.querySelectorAll('[data-voice-pdf-fragment] img')].every(image => image.complete && image.naturalWidth > 0));
 }
 
-test("prepara diez resultados y continuar el término filtra sin consultar el PDF", async t => {
+test("lista diez resultados sin precargar lectores y continuar el término filtra sin consultar el PDF", async t => {
   const page = await setup(t)
   await page.evaluate(() => {
     window.fixturePayload.json.children = [window.fixturePayload.json.children[0]]
@@ -224,7 +224,7 @@ test("prepara diez resultados y continuar el término filtra sin consultar el PD
   await page.evaluate(() => window.changePdfSubject('algebra'))
   await page.locator('[data-voice-search]').fill('teorema')
   await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===10)
-  await page.waitForFunction(() => document.querySelectorAll('[data-pdf-preloaded] [data-pdf-ready="true"]').length===10)
+  assert.equal(await page.locator('[data-pdf-view]').count(), 0)
   const calls = await page.evaluate(() => window.pdfRequests.length)
   await page.locator('[data-voice-search]').fill('teorema 7')
   await page.waitForFunction(() => document.querySelectorAll('[data-voice-pdf-id]').length===6)
@@ -250,32 +250,26 @@ test("continuar mientras Clef responde conserva la búsqueda en curso", async t 
   assert.equal(await page.evaluate(() => window.pdfRequests.filter(request => request.url.endsWith('pdf-evaluate')).length), 2)
 })
 
-test("los globos abren imágenes ya preparadas y ubicadas, y las reutilizan al volver", async t => {
+test("los globos montan solo el lector activo y restauran la lectura en diez ciclos", async t => {
   const page=await setup(t)
   const search=page.locator('[data-voice-search]')
   await search.fill('derivada')
   await page.waitForFunction(()=>document.querySelectorAll('[data-voice-pdf-id]').length===2)
-  await page.waitForFunction(()=>document.querySelectorAll('[data-pdf-preloaded] [data-pdf-image-scroll][data-pdf-ready="true"]').length===2)
-  await page.evaluate(()=>{
-    const id=document.querySelector('[data-voice-pdf-id]').getAttribute('data-voice-pdf-id')
-    window.preparedFrame=[...document.querySelectorAll('[data-pdf-preloaded]')].find(node=>node.getAttribute('data-pdf-preloaded')===id).querySelector('[data-pdf-image-scroll]')
-    window.subsetLoads=0
-    const load=window.PDFLib.PDFDocument.load
-    window.PDFLib.PDFDocument.load=(...args)=>{window.subsetLoads++;return load(...args)}
-  })
-  await page.locator('[data-voice-pdf-id]').first().click()
-  assert.equal(await page.evaluate(()=>document.querySelector('[data-voice-pdf-fragment] [data-pdf-image-scroll]')===window.preparedFrame),true)
-  assert.equal(await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').getAttribute('data-pdf-ready'),'true')
-  assert.equal(await page.getByText('Abriendo páginas…',{exact:true}).count(),0)
-  await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').evaluate(node=>{node.scrollTop=300})
-  await page.keyboard.press('Backspace')
-  await search.waitFor()
-  await page.waitForFunction(()=>window.preparedFrame.getAttribute('data-pdf-ready')==='true')
-  await page.locator('[data-voice-pdf-id]').first().click()
-  assert.equal(await page.evaluate(()=>document.querySelector('[data-voice-pdf-fragment] [data-pdf-image-scroll]')===window.preparedFrame),true)
-  assert.equal(await page.evaluate(()=>window.subsetLoads),0)
-  const scroll=await page.locator('[data-voice-pdf-fragment] [data-pdf-image-scroll]').evaluate(node=>node.scrollTop)
-  assert.ok(scroll<150,`Se conservó el scroll manual de ${scroll}px`)
+  assert.equal(await page.locator('[data-pdf-view]').count(),0)
+  for(let cycle=0;cycle<10;cycle++) {
+    await page.locator('[data-voice-pdf-id]').first().click()
+    await waitForPdfFrame(page)
+    assert.equal(await page.locator('[data-pdf-view]').count(),1)
+    if(cycle>0) {
+      const top=await page.locator('[data-pdf-image-scroll]').evaluate(node=>node.scrollTop)
+      assert.ok(Math.abs(top-300)<3, `Reading position was ${top}`)
+    }
+    await page.locator('[data-pdf-image-scroll]').evaluate(node=>{node.scrollTop=300;node.dispatchEvent(new Event('scroll',{bubbles:true}))})
+    await page.keyboard.press('Backspace')
+    await search.waitFor()
+    assert.equal(await page.locator('[data-pdf-view], [data-pdf-image-scroll]').count(),0)
+  }
+
 })
 
 test("DEFINICI encuentra el término completo y el historial anterior se adapta a páginas", async t => {

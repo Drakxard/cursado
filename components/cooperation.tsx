@@ -157,7 +157,7 @@ export function CooperationRuntime() {
   }, [state, invitation, review])
   if (invitation && !review) return <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><CooperationInvitation sphere={invitation} onClose={() => { void dismissCooperationSphere(invitation.id); setInvitation(null) }} onAccepted={() => setInvitation(null)} /></div>
   if (!review) {
-    const transfers = Object.values(state.mirrors).filter(m => m.transfer || m.error)
+    const transfers = Object.values(state.mirrors).filter(m => m.error)
     if (!transfers.length && !(state.error && state.groups.length)) return null
     return <aside aria-label="Sincronización cooperativa" className="fixed bottom-4 left-4 z-[240] max-w-sm space-y-2 rounded-xl border bg-background p-3 text-sm text-foreground shadow-lg">
       {state.error && <p role="alert">{state.error}</p>}
