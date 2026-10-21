@@ -333,3 +333,9 @@ canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%
   .pen-settings-popover .tool-width-label {grid-column:2;grid-row:1;align-self:start;}
   .toolbar .pen-settings-popover .tool-width-range {grid-column:2;grid-row:1;align-self:end;}
 }
+.audio-note-draft{position:absolute;left:0;top:0;width:56px;height:56px;transform-origin:0 0;pointer-events:none;z-index:70;color:#111;opacity:.8}
+.audio-note-draft svg{width:100%;height:100%}
+.audio-note-status{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:3500;display:flex;align-items:center;gap:12px;flex-wrap:wrap;max-width:calc(100vw - 32px);padding:12px 16px;border:1px solid #d1d5db;border-radius:14px;background:#fff;color:#111;box-shadow:0 4px 20px #0002;font:14px system-ui}
+.audio-note-status small{flex-basis:100%}.audio-note-status button{background:#f3f4f6;color:#111;border:1px solid #d1d5db;border-radius:8px;padding:7px 10px;cursor:pointer}
+.audio-note-element{position:absolute;pointer-events:auto;border:0;padding:0;background:transparent;color:#111;cursor:pointer;touch-action:none;border-radius:50%;transform-origin:center}
+.audio-note-element svg{width:100%;height:100%;display:block}.audio-note-element:focus-visible{outline:2px solid #2563eb;outline-offset:3px}

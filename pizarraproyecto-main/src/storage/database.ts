@@ -11,7 +11,9 @@ export type MediaItem = {
   width: number
   height: number
   name: string
-  kind: 'image' | 'pdf-page'
+  kind: 'image' | 'pdf-page' | 'audio'
+  durationMs?: number
+  mimeType?: string
   documentId?: string
   pageNumber?: number
   pageText?: string

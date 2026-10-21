@@ -562,8 +562,13 @@ export async function importBoardBackup(file:File) {
   for (const media of content.media) {
     if (replacements.has(media.assetId)) {media.assetId=replacements.get(media.assetId)!;continue}
     const data = backup.assets[media.assetId]
-    if (typeof data!=='string' || !/^data:image\/(png|jpeg|webp);base64,/.test(data)) throw new Error('Falta una imagen válida en el respaldo.')
+    const supported=media.kind==='audio'
+      ? /^data:audio\/(webm|ogg|mp4)(?:;codecs=[^;,]+)?;base64,/i
+      : /^data:image\/(png|jpeg|webp);base64,/
+    if (typeof data!=='string' || !supported.test(data)) throw new Error('Falta un recurso válido en el respaldo.')
+    if(media.kind==='audio'&&(typeof media.durationMs!=='number'||!Number.isFinite(media.durationMs)||media.durationMs<0))throw new Error('La duración de la nota de audio no es válida.')
     const blob = await (await fetch(data)).blob()
+    if(media.kind==='audio')media.mimeType=blob.type
     const id = crypto.randomUUID()
     await (await deviceDB).put('assets',blob,assetKey(id,true))
     replacements.set(media.assetId,id)

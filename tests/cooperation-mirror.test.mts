@@ -57,7 +57,8 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   await a.fs.put('teoria/Private/secret.pdf', 'private')
   await a.fs.put('User.Services', 'secret credentials')
   const image = 'data:image/png;base64,aW1hZ2U='
-  await a.fs.put('progreso/pizarras/study-test.json', { version: 1, boardId: 'study-test', cooperationSubjectId: 'algebra', name: 'Álgebra - Teoría', content: { strokes: [{ id: 'stroke-a', points: [{ x: 1, y: 2 }] }], texts: [], media: [{ id: 'media-a', assetId: 'asset-a' }], shapes: [], camera: { x: 100, y: 100, zoom: 2 } }, assets: { 'asset-a': image } })
+  const audio = 'data:audio/webm;codecs=opus;base64,YXVkaW8='
+  await a.fs.put('progreso/pizarras/study-test.json', { version: 1, boardId: 'study-test', cooperationSubjectId: 'algebra', name: 'Álgebra - Teoría', content: { strokes: [{ id: 'stroke-a', points: [{ x: 1, y: 2 }] }], texts: [], media: [{ id: 'media-a', assetId: 'asset-a' },{id:'audio-note',assetId:'audio-asset',kind:'audio',mimeType:'audio/webm;codecs=opus',durationMs:1000,x:40,y:50,width:56,height:56}], shapes: [], camera: { x: 100, y: 100, zoom: 2 } }, assets: { 'asset-a': image, 'audio-asset': audio } })
   const largeNotes = '📚Álgebra'.repeat(40000)
   await a.fs.put('manifests/subject-voice/algebra/workspace.json', { version: 1, subjectId: 'algebra', notes: largeNotes, groups: [{ id: 'voice-group', name: 'Conjunto', color: '#b2f2bb', images: [{ id: 'voice-image', name: 'Foto', path: 'subject-voice/images/algebra/foto.png' }] }] })
   await a.fs.put('subject-voice/images/algebra/foto.png', new Blob(['voice image'], { type: 'image/png' }))
@@ -110,6 +111,8 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
     assert.equal((await actor.fs.json('manifests/subject-catalog.json')).subjects.algebra.name, 'Personal')
     const board = await actor.fs.json(`progreso/pizarras/study-test-${binding.id.slice(0, 8)}.json`)
     assert.equal(board.assets['asset-a'], image)
+    assert.equal(Buffer.from(board.assets['audio-asset'].split(',')[1], 'base64').toString(), 'audio')
+    assert.equal(board.content.media.find((item:any)=>item.id==='audio-note').mimeType,'audio/webm;codecs=opus')
     assert.equal(board.content.camera.zoom, 1)
     assert.equal(await actor.fs.files.get(`subject-voice/images/coop-${binding.id}/foto.png`).text(), 'voice image')
     assert.equal((await actor.fs.json(`manifests/subject-voice/coop-${binding.id}/workspace.json`)).notes, largeNotes)

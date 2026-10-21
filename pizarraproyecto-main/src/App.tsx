@@ -24,6 +24,8 @@ import AcademicLibrary from './components/AcademicLibrary'
 import CodeWorkspace from './components/CodeWorkspace'
 import ChatGPTConsultation from './components/ChatGPTConsultation'
 import BoardApiChat from './components/BoardApiChat'
+import { BoardAudio } from './audioNotes'
+import { AudioNoteIcon, paintAudioNote } from './components/AudioNoteIcon'
 import ImageCropDialog from './components/ImageCropDialog'
 import TouchButton from './components/TouchButton'
 import {croppedGeometry} from './canvas/imageCrop'
@@ -810,11 +812,21 @@ function App() {
   const mediaQueueRef = useRef<string[]>([])
   const mediaFailedRef = useRef(new Set<string>())
   const mediaRunningRef = useRef(0)
+  const [,refreshAudio]=useState(0)
+  const audioRef=useRef<BoardAudio|null>(null)
+  const audioCursorRef=useRef<Point|null>(null)
+  const audioDraftRef=useRef<HTMLDivElement>(null)
+  const audioPointerRef=useRef<{pointerId:number;id:string;x:number;y:number;moved:boolean;transform?:Transform}|null>(null)
+  if(!audioRef.current)audioRef.current=new BoardAudio({boardId:getActiveBoardId,load:loadAsset,commit:commitAudioNote,changed:()=>{}})
+  const boardAudio=audioRef.current
+  boardAudio.options={boardId:getActiveBoardId,load:loadAsset,commit:commitAudioNote,changed:()=>{refreshAudio(n=>n+1);redraw()}}
+  useEffect(()=>()=>{boardAudio.options.changed=()=>{};boardAudio.dispose()},[])
   const pendingReplicaRef = useRef(false)
   const strokeTilesRef = useRef(new StrokeTileIndex<Stroke>())
   const viewportFrameRef = useRef<number | null>(null)
   const [, setVisibleTableIds] = useState<string[]>([])
   const [visibleGraphIds, setVisibleGraphIds] = useState<string[]>([])
+  const [visibleAudioIds,setVisibleAudioIds]=useState<string[]>([])
   // Evita inserciones dobles mientras React monta el gráfico.
   const lastGraphInsertAtRef = useRef<number>(-Infinity)
 
@@ -1256,6 +1268,7 @@ function App() {
     setBoardSearchQuery('')
     setContextMenu(null)
     if (id === getActiveBoardId()) { setLibraryOpen(false); return }
+    try{await boardAudio.finish()}catch(error){setLibraryError(String(error));return}
     if (saveStatus === 'error') { setLibraryError('Hay cambios sin guardar. No cambies de pizarra hasta resolver el error.'); return }
     if (editingRef.current) commitText()
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
@@ -1284,6 +1297,9 @@ function App() {
 
 
   function selectElement(value: Selection | null) {
+    const focused=document.activeElement as HTMLElement|null
+    const focusedAudio=focused?.closest<HTMLElement>('[data-audio-id]')?.dataset.audioId
+    if(focusedAudio&&!(value?.kind==='media'&&value.id===focusedAudio))focused?.blur()
     if(value?.kind==='shape'&&shapesRef.current.some(item=>item.id===value.id&&item.symbol==='cartesian'))setVisualEditor(null)
     refreshSelection(n=>n+1)
     selectedRef.current = value
@@ -1441,8 +1457,10 @@ function App() {
       const view = visibleBounds()
       const tableIds = tablesRef.current.filter(item => rectsIntersect(view, rotatedRect(tableSize(item),item.rotation))).map(item => item.id)
       const graphIds = graphsRef.current.filter(item => rectsIntersect(view, rotatedRect(item,item.rotation))).map(item => item.id)
+      const audioIds=mediaRef.current.filter(item=>item.kind==='audio'&&rectsIntersect(view,rotatedRect(item,item.rotation))).map(item=>item.id)
       setVisibleTableIds(previous => sameVisibleIds(previous, tableIds) ? previous : tableIds)
       setVisibleGraphIds(previous => sameVisibleIds(previous, graphIds) ? previous : graphIds)
+      setVisibleAudioIds(previous=>sameVisibleIds(previous,audioIds)?previous:audioIds)
     })
   }
 
@@ -1493,6 +1511,7 @@ function App() {
 
   function enqueueVisibleMedia(items: MediaItem[]) {
     for (const item of items) {
+      if(item.kind==='audio')continue
       const id = item.assetId
       if (imageCacheRef.current.has(id) || mediaLoadingRef.current.has(id) ||
           mediaQueuedRef.current.has(id) || mediaFailedRef.current.has(id)) continue
@@ -1503,6 +1522,12 @@ function App() {
   }
 
   function redraw() {
+    boardAudio.reconcile(mediaRef.current)
+    const draft=boardAudio.draft
+    if(draft&&audioDraftRef.current){
+      const cam=cameraRef.current,node=audioDraftRef.current,item=draft.item
+      node.style.transform=`translate(${item.x*cam.zoom+cam.x}px,${item.y*cam.zoom+cam.y}px) scale(${cam.zoom})`
+    }
     sendCamera()
     const pin=pdfPinRef.current,item=selectedPdfShortcut()
     if(pin&&item){
@@ -1516,6 +1541,10 @@ function App() {
     if(sceneRef.current){
       const cam=cameraRef.current
       sceneRef.current.style.transform=`translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})`
+      sceneRef.current.querySelectorAll<HTMLElement>('[data-audio-id]').forEach(node=>{
+        const item=mediaRef.current.find(item=>item.id===node.dataset.audioId)
+        if(item){node.style.left=`${item.x}px`;node.style.top=`${item.y}px`;node.style.width=`${item.width}px`;node.style.height=`${item.height}px`;node.style.transform=`rotate(${item.rotation??0}rad)`}
+      })
     }
     const staticLayer=staticTableLayerRef.current
     if(staticLayer){
@@ -1621,6 +1650,10 @@ function App() {
     const renderables:{z:number;index:number;bounds?:Bounds;paint:(surface:CanvasRenderingContext2D)=>void}[]= []
     let renderIndex=0
     for(const item of visibleMedia){
+      if(item.kind==='audio'){
+        renderables.push({z:(item as GroupedItem).zIndex??-300000,index:renderIndex++,bounds:rotatedRect(item,item.rotation),paint:surface=>paintAudioNote(surface,item,boardAudio.playingId===item.id)})
+        continue
+      }
       renderables.push({z:(item as GroupedItem).zIndex??-300000,index:renderIndex++,bounds:rotatedRect(item,item.rotation),paint:(surface)=>{
         const image=imageCacheRef.current.get(item.assetId)
         surface.save()
@@ -2092,7 +2125,29 @@ function App() {
 
   // Esperar los guardados en curso antes de crear o restaurar una versión.
   // Evita capturar un estado incompleto y no altera la cola de autoguardado.
+  async function commitAudioNote(item:MediaItem,blob:Blob) {
+    await saveAsset(item.assetId,blob)
+    if(!mediaRef.current.some(media=>media.id===item.id)){
+      rememberChange();mediaRef.current.push({...item});setTool('select');selectElement({kind:'media',id:item.id});scheduleSave()
+    }
+    if(saveTimerRef.current){clearTimeout(saveTimerRef.current);saveTimerRef.current=null}
+    for(let attempt=0;attempt<100&&savingRef.current;attempt++)await new Promise(resolve=>setTimeout(resolve,50))
+    if(savingRef.current)throw new Error('El guardado sigue en curso. Reintentá guardar la nota.')
+    if(dirtyRef.current)await persistBoard()
+    if(dirtyRef.current)throw new Error('No se pudo guardar la nota de audio. Reintentá o descartala.')
+  }
+
+  function discardAudioDraft() {
+    if(boardAudio.draft?.phase==='saving')return
+    const id=boardAudio.draft?.item.id
+    if(id&&mediaRef.current.some(item=>item.id===id)){
+      mediaRef.current=mediaRef.current.filter(item=>item.id!==id);selectElement(null);scheduleSave()
+    }
+    boardAudio.cancel()
+  }
+
   async function flushBoardForHistory(): Promise<void> {
+    await boardAudio.finish()
     finishPendingPen()
     if (!loadedRef.current) throw new Error('La pizarra todavía se está cargando.')
     if (editingRef.current) commitText()
@@ -2123,7 +2178,7 @@ function App() {
 
   useEffect(()=>beforeAppUpdate(flushBoardForHistory,()=>loadedRef.current&&pointerRef.current===null&&
     !activeStroke.current&&!pdfPointer.current&&!touchPointersRef.current.size&&!importBusyRef.current&&
-    !recognizing&&!studyAssistant&&!apiChat&&!apiCaptureRef.current&&!imageCrop&&!materialLibrary.reader&&!materialLibrary.splitOpen))
+    !recognizing&&!studyAssistant&&!apiChat&&!apiCaptureRef.current&&!imageCrop&&!materialLibrary.reader&&!materialLibrary.splitOpen&&!boardAudio.draft))
   useEffect(()=>beforeHome(async()=>{
     // There is nothing to commit if the initial board has not loaded yet.
     if(!loadedRef.current&&!dirtyRef.current)return
@@ -2544,11 +2599,6 @@ function App() {
     redraw()
   }
 
-  function cancelText() {
-    setEditor(null)
-    redraw()
-  }
-
   function distanceToSegment(p: Point, a: Point, b: Point) {
     const dx = b.x - a.x
     const dy = b.y - a.y
@@ -2782,7 +2832,7 @@ function App() {
     if(!scene&&!navigation)return
     const control=target.closest('button,input,textarea,select,[contenteditable]')
     const hit=hitSelectionAt(toWorld(e.clientX,e.clientY))
-    const visibleControl=control&&((hit?.kind==='graph'&&target.closest<HTMLElement>('[data-graph-id]')?.dataset.graphId===hit.id)||
+    const visibleControl=control&&((hit?.kind==='media'&&target.closest<HTMLElement>('[data-audio-id]')?.dataset.audioId===hit.id)||(hit?.kind==='graph'&&target.closest<HTMLElement>('[data-graph-id]')?.dataset.graphId===hit.id)||
       (hit?.kind==='video'&&target.closest<HTMLElement>('[data-video-id]')?.dataset.videoId===hit.id))
     if(!navigation&&(tool!=='select'||(visibleControl&&!selectionPicking)))return
     if(e.button!==0&&!navigation)return
@@ -2927,6 +2977,19 @@ function App() {
   },[])
 
   function pointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if(boardAudio.draft&&!boardAudio.draft.placed&&e.button===0){e.preventDefault();boardAudio.move(toWorld(e.clientX,e.clientY));boardAudio.place();return}
+    if(loadedRef.current&&!selectionPicking&&tool!=='eraser'&&e.button===0&&!e.ctrlKey&&!e.metaKey){
+      const hit=hitSelectionAt(toWorld(e.clientX,e.clientY))
+      const item=hit?.kind==='media'?mediaRef.current.find(item=>item.id===hit.id&&item.kind==='audio'):null
+      if(item){
+        e.preventDefault();finishPendingPen();if(editingRef.current)commitText()
+        if(!nativeBoardMode())setTool('select')
+        if(!groupRef.current.some(sel=>sel.kind==='media'&&sel.id===item.id))selectElement({kind:'media',id:item.id})
+        audioPointerRef.current={pointerId:e.pointerId,id:item.id,x:e.clientX,y:e.clientY,moved:false,
+          ...(!nativeBoardMode()?{transform:{mode:'move',start:toWorld(e.clientX,e.clientY),bounds:groupBounds()!,initial:snapshot(),group:[...groupRef.current]}}:{})}
+        e.currentTarget.setPointerCapture(e.pointerId);return
+      }
+    }
     if (nativeBoardMode() && loadedRef.current) {
       if (touchPointersRef.current.size || pointerRef.current !== null) nativePdfTap.current = null
       else if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
@@ -3079,6 +3142,17 @@ function App() {
   }
 
   function pointerMove(e: ReactPointerEvent<HTMLCanvasElement>) {
+    audioCursorRef.current={x:e.clientX,y:e.clientY}
+    if(boardAudio.move(toWorld(e.clientX,e.clientY))){redraw();return}
+    const audio=audioPointerRef.current
+    if(audio?.pointerId===e.pointerId){
+      e.preventDefault()
+      if(Math.hypot(e.clientX-audio.x,e.clientY-audio.y)>5||audio.moved){
+        if(!audio.moved&&audio.transform)rememberChange()
+        audio.moved=true;if(audio.transform)transformSelection(audio.transform,toWorld(e.clientX,e.clientY))
+      }
+      return
+    }
     const tap = nativePdfTap.current
     if (tap?.pointerId === e.pointerId && Math.hypot(e.clientX-tap.x,e.clientY-tap.y) > 8) nativePdfTap.current = null
     const pdf = pdfPointer.current
@@ -3205,6 +3279,14 @@ function App() {
   }
 
   function pointerUp(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const audio=audioPointerRef.current
+    if(audio?.pointerId===e.pointerId){
+      audioPointerRef.current=null
+      if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId)
+      if(audio.moved){if(audio.transform)scheduleSave()}
+      else if(groupRef.current.length===1){const item=mediaRef.current.find(item=>item.id===audio.id);if(item)void boardAudio.toggle(item)}
+      return
+    }
     const tap = nativePdfTap.current
     if (tap?.pointerId === e.pointerId) {
       nativePdfTap.current = null
@@ -3279,6 +3361,10 @@ function App() {
   }
 
   function pointerCancel(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if(audioPointerRef.current?.pointerId===e.pointerId){
+      if(audioPointerRef.current.moved&&audioPointerRef.current.transform)scheduleSave()
+      audioPointerRef.current=null;return
+    }
     nativePdfTap.current = null
     if(pdfPointer.current?.pointerId===e.pointerId) {
       if(pdfPointer.current.moved)scheduleSave()
@@ -3499,6 +3585,10 @@ function App() {
     if(includePages&&data.videos.some(item=>intersects(item)))throw new Error('La vista contiene un video externo que no se puede capturar. Movelo fuera del encuadre antes de abrir API chat.')
     await document.fonts.ready
     for(const item of data.media.filter(item=>intersects(rotatedRect(item,item.rotation)))) {
+      if(item.kind==='audio'){
+        renderers.push({z:(item as GroupedItem).zIndex??-300000,paint:ctx=>paintAudioNote(ctx,item)})
+        continue
+      }
       const blob=await loadAsset(item.assetId)
       if(!blob)throw new Error(`No se pudo cargar ${item.name} para preparar la imagen.`)
       const url=URL.createObjectURL(blob);let bitmap:HTMLImageElement
@@ -4073,7 +4163,7 @@ function App() {
   async function openImageCrop() {
     setContextMenu(null)
     const selected=groupRef.current.length===1?groupRef.current[0]:null
-    const item=selected?.kind==='media'?mediaRef.current.find(m=>m.id===selected.id):null
+    const item=selected?.kind==='media'?mediaRef.current.find(m=>m.id===selected.id&&m.kind!=='audio'):null
     if(!item)return
     const boardId=getActiveBoardId(),assetId=item.assetId
     try {
@@ -4380,7 +4470,7 @@ function App() {
   async function openChatGPTSelection(destination:'assistant'|'transcription'=selectionDestinationRef.current,crop?:Bounds) {
     setOpenMenu(null)
     const boardId=getActiveBoardId()
-    const selected=groupRef.current.filter(s=>s.kind==='stroke'||s.kind==='media')
+    const selected=groupRef.current.filter(s=>s.kind==='stroke'||(s.kind==='media'&&mediaRef.current.some(item=>item.id===s.id&&item.kind!=='audio')))
     const boxes=selected.map(s=>selectionBounds(s)).filter((b):b is Bounds=>Boolean(b))
     if(!boxes.length){startChatGPTSelection(destination);return}
     const left=crop?.x??Math.min(...boxes.map(b=>b.x))-16,top=crop?.y??Math.min(...boxes.map(b=>b.y))-16
@@ -4731,6 +4821,22 @@ function App() {
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return
       if(e.isComposing||apiChat)return
+      if(e.key==='¿'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat&&!editingRef.current&&!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&!treePanel&&!materialLibrary.reader&&!nativeBoardMode()&&loadedRef.current){
+        e.preventDefault();finishPendingPen()
+        if(boardAudio.draft)void boardAudio.finish().catch(()=>{})
+        else{
+          const rect=canvasRef.current?.getBoundingClientRect(),cursor=audioCursorRef.current
+          boardAudio.start(cursor?toWorld(cursor.x,cursor.y):toWorld((rect?.left??0)+(rect?.width??innerWidth)/2,(rect?.top??0)+(rect?.height??innerHeight)/2))
+        }
+        return
+      }
+      if(e.key==='Escape'&&boardAudio.draft&&!e.repeat){e.preventDefault();discardAudioDraft();return}
+      if((e.key==='ArrowLeft'||e.key==='ArrowRight')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+        const focusedAudio=target?.closest<HTMLElement>('[data-audio-id]')?.dataset.audioId
+        const selected=groupRef.current.length===1?groupRef.current[0]:null
+        const item=mediaRef.current.find(item=>item.kind==='audio'&&(item.id===focusedAudio||(selected?.kind==='media'&&item.id===selected.id)))
+        if(item){e.preventDefault();boardAudio.seek(item,e.key==='ArrowLeft'?-5:5);return}
+      }
       if(e.key==='<'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat&&!editingRef.current&&!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&!treePanel) {
         if(materialLibrary.reader){e.preventDefault();materialLibrary.closeReader();return}
         const pinned=shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).slice(-1)
@@ -4790,6 +4896,8 @@ function App() {
   }, [apiChat, imageCrop, studyAssistant, libraryOpen, treePanel, selectionError, handwrittenEvent, handwrittenError, openMenu, importStatus, recognizing, boardSearchOpen, contextMenu, materialLibrary.reader, materialLibrary.splitOpen])
 
   const cam = cameraRef.current
+  const selectedAudio=groupRef.current.length===1&&groupRef.current[0].kind==='media'?mediaRef.current.find(item=>item.id===groupRef.current[0].id&&item.kind==='audio'):undefined
+  const audioDraft=boardAudio.draft
   const editorX = editing ? editing.x * cam.zoom + cam.x : 0
   const editorY = editing ? editing.y * cam.zoom + cam.y : 0
   const editorFontSize = editing ? editing.fontSize * cam.zoom : 24
@@ -4855,7 +4963,7 @@ function App() {
         onPointerUp={tabletPointerUp} onPointerCancel={tabletPointerCancel} onLostPointerCapture={tabletPointerCancel} onDoubleClick={onCanvasDoubleClick} onContextMenu={onBoardContextMenu} />
       {contextMenu&&<><div className="board-context-dismiss" onClick={()=>setContextMenu(null)} onContextMenu={e=>{e.preventDefault();setContextMenu(null)}} />
         <div className="board-context-menu" role="menu" aria-label="Acciones sobre elementos" style={{left:contextMenu.x,top:contextMenu.y,maxHeight:Math.max(80,window.innerHeight-contextMenu.y-8),overflowY:'auto'}}>
-          {groupRef.current.length===1&&groupRef.current[0].kind==='media'&&<TouchButton role="menuitem" onPress={()=>void openImageCrop()}>Recortar imagen</TouchButton>}
+          {groupRef.current.length===1&&groupRef.current[0].kind==='media'&&!selectedAudio&&<TouchButton role="menuitem" onPress={()=>void openImageCrop()}>Recortar imagen</TouchButton>}
           <button role="menuitem" disabled={!groupRef.current.length} onClick={()=>{copySelected();setContextMenu(null)}}>Copiar <small>Ctrl+C</small></button>
           <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" onClick={()=>{void pasteFromBoardMenu()}}>Pegar <small>Ctrl+V</small></button>
           <hr/>
@@ -4873,6 +4981,15 @@ function App() {
           <button data-workspace-write={nativeBoardMode() || undefined} role="menuitem" disabled={!groupRef.current.length} onClick={()=>{deleteSelected();setContextMenu(null)}}>Eliminar selección <small>Supr</small></button>
         </div></>}
       <div className="board-scene" ref={sceneRef} style={{transform:`translate(${cameraRef.current.x}px, ${cameraRef.current.y}px) scale(${cameraRef.current.zoom})`}}>
+      {mediaRef.current.filter(item=>item.kind==='audio'&&visibleAudioIds.includes(item.id)).map(item=><button key={item.id} type="button" className="audio-note-element" data-audio-id={item.id}
+        style={{left:item.x,top:item.y,width:item.width,height:item.height,transform:`rotate(${item.rotation??0}rad)`,zIndex:((item as GroupedItem).zIndex??-300000)*2}}
+        aria-label={boardAudio.playingId===item.id?'Pausar nota de audio':'Reproducir nota de audio'} title="Nota de audio · ← / →: 5 segundos"
+        onFocus={()=>{if(!groupRef.current.some(sel=>sel.kind==='media'&&sel.id===item.id))selectElement({kind:'media',id:item.id})}}
+        onPointerDown={e=>{e.stopPropagation();pointerDown(e as unknown as ReactPointerEvent<HTMLCanvasElement>)}}
+        onPointerMove={e=>{e.stopPropagation();pointerMove(e as unknown as ReactPointerEvent<HTMLCanvasElement>)}}
+        onPointerUp={e=>{e.stopPropagation();pointerUp(e as unknown as ReactPointerEvent<HTMLCanvasElement>)}}
+        onPointerCancel={e=>{e.stopPropagation();pointerCancel(e as unknown as ReactPointerEvent<HTMLCanvasElement>)}}
+        onClick={e=>{if(e.detail===0)void boardAudio.toggle(item)}}><AudioNoteIcon playing={boardAudio.playingId===item.id}/></button>)}
       <div className="sheet-static-layer" ref={staticTableLayerRef} data-version={tableRevision} onContextMenu={onBoardContextMenu}
         style={{transform:`translate(${cameraRef.current.x}px, ${cameraRef.current.y}px) scale(${cameraRef.current.zoom})`}}>
         {tablesRef.current.filter(table =>
@@ -5402,7 +5519,17 @@ function App() {
       {importStatus && <div className="importing">{importStatus}</div>}
       {tool==='connector'&&<div className="connector-instruction">Arrastrá desde un objeto hasta otro. Después podés editar el recorrido y las puntas.</div>}
       {selectionPicking&&<div className="chatgpt-selection-instruction" role="status">Marcá el área del manuscrito, imagen o PDF que querés enviar.<button onClick={()=>setSelectionPicking(false)}>Cancelar selección</button></div>}
-      {!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&groupRef.current.length===1&&groupRef.current[0].kind==='media'&&<TouchButton type="button" className="visual-edit-button" onPress={()=>void openImageCrop()}>Recortar imagen</TouchButton>}
+      {!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&groupRef.current.length===1&&groupRef.current[0].kind==='media'&&!selectedAudio&&<TouchButton type="button" className="visual-edit-button" onPress={()=>void openImageCrop()}>Recortar imagen</TouchButton>}
+      {audioDraft&&<>
+        <div ref={audioDraftRef} className="audio-note-draft" aria-hidden="true" style={{transform:`translate(${audioDraft.item.x*cam.zoom+cam.x}px,${audioDraft.item.y*cam.zoom+cam.y}px) scale(${cam.zoom})`}}><AudioNoteIcon/></div>
+        <div className="audio-note-status" role={audioDraft.error?'alert':'status'}>
+          <span>{audioDraft.phase==='permission'?'Esperando micrófono…':audioDraft.phase==='saving'?'Guardando audio…':audioDraft.phase==='error'?audioDraft.error:`● Grabando ${Math.floor(audioDraft.seconds/60)}:${String(audioDraft.seconds%60).padStart(2,'0')}`}</span>
+          {!audioDraft.placed&&<small>Hacé clic para ubicar la nota.</small>}
+          <button type="button" disabled={audioDraft.phase==='saving'} onClick={()=>void boardAudio.finish().catch(()=>{})}>{audioDraft.phase==='error'?'Reintentar guardado':'Confirmar (¿)'}</button>
+          <button type="button" disabled={audioDraft.phase==='saving'} onClick={discardAudioDraft}>Descartar (Esc)</button>
+        </div>
+      </>}
+      {boardAudio.error&&<div className="audio-note-status" role="alert"><span>{boardAudio.error}</span><button type="button" onClick={()=>{boardAudio.error='';refreshAudio(n=>n+1)}}>Cerrar</button></div>}
       {printPreview&&<A4PrintPreview value={printPreview} onClose={()=>{printRequestRef.current++;setPrintPreview(null)}}/>}
       {!visualEditor&&!openMenu&&groupRef.current.some(sel=>sel.kind==='shape'&&shapesRef.current.some(s=>s.id===sel.id&&s.visualType==='page'))&&<button type="button" className="visual-edit-button" onClick={()=>void printA4(true)}>Imprimir hojas A4 seleccionadas</button>}
       {!visualEditor && !treePanel && !openMenu && selectedTreeExpression() && <button type="button" className="visual-edit-button tree-expression-button"
@@ -5457,7 +5584,8 @@ function App() {
             if (editingRef.current) commitText()
           }}
           onKeyDown={e => {
-            if (e.key === 'Escape') { e.preventDefault(); cancelText() }
+            if (e.nativeEvent.isComposing) return
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); commitText(); canvasRef.current?.focus({preventScroll:true}) }
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commitText() }
           }}
         />

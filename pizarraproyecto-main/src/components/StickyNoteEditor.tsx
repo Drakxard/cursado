@@ -93,7 +93,7 @@ export default function StickyNoteEditor({ item, getPlacement, layoutRef, onAppl
     onKeyDown={event => {
       event.stopPropagation()
       if (event.nativeEvent.isComposing) return
-      if (event.key === 'Escape') { event.preventDefault(); cancel() }
+      if (event.key === 'Escape') { event.preventDefault(); apply() }
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); apply() }
     }}>
     <div ref={surface} className="inline-note-surface" style={{ visibility: 'hidden' }}>
@@ -112,8 +112,8 @@ export default function StickyNoteEditor({ item, getPlacement, layoutRef, onAppl
           {NOTE_COLORS.map((color, i) => <button type="button" key={color} aria-label={`Color de nota ${i + 1}`}
             aria-pressed={note.background === color} style={{ background: color }} onClick={() => patch({ background: color })} />)}
         </div>
-        <button type="button" aria-label="Aplicar" title="Guardar nota (Ctrl+Enter)" onClick={apply}><LuCheck /></button>
-        <button type="button" aria-label="Cancelar" title="Cancelar (Escape)" onClick={cancel}><LuX /></button>
+        <button type="button" aria-label="Aplicar" title="Guardar nota (Escape o Ctrl+Enter)" onClick={apply}><LuCheck /></button>
+        <button type="button" aria-label="Cancelar" title="Descartar cambios" onClick={cancel}><LuX /></button>
       </div>
       {!!note.alternatives?.length && <section className="visual-conflicts" aria-label="Ediciones simultáneas">
         <strong>Otra edición de esta nota</strong><p>Se conservaron ambas versiones. Revisalas antes de resolver.</p>

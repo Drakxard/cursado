@@ -10,6 +10,26 @@ from fastapi.testclient import TestClient
 
 
 class BackendTest(unittest.TestCase):
+    def test_board_audio_is_an_owned_resource_available_to_collaborators(self):
+        with TestClient(self.app,base_url='https://testserver') as owner, TestClient(self.app,base_url='https://testserver') as editor, TestClient(self.app,base_url='https://testserver') as outsider:
+            for client, name in [(owner,'Audio owner'),(editor,'Audio editor'),(outsider,'Audio outsider')]:
+                self.assertEqual(client.post('/api/auth/guest',json={'name':name,'password':'audio-password'}).status_code,200)
+            board=owner.post('/api/boards',json={'name':'Audio notes'}).json()['id']
+            token=owner.post(f'/api/share/boards/{board}',json={'role':'editor'}).json()['token']
+            self.assertEqual(editor.post('/api/share/join',json={'token':token}).status_code,200)
+            for index, mime in enumerate(['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4']):
+                asset=f'audio-note-{index}'
+                response=owner.put(f'/api/assets/{asset}',content=b'audio-bytes',headers={'Content-Type':mime})
+                self.assertEqual(response.status_code,200,response.text)
+                note={'id':asset,'assetId':asset,'kind':'audio','mimeType':mime,'durationMs':1000,'x':20,'y':30,'width':56,'height':56}
+                response=owner.put(f'/api/boards/{board}',json={'version':index,'content':{'strokes':[],'texts':[],'media':[note]}})
+                self.assertEqual(response.status_code,200,response.text)
+                audio=editor.get(f'/api/assets/{asset}')
+                self.assertEqual(audio.status_code,200)
+                self.assertEqual(audio.content,b'audio-bytes')
+                self.assertEqual(audio.headers['content-type'].split(';')[0],mime.split(';')[0])
+                self.assertEqual(outsider.get(f'/api/assets/{asset}').status_code,404)
+
     def test_shared_board_removal_is_personal_for_creator_editor_and_viewer(self):
         with TestClient(self.app,base_url='https://testserver') as owner,TestClient(self.app,base_url='https://testserver') as editor,TestClient(self.app,base_url='https://testserver') as viewer,TestClient(self.app,base_url='https://testserver') as outsider:
             for client,name in [(owner,'Hidden owner'),(editor,'Hidden editor'),(viewer,'Hidden viewer'),(outsider,'Hidden outsider')]:
