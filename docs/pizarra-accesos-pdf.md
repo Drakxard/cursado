@@ -21,7 +21,7 @@ acceso no fija automáticamente la copia; eliminarlo también retira su icono.
 Arrastrar un acceso perteneciente a la selección múltiple conserva el grupo.
 Soltar esa selección no abre un PDF accidentalmente.
 
-No se precargan lectores PDF. Cerrar un lector desmonta su iframe y conserva
+No se precargan lectores PDF. El ?ltimo PDF fijado permanece cargado al ocultarlo durante la sesi?n de la pizarra: ?<? y su bot?n alternan su visibilidad instant?neamente. Se retiene como m?ximo un lector, sin foco ni interacci?n mientras est? oculto; cambiar de pizarra, reemplazar el lector o recargar lo libera. Cerrar un lector no fijado desmonta su iframe y conserva
 solo su página, zoom y desplazamiento para restaurarlos al reabrir. Se guardan
 hasta 50 posiciones por pizarra, incluso al alternar documentos. Recargar
 la página o cambiar de pizarra reinicia esta memoria. Ver [mediciones de memoria](pizarra-memoria.md).
@@ -33,3 +33,5 @@ GitHub Actions ejecuta las pruebas de `pdf-shortcuts.spec.mjs`, incluidas
 fijación, pulsación prolongada, guardado, movimiento grupal, alternancia entre
 lectores, liberación de los PDF cerrados y cinco cambios de deshacer. La validación del servidor se comprueba
 con `tests/pdf_shortcuts.test.py`.
+
+Las actualizaciones se descargan en segundo plano y se usan en la próxima apertura. Nunca recargan la sesión abierta ni cierran sus editores o ventanas.

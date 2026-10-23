@@ -82,7 +82,7 @@ jobs:
         run: npm run test:browser -- tests/browser/offline-study.spec.mjs tests/browser/app-update.spec.mjs tests/browser/pdf-shortcuts.spec.mjs
         working-directory: pizarraproyecto-main
       - name: Edición directa de notas adhesivas en escritorio y móvil
-        run: npm run test:browser -- tests/browser/sticky-notes.spec.mjs
+        run: npm run test:browser -- tests/browser/sticky-notes.spec.mjs tests/browser/text-escape.spec.mjs tests/browser/board-links.spec.mjs tests/browser/collaboration.spec.mjs
         working-directory: pizarraproyecto-main
       - name: Guardar capturas y diagnósticos
         if: always()
@@ -143,7 +143,7 @@ jobs:
           done
           curl --silent --fail http://localhost:3000/ > /dev/null
           node --test tests/cooperation-weeks.browser.mjs
-          node --test --test-name-pattern="pin follows" tests/board-library.browser.mjs
+          node --test tests/board-library.browser.mjs
       - name: Guardar capturas y diagnósticos de cooperación
         if: always()
         uses: actions/upload-artifact@v4

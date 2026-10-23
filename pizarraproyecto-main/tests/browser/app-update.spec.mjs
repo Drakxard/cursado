@@ -89,7 +89,7 @@ test('old offline shell upgrades with another old tab open, preserving boards an
     const value=await new Promise(resolve=>{const r=db.transaction('meta').objectStore('meta').get('ocr-learning-sentinel');r.onsuccess=()=>resolve(r.result)});db.close();return value
   })).toBe('palabra aprendida')
 })
-test('automatic update waits for a pen stroke and saves it before reloading',async({page})=>{
+test('silent updates never reload an idle board and preserve its stroke',async({page})=>{
   test.setTimeout(60000);generation='current'
   await page.goto(site);await page.getByRole('button',{name:'Abrir privadas y copias de este dispositivo'}).click()
   await expect(page.locator('.library-open-button')).toContainText('privada')
@@ -102,7 +102,12 @@ test('automatic update waits for a pen stroke and saves it before reloading',asy
   await page.waitForTimeout(2500)
   await expect(page.locator('script[type="module"]')).toHaveAttribute('src',mainScript)
   await expect(page.getByRole('button',{name:'Actualizar app',exact:true})).toHaveCount(0)
-  await Promise.all([page.waitForEvent('load'),page.mouse.up()])
+  await page.mouse.up()
+  await page.waitForTimeout(6000)
+  await expect(page.locator('script[type="module"]')).toHaveAttribute('src',mainScript)
+  await expect.poll(async()=>(await saved(page)).content.strokes.length).toBe(1)
+  await expect(page.locator('.app-update')).toHaveCount(0)
+  await page.reload()
   await expect(page.locator('script[type="module"]')).toHaveAttribute('src','/pizarra/assets/index-next.js')
   await expect(page.locator('.library-open-button')).toContainText('privada')
   expect(await page.evaluate(()=>localStorage.getItem('pizarra_activa'))).toBe(id)
@@ -110,7 +115,7 @@ test('automatic update waits for a pen stroke and saves it before reloading',asy
   await expect(page.locator('.app-update')).toHaveCount(0)
 })
 
-test('automatic update waits until note editing ends and preserves the text',async({page})=>{
+test('silent updates preserve an open note and never reload after editing',async({page})=>{
   test.setTimeout(60000);generation='current'
   await page.goto(site);await page.getByRole('button',{name:'Abrir privadas y copias de este dispositivo'}).click()
   await expect(page.locator('.library-open-button')).toContainText('privada')
@@ -124,7 +129,12 @@ test('automatic update waits until note editing ends and preserves the text',asy
   await page.waitForTimeout(2500)
   await expect(page.locator('script[type="module"]')).toHaveAttribute('src',mainScript)
   await expect(text).toHaveValue('Texto conservado durante la actualización')
-  await Promise.all([page.waitForEvent('load'),page.mouse.click(100,260)])
+  await page.mouse.click(100,260)
+  await page.waitForTimeout(6000)
+  await expect(page.locator('script[type="module"]')).toHaveAttribute('src',mainScript)
+  await expect.poll(async()=>(await saved(page))?.content.shapes[0]?.note?.text).toBe('Texto conservado durante la actualizaci\u00f3n')
+  await expect(page.locator('.app-update')).toHaveCount(0)
+  await page.reload()
   await expect(page.locator('script[type="module"]')).toHaveAttribute('src','/pizarra/assets/index-next.js')
   await expect.poll(async()=>(await saved(page))?.content.shapes[0]?.note?.text).toBe('Texto conservado durante la actualización')
 })

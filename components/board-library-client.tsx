@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { AuthSession } from '@/lib/authz'
+import ImportantProgressView from './important-progress-view'
 import { SubjectWheelLoader } from './subject-wheel-loader'
 import { EmbeddedWorkspaceProvider } from './local-workspace-provider'
 import { PracticeViewerClient } from '@/app/practice/viewer/practice-viewer-client'
@@ -14,6 +15,7 @@ import { isLocalStorageMode } from '@/lib/storage-mode'
 export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
   const params = useSearchParams(), session = params.get('session'), boardId = params.get('boardId')
   const reader = params.get('mode') === 'reader'
+  const calendar = params.get('mode') === 'calendar'
   const [providedRoot,setProvidedRoot] = useState<FileSystemDirectoryHandle | null>(null)
   const [initialized,setInitialized] = useState(false)
   const [reference,setReference] = useState<BoardPdfReference | null>(null)
@@ -57,13 +59,13 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
       if(event.key!=='Escape' || event.defaultPrevented || event.repeat) return
       if(reader) {if(!viewerHost.current?.querySelector('iframe')){event.preventDefault();send('board-library:reader-closed')}return}
       if((event.target as Element)?.closest('input,textarea,select,[contenteditable=true]') || document.querySelector('[role=dialog],[role=alertdialog]')) return
-      event.preventDefault();send('board-library:escape')
+      event.preventDefault();send(calendar?'board-library:calendar-closed':'board-library:escape')
     }
     window.addEventListener('message',receive)
     window.addEventListener('keydown',escape)
     send('board-library:ready')
     return ()=>{window.removeEventListener('message',receive);window.removeEventListener('keydown',escape)}
-  },[session,boardId,reader])
+  },[session,boardId,reader,calendar])
   const root = providedRoot
   useEffect(()=>{
     if(!initialized || !isLocalStorageMode() || providedRoot)return
@@ -99,7 +101,7 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
     void pickWorkspaceRootHandle().then(handle=>{setReadyWorkspaceHandle(handle);setProvidedRoot(handle);setError('')}).catch(error=>setError(error.message))
   }}>Conectar carpeta</button>}{reader&&<button onClick={()=>send('board-library:reader-closed')}>Volver a la pizarra</button>}</main>
   if(!initialized || (isLocalStorageMode() && !root)) return <p role="status">Conectando la biblioteca…</p>
-  const content = reader ? <div ref={viewerHost} style={{height:'100dvh'}}>{resolved && reference
+  const content = calendar ? <ImportantProgressView active onBack={()=>send('board-library:calendar-closed')} initialCalendarTaskId={params.get('taskId')??undefined} /> : reader ? <div ref={viewerHost} style={{height:'100dvh'}}>{resolved && reference
     ? <PracticeViewerClient materialId={reference.materialId} mode="inline" boardReader onRequestClose={()=>send('board-library:reader-closed')} />
     : <p role="status">Buscando el PDF…</p>}</div>
     : <SubjectWheelLoader authSession={authSession} boardLibrary />

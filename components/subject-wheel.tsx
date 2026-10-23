@@ -1256,6 +1256,24 @@ function buildSynthesisSubjectSummary(subjectId: string, weekNumber: number, sta
   }
 }
 
+function ContainerBoardDragIcon({subjectId, boardKey, name}: {subjectId:string;boardKey:string;name:string}) {
+  const [boardId,setBoardId]=useState('')
+  const dragged=useRef(0)
+  useEffect(()=>{
+    let current=true
+    setBoardId('')
+    void crypto.subtle.digest('SHA-256',new TextEncoder().encode(boardKey)).then(hash=>{
+      if(current)setBoardId(localCooperationBoardId(subjectId,'study-'+Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join('')))
+    })
+    return()=>{current=false}
+  },[subjectId,boardKey])
+  return <span draggable={Boolean(boardId)&&!isNativeReadOnly()} title="Arrastrar acceso a esta pizarra"
+    onPointerDown={event=>event.stopPropagation()}
+    onClick={event=>{if(Date.now()-dragged.current<500){event.preventDefault();event.stopPropagation()}}}
+    onDragStart={event=>{dragged.current=Date.now();event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-cursado-board-link',JSON.stringify({boardId,name}))}}
+    onDragEnd={()=>{dragged.current=Date.now()}}><img draggable={false} src="/pizarra-home.svg" alt="" className="h-7 w-7 object-contain" /></span>
+}
+
 export function SubjectWheel({
   authSession,
   initialSearchParams,
@@ -6925,7 +6943,7 @@ export function SubjectWheel({
                       .map(material => ({ materialId: material.id, subjectId: material.subject_id, fileName: material.file_name,
                         workspaceFileId: material.drive_file_id?.startsWith("workspace://") ? material.drive_file_id : null })) }), `progreso/pizarras/${boardId}.json`)
                   })
-                }}><img src="/pizarra-home.svg" alt="" className="h-7 w-7 object-contain" /></button>}
+                }}><ContainerBoardDragIcon subjectId={currentSubject.id} name={`${currentSubject.name} - ${title}`} boardKey={JSON.stringify([canonicalCooperationSubject(currentSubject.id),canonicalCooperationElement(currentSubject.id,container?.id??mode),container?.isPinned?'pinned':isWeeklyExercisesScope?dialogSelectedWeekNumber:subjectDialogDateKey])} /></button>}
             {container?.kind === "custom" && activeContainerControlsId === container.id && editingContainerId !== container.id ? (
               <div className="flex shrink-0 items-center gap-0.5" aria-label={`Opciones de ${container.name}`}>
                 <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"

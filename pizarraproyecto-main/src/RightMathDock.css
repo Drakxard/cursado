@@ -70,3 +70,7 @@
 .math-system-header { font-weight:700; }
 .math-system-rowlabel { opacity:.65; }
 .math-system-grid .math-system-cell { width:100%; min-width:0; height:42px; padding:8px 3px; text-align:center; font-size:13px; border-radius:7px; background:var(--math-input,#fff); }
+
+.app[data-pdf-reader='true'] .math-dock:has(.math-dock-pdfs){z-index:10001;}
+.app[data-pdf-reader='true'] .math-dock>button{display:none;}
+.app[data-pdf-reader='true'] .math-dock-pdfs{border-top:0;padding-top:0;}

@@ -378,3 +378,28 @@ test('the embedded library exposes Importantes and topic links return through th
   await expect(page.locator('iframe[title^="Pizarra de"]')).toHaveCount(0)
   assert.deepEqual(errors,[])
 })
+
+
+test('countdown opens its Important calendar and all close controls return to the board',{timeout:150000},async t=>{
+  const {page,errors}=await setup(t)
+  const board=await openTopic(page)
+  const canvas=board.locator('.app canvas').first()
+  await canvas.evaluate(canvas=>{
+    const transfer=new DataTransfer();transfer.setData('application/x-cursado-important',JSON.stringify({taskId:'exam'}))
+    canvas.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer,clientX:250,clientY:300}))
+  })
+  await expect.poll(async()=>(await topicScene(page)).content.shapes?.length).toBe(1)
+  const calendar=board.frameLocator('iframe[title="Calendario de importantes"]')
+  for(const close of ['escape','back','x']){
+    await canvas.click({position:{x:280,y:326}})
+    await expect(calendar.locator('[data-calendar-gestures] h2')).toContainText('2026',{timeout:30000})
+    await expect(calendar.locator('[data-calendar-gestures] h2')).toContainText('diciembre')
+    await calendar.getByRole('button',{name:'Mes siguiente',exact:true}).click()
+    await expect(calendar.locator('[data-calendar-gestures] h2')).toContainText('2027')
+    if(close==='escape'){await calendar.getByRole('button',{name:'Mes siguiente',exact:true}).focus();await page.keyboard.press('Escape')}
+    else await calendar.getByRole('button',{name:close==='back'?'Volver a la pizarra':'Cerrar calendario',exact:true}).click()
+    await expect(board.locator('iframe[title="Calendario de importantes"]')).toHaveCount(0)
+    await expect(canvas).toBeFocused()
+  }
+  assert.deepEqual(errors,[])
+})
