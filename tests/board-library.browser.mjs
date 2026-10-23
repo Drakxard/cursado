@@ -408,6 +408,8 @@ test('countdown opens its Important calendar and all close controls return to th
 test('PDF container board icons drag links without opening their boards',{timeout:150000},async t=>{
   const {page,errors}=await setup(t)
   const board=await openTopic(page)
+  await board.getByRole('button',{name:'Agregar imagen o PDF',exact:true}).click()
+  await board.getByRole('button',{name:'▥ Biblioteca',exact:true}).click()
   await board.getByRole('button',{name:'Abrir mitad y mitad',exact:true}).click()
   const library=board.frameLocator('iframe[title="Biblioteca de Estudio"]')
   await library.getByRole('button',{name:/Cálculo 3/}).click({timeout:30000})

@@ -79,11 +79,14 @@ jobs:
           curl --silent --fail http://localhost:3000/ > /dev/null
           npm run test:integration
       - name: Actualizaciones y copias sin conexión de Pizarra
+        if: ${{ !cancelled() }}
         run: npm run test:browser -- tests/browser/offline-study.spec.mjs tests/browser/app-update.spec.mjs tests/browser/pdf-shortcuts.spec.mjs
         working-directory: pizarraproyecto-main
       - name: Importantes sin controles de promedio
+        if: ${{ !cancelled() }}
         run: node --test tests/important-progress.browser.mjs
       - name: Edición directa de notas adhesivas en escritorio y móvil
+        if: ${{ !cancelled() }}
         run: npm run test:browser -- tests/browser/sticky-notes.spec.mjs tests/browser/text-escape.spec.mjs tests/browser/board-links.spec.mjs tests/browser/collaboration.spec.mjs
         working-directory: pizarraproyecto-main
       - name: Guardar capturas y diagnósticos
