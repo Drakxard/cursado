@@ -12,6 +12,7 @@ on:
         options:
           - all
           - explanations
+          - interaction-ui
 
 permissions:
   contents: read
@@ -22,7 +23,7 @@ concurrency:
 
 jobs:
   checks:
-    if: ${{ inputs.focus != 'explanations' }}
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -101,7 +102,7 @@ jobs:
             ${{ runner.temp }}/cursado-next.log
 
   board-cooperation:
-    if: ${{ inputs.focus != 'explanations' }}
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' }}
     name: Pizarra, API chat y cooperación semanal
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -179,5 +180,27 @@ jobs:
         if: always()
         with:
           name: estrella-grafos-diagnosticos
+          if-no-files-found: ignore
+          path: test-results/
+
+
+  interaction-ui:
+    name: Interfaz de Importantes y cooperacion
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.focus == 'interaction-ui' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node --test --experimental-strip-types tests/important-progress.browser.mjs tests/cooperation-panel.browser.mts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: interaction-ui-diagnosticos
           if-no-files-found: ignore
           path: test-results/

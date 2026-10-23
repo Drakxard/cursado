@@ -62,7 +62,7 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     await page.getByLabel('Sincronización sin confirmar').waitFor()
     await page.context().setOffline(false)
     await page.getByLabel('Sincronización 100%').waitFor()
-    await page.getByRole('complementary', { name: 'Sincronización cooperativa' }).getByText(/Metadatos disponibles/).waitFor()
+    assert.equal(await page.getByRole('complementary', { name: 'Sincronizaci\u00f3n cooperativa' }).count(), 0)
     assert.doesNotMatch(await sphere.getAttribute('class'), /grayscale/)
     await sphere.click()
     assert.equal(await page.evaluate(() => (window as any).openedSubject), 'coop-subject')
