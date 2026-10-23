@@ -162,7 +162,7 @@ test('topic arrow keeps the board open on a save failure and closes after a succ
   await expect(page.locator('iframe[title^="Pizarra de"]')).toHaveCount(0)
 })
 
-test('pin follows the PDF, < reloads the reader with its zoom, API chat captures visible board layers',{timeout:150000},async t=>{
+test('pin follows the PDF, < retains the reader with its zoom, API chat captures visible board layers',{timeout:150000},async t=>{
   const {page,context,errors}=await setup(t)
   // Isolate board behavior from subject-catalog migrations, while keeping real PDF.js.
   await context.route('**/board-test.pdf',route=>route.fulfill({contentType:'application/pdf',body:Buffer.from(pdfBytes())}))
@@ -222,7 +222,7 @@ test('pin follows the PDF, < reloads the reader with its zoom, API chat captures
   await page.waitForTimeout(200)
   await pdf.locator('body').press('<')
   await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
-  await expect(board.locator('.board-pdf-reader iframe')).toHaveCount(0)
+  await expect(board.locator('.board-pdf-reader[aria-hidden="true"][inert] iframe')).toHaveCount(1)
   await canvas.press('<');await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
   await expect.poll(()=>pdf.locator('body').evaluate(()=>window.PDFViewerApplication?.pdfViewer?.currentScale)).toBe(1.5)
   await pdf.locator('body').press('<');await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
@@ -401,5 +401,32 @@ test('countdown opens its Important calendar and all close controls return to th
     await expect(board.locator('iframe[title="Calendario de importantes"]')).toHaveCount(0)
     await expect(canvas).toBeFocused()
   }
+  assert.deepEqual(errors,[])
+})
+
+
+test('PDF container board icons drag links without opening their boards',{timeout:150000},async t=>{
+  const {page,errors}=await setup(t)
+  const board=await openTopic(page)
+  await board.getByRole('button',{name:'Abrir mitad y mitad',exact:true}).click()
+  const library=board.frameLocator('iframe[title="Biblioteca de Estudio"]')
+  await library.getByRole('button',{name:/Cálculo 3/}).click({timeout:30000})
+  const icon=library.locator('button[aria-label^="Abrir pizarra de"] span[draggable="true"]').first()
+  await icon.waitFor({timeout:30000})
+  const data=await icon.evaluate(element=>{
+    const transfer=new DataTransfer()
+    element.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}))
+    element.click()
+    return transfer.getData('application/x-cursado-board-link')
+  })
+  const reference=JSON.parse(data)
+  assert.ok(reference.boardId.includes('study-'))
+  await expect(library.locator('iframe[title^="Pizarra de"]')).toHaveCount(0)
+  await board.locator('.app canvas').first().evaluate((canvas,data)=>{
+    const transfer=new DataTransfer();transfer.setData('application/x-cursado-board-link',data)
+    const rect=canvas.getBoundingClientRect()
+    canvas.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer,clientX:rect.left+200,clientY:rect.top+300}))
+  },data)
+  await expect.poll(async()=>(await topicScene(page)).content.shapes?.[0]?.boardReference).toEqual(reference)
   assert.deepEqual(errors,[])
 })

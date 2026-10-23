@@ -81,6 +81,8 @@ jobs:
       - name: Actualizaciones y copias sin conexión de Pizarra
         run: npm run test:browser -- tests/browser/offline-study.spec.mjs tests/browser/app-update.spec.mjs tests/browser/pdf-shortcuts.spec.mjs
         working-directory: pizarraproyecto-main
+      - name: Importantes sin controles de promedio
+        run: node --test tests/important-progress.browser.mjs
       - name: Edición directa de notas adhesivas en escritorio y móvil
         run: npm run test:browser -- tests/browser/sticky-notes.spec.mjs tests/browser/text-escape.spec.mjs tests/browser/board-links.spec.mjs tests/browser/collaboration.spec.mjs
         working-directory: pizarraproyecto-main
