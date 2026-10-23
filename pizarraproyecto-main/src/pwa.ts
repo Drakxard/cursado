@@ -1,26 +1,7 @@
-import { flushNavigationSaves } from './homeNavigation'
-
 type InstallPrompt=Event&{prompt:()=>Promise<{outcome:string}>;userChoice:Promise<{outcome:string}>}
 export type OfflineReadiness='preparing'|'ready'|'error'|'unsupported'
 let readiness:OfflineReadiness=import.meta.env.PROD&&'serviceWorker' in navigator?'preparing':'unsupported'
-let updateReady=false
-let beforeUpdate:(()=>Promise<void>)|null=null
-let canUpdate=()=>true
-let updating=false
 export function offlineReadiness(){return readiness}
-export function offlineUpdateReady(){return updateReady}
-export function beforeAppUpdate(save:()=>Promise<void>,ready=()=>true){beforeUpdate=save;canUpdate=ready;return()=>{if(beforeUpdate===save){beforeUpdate=null;canUpdate=()=>true}}}
-export async function applyAppUpdate(stillIdle=()=>true){
-  if(!updateReady||updating||!canUpdate()||!stillIdle())return false
-  updating=true
-  try{
-    await flushNavigationSaves()
-    if(beforeUpdate)await beforeUpdate()
-    if(!canUpdate()||!stillIdle())return false
-    window.location.reload()
-    return true
-  }finally{updating=false}
-}
 function publishReadiness(value:OfflineReadiness){readiness=value;window.dispatchEvent(new Event('pizarra-offline-ready'))}
 let prompt:InstallPrompt|null=null
 let installed=matchMedia('(display-mode: standalone)').matches||Boolean((navigator as Navigator&{standalone?:boolean}).standalone)
@@ -39,7 +20,6 @@ if(import.meta.env.PROD&&'serviceWorker' in navigator){
   const reportVersion=()=>navigator.serviceWorker.controller?.postMessage({type:'PIZARRA_CLIENT_VERSION',script:currentScript()})
   navigator.serviceWorker.addEventListener('message',event=>{
     if(event.data?.type!=='PIZARRA_VERSION'||!Array.isArray(event.data.scripts))return
-    updateReady=Boolean(currentScript()&&!event.data.scripts.includes(currentScript()))
     publishReadiness('ready')
   })
   navigator.serviceWorker.addEventListener('controllerchange',reportVersion)

@@ -37,7 +37,6 @@ import {cartesianHandles,resizeCartesian} from './canvas/cartesianResize'
 import type {CartesianHandle} from './canvas/cartesianResize'
 import {TRANSCRIPTION_PROMPT,transcriptionKey} from './assistant/transcription'
 import {deviceDB} from './storage/device'
-import {beforeAppUpdate} from './pwa'
 import StudyCheckIn from './components/StudyCheckIn'
 import {fitFollowCamera,followCycle} from './collaborationCamera'
 import type {CameraView} from './collaborationCamera'
@@ -782,7 +781,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const mediaRef = useRef<Rotatable<MediaItem>[]>([])
   const shapesRef = useRef<ShapeItem[]>([])
   const [libraryLinkDragging,setLibraryLinkDragging]=useState(false)
-  const materialLibrary = useBoardLibrary(getActiveBoardId())
+  const materialLibrary = useBoardLibrary(getActiveBoardId(),shapesRef.current.find(item=>item.pdfPinned)?.pdfReference?.materialId)
   useEffect(()=>{
     let stopped=false,busy=false
     const refresh=async()=>{if(busy)return;busy=true;try{await refreshCountdowns();if(!stopped)redraw()}catch{ /* Keep the last successful task snapshot on a transient read failure. */ }finally{busy=false}}
@@ -2164,9 +2163,6 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     }, isTopicWorkspace() ? (topicPeersRef.current ? 80 : 1800) : privateBoard() ? 400 : 80)
   }
 
-  useEffect(()=>beforeAppUpdate(flushBoardForHistory,()=>loadedRef.current&&pointerRef.current===null&&
-    !activeStroke.current&&!pdfPointer.current&&!touchPointersRef.current.size&&!importBusyRef.current&&
-    !recognizing&&!studyAssistant&&!apiChat&&!apiCaptureRef.current&&!imageCrop&&!materialLibrary.reader&&!materialLibrary.splitOpen&&!boardAudio.draft))
   useEffect(()=>beforeHome(async()=>{
     // There is nothing to commit if the initial board has not loaded yet.
     if(!loadedRef.current&&!dirtyRef.current)return
@@ -2783,13 +2779,6 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     return findAnchor(point,objects,resolveObject,16/cameraRef.current.zoom)
   }
 
-  function hitShapeAt(point:Point):ShapeItem|undefined {
-    return [...shapesRef.current].reverse().sort((a,b)=>(b.zIndex??-200000)-(a.zIndex??-200000)).find(item=>
-      isConnector(item)?hitsConnector(item,point,resolveObject,8/cameraRef.current.zoom):
-      item.visualType==='page'?shapeTouchesEraser(item,point,12/cameraRef.current.zoom):
-      overlaps({x:point.x,y:point.y,width:0,height:0},rotatedRect(item,item.rotation)))
-  }
-
   function hitSelectionAt(point:Point):Selection|undefined {
     return everySelection().map((sel,index)=>({sel,index,z:selectionZ(sel)})).sort((a,b)=>b.z-a.z||b.index-a.index).find(({sel})=>{
       if(sel.kind==='shape'){
@@ -3054,12 +3043,14 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     if(contextMenu) setContextMenu(null)
     if(loadedRef.current && !nativeBoardMode() && !selectionPicking && tool!=='eraser' && e.button===0 && !e.ctrlKey && !e.metaKey) {
       const hit = hitSelectionAt(toWorld(e.clientX,e.clientY))
-      const shortcut = hit?.kind==='shape' ? shapesRef.current.find(shape=>shape.id===hit.id&&(shape.visualType==='pdf-shortcut'||shape.visualType==='board-shortcut')) : null
-      if(shortcut?.pdfReference||shortcut?.boardReference) {
+      const shortcut = hit?.kind==='shape' ? shapesRef.current.find(shape=>shape.id===hit.id&&(shape.visualType==='pdf-shortcut'||shape.visualType==='board-shortcut'||shape.visualType==='important-countdown'||shape.visualType==='sticky')) : null
+      const editableText=hit?.kind==='text'&&tool!=='text'?textsRef.current.find(item=>item.id===hit.id):null
+      const interactive=shortcut??editableText
+      if(interactive&&(editableText||shortcut?.pdfReference||shortcut?.boardReference||shortcut?.importantTaskId||shortcut?.visualType==='sticky')) {
         e.preventDefault();finishPendingPen();if(editingRef.current)commitText()
         setTool('select')
-        if(!groupRef.current.some(item=>item.kind==='shape'&&item.id===shortcut.id))selectElement({kind:'shape',id:shortcut.id})
-        pdfPointer.current={pointerId:e.pointerId,id:shortcut.id,x:e.clientX,y:e.clientY,moved:false,
+        if(!groupRef.current.some(item=>item.kind===hit!.kind&&item.id===interactive.id))selectElement(hit!)
+        pdfPointer.current={pointerId:e.pointerId,id:interactive.id,x:e.clientX,y:e.clientY,moved:false,
           transform:{mode:'move',start:toWorld(e.clientX,e.clientY),bounds:groupBounds()!,initial:snapshot(),group:[...groupRef.current]}}
         e.currentTarget.setPointerCapture(e.pointerId);return
       }
@@ -3357,7 +3348,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       pdfPointer.current=null
       if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId)
       if(pdf.moved)scheduleSave()
-      else if(pdf.transform.group.length===1){const shape=shapesRef.current.find(shape=>shape.id===pdf.id),reference=shape?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:pdf.id};materialLibrary.openReader(reference)}else if(shape?.boardReference)void followBoardLink(shape.boardReference.boardId)}
+      else if(pdf.transform.group.length===1){const shape=shapesRef.current.find(shape=>shape.id===pdf.id),reference=shape?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:pdf.id};materialLibrary.openReader(reference,!!shape?.pdfPinned)}else if(shape?.importantTaskId)materialLibrary.openCalendar(shape.importantTaskId);else if(shape?.boardReference)void followBoardLink(shape.boardReference.boardId)}
       return
     }
     if(cartesianDragRef.current&&e.pointerId===pointerRef.current){moveCartesianResize(toWorld(e.clientX,e.clientY));finishCartesianResize();return}
@@ -3924,12 +3915,18 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
 
   function onCanvasDoubleClick(e:ReactMouseEvent<HTMLCanvasElement>) {
     const point=toWorld(e.clientX,e.clientY)
-    const visual=hitShapeAt(point)
-    if(visual && (visual.visualType || visual.label!==undefined)) {
-      selectElement({kind:'shape',id:visual.id});setVisualEditor(visual.symbol==='cartesian'?null:visual.id);return
+    if(nativeBoardMode()||!loadedRef.current||selectionPicking)return
+    const hit=hitSelectionAt(point)
+    if(hit?.kind==='text'){selectElement(hit);startText(point);return}
+    if(hit?.kind==='shape'){
+      const visual=shapesRef.current.find(item=>item.id===hit.id)
+      if(visual&&(visual.visualType||visual.label!==undefined)){
+        if(['pdf-shortcut','board-shortcut','important-countdown'].includes(visual.visualType??''))return
+        selectElement(hit);setVisualEditor(visual.symbol==='cartesian'?null:visual.id);return
+      }
     }
-    const table=[...tablesRef.current].reverse().find(item=>overlaps({x:point.x,y:point.y,width:0,height:0},tableSize(item)))
-    if(table){selectElement({kind:'table',id:table.id});setTableEditorId(table.id);setExcelNotice('')}
+    if(hit?.kind==='table'){selectElement(hit);setTableEditorId(String(hit.id));setExcelNotice('')}
+
   }
 
   // Un solo importador para el botón +, archivos arrastrados y Ctrl+V.
@@ -4953,6 +4950,12 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return
       if(e.isComposing||apiChat)return
+      if((e.ctrlKey||e.metaKey)&&!e.altKey&&!e.repeat&&loadedRef.current&&!nativeBoardMode()&&!editingRef.current&&!imageCrop&&!studyAssistant&&!treePanel&&!libraryOpen){
+        const key=e.key.toLowerCase()
+        if(key==='z'||(key==='y'&&!e.shiftKey)){
+          e.preventDefault();if(key==='y'||e.shiftKey)redo();else undo();return
+        }
+      }
       if(e.key==='!'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat&&!editingRef.current&&!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&!treePanel&&!materialLibrary.reader&&!nativeBoardMode()&&loadedRef.current&&!boardAudio.draft){
         e.preventDefault();insertReviewMarker();return
       }
@@ -4980,7 +4983,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         const pinned=shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).slice(-1)
         const last=lastPinnedPdfRef.current
         const item=pinned.find(item=>last?.boardId===getActiveBoardId()&&item.id===last.id)??pinned[0]
-        if(item?.pdfReference){e.preventDefault();lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:item.id};materialLibrary.openReader(item.pdfReference)}
+        if(item?.pdfReference){e.preventDefault();lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:item.id};materialLibrary.openReader(item.pdfReference,true)}
         return
       }
       if (nativeBoardMode() && !((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) return
@@ -5030,8 +5033,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       const shortcuts: Record<string, Tool> = { p: 'pen', t: 'text', e: 'eraser', h: 'pan', v: 'select', c:'connector' }
       if (shortcuts[key]) { e.preventDefault(); selectTool(shortcuts[key]); setOpenMenu(null) }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown,true)
+    return () => window.removeEventListener('keydown', onKeyDown,true)
   }, [apiChat, imageCrop, studyAssistant, libraryOpen, treePanel, selectionError, handwrittenEvent, handwrittenError, openMenu, importStatus, recognizing, boardSearchOpen, contextMenu, materialLibrary.reader, materialLibrary.splitOpen])
 
   const cam = cameraRef.current
@@ -5070,7 +5073,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     : []
   const selectedDayLabel = selectedCalendarDate ? (() => { const [y,m,d] = selectedCalendarDate.split('-').map(Number); return `${d} de ${new Intl.DateTimeFormat('es-AR', { month: 'long' }).format(new Date(y,m-1,d))}` })() : ''
   return (
-    <div className="app" inert={navigationBusy} data-board-id={getActiveBoardId()} data-theme={theme} data-tool={tool} data-control-navigation={controlNavigation} data-library-split={materialLibrary.splitOpen}
+    <div className="app" inert={navigationBusy} data-board-id={getActiveBoardId()} data-theme={theme} data-tool={tool} data-control-navigation={controlNavigation} data-library-split={materialLibrary.splitOpen} data-pdf-reader={Boolean(materialLibrary.reader)}
       style={materialLibrary.splitOpen ? {right:'50%'} : undefined}
       onPointerDownCapture={captureScenePointerDown} onPointerMoveCapture={captureScenePointerMove}
       onPointerUpCapture={captureScenePointerUp} onPointerCancelCapture={captureScenePointerCancel}
@@ -5078,7 +5081,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       onAuxClick={e=>{if(e.button===1&&(e.target as HTMLElement).closest('canvas,.board-scene'))e.preventDefault()}}
       onDragEnter={onFileDragEnter} onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave} onDrop={onFileDrop}>
-      {liveBoardId && (!privateBoard(liveBoardId) || (isTopicWorkspace() && liveUsers.length > 0)) && <aside className="live-presence" aria-label="Usuarios activos en esta pizarra">
+      {liveBoardId && liveUsers.some(user=>user.id!==liveSelf) && (!privateBoard(liveBoardId) || (isTopicWorkspace() && liveUsers.length > 0)) && <aside className="live-presence" aria-label="Usuarios activos en esta pizarra">
         <span className={`live-presence-state ${liveConnected?'':'disconnected'}`} title={liveConnected?'Conectado':'Reconectando'} />
         {liveUsers.map(user=><button type="button" key={user.id}
           className={`live-presence-avatar ${user.id===liveSelf?'live-presence-self':''} ${following===user.id?'following':''}`}
@@ -5448,7 +5451,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       })()}
       <RightMathDock getSelection={getMathSelectionForDock} addGraphToBoard={(formulas,settings)=>insertBoardGraph(formulas,undefined,settings)}
         pinnedPdfs={shapesRef.current.filter(item=>item.visualType==='pdf-shortcut'&&item.pdfPinned&&item.pdfReference).slice(-1).map(item=>({id:item.id,name:item.label||item.pdfReference!.fileName.replace(/\.pdf$/i,'')}))}
-        onOpenPdf={id=>{const reference=shapesRef.current.find(item=>item.id===id)?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id};materialLibrary.openReader(reference)}}}
+        onOpenPdf={id=>{const reference=shapesRef.current.find(item=>item.id===id)?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id};materialLibrary.reader?.materialId===reference.materialId?materialLibrary.closeReader():materialLibrary.openReader(reference,true)}}}
         onRevealPdf={revealPdfShortcut}
         getSelectedMatrix={()=>{
           const selected=groupRef.current

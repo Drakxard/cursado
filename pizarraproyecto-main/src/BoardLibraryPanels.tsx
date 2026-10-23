@@ -3,22 +3,27 @@ import type { BoardPdfReference } from '../../lib/board-library-contract'
 import { getTopicWorkspaceRoot } from './topicWorkspace'
 import { isNativeReadOnly, openNativePdf } from '../../lib/native-workspace'
 
-// Retain only reading coordinates while closed, never a hidden PDF document.
-export function useBoardLibrary(boardId: string) {
+// Retain at most the last pinned reader during this board session.
+export function useBoardLibrary(boardId: string, pinnedMaterialId?: number) {
   const native = isNativeReadOnly()
   const [nativeError, setNativeError] = useState('')
   const nativeRequest = useRef<AbortController | null>(null)
   const nativeReference = useRef<BoardPdfReference | null>(null)
   const [splitOpen,setSplitOpen] = useState(false)
   const [reader,setReader] = useState<BoardPdfReference | null>(null)
+  const [retained,setRetained] = useState<BoardPdfReference | null>(null)
+  const [calendarTask,setCalendarTask] = useState<string | null>(null)
+  useEffect(()=>{
+    if(retained&&retained.materialId!==pinnedMaterialId)setRetained(null)
+  },[pinnedMaterialId,retained])
   const libraryFrame = useRef<HTMLIFrameElement>(null)
   const readerFrames = useRef(new Map<number, HTMLIFrameElement>())
   const readingPositions = useRef(new Map<number, string>())
   const [ready, setReady] = useState<Set<number>>(new Set())
   const session = useMemo(()=>crypto.randomUUID(),[boardId])
-  const frames = useRef({reader,boardId,session})
-  frames.current = {reader,boardId,session}
-  useEffect(()=>{setSplitOpen(false);setReader(null);readingPositions.current.clear();setReady(new Set())},[boardId])
+  const frames = useRef({reader,retained,boardId,session})
+  frames.current = {reader,retained,boardId,session}
+  useEffect(()=>{setSplitOpen(false);setReader(null);setRetained(null);setCalendarTask(null);readingPositions.current.clear();setReady(new Set())},[boardId])
   useEffect(() => {
     setNativeError('')
     return () => { nativeRequest.current?.abort(); nativeRequest.current = null }
@@ -33,7 +38,7 @@ export function useBoardLibrary(boardId: string) {
       if(event.data.type === 'board-library:ready') {
         const target = readerEntry ? readerEntry[1] : libraryFrame.current
         target?.contentWindow?.postMessage({type:'board-library:init',session,boardId,
-          rootHandle:getTopicWorkspaceRoot(),reference:readerEntry ? frames.current.reader : null,
+          rootHandle:getTopicWorkspaceRoot(),reference:readerEntry ? frames.current.reader ?? frames.current.retained : null,
           readingPosition:readerEntry ? readingPositions.current.get(readerEntry[0]) : undefined},location.origin)
       }
       if(event.data.type === 'board-library:reading-position' && readerEntry && typeof event.data.hash === 'string' && event.data.hash.length <= 512) {
@@ -45,8 +50,9 @@ export function useBoardLibrary(boardId: string) {
         setSplitOpen(false)
         document.querySelector<HTMLCanvasElement>('.app canvas')?.focus()
       }
+      if(event.data.type === 'board-library:calendar-closed' && isLibrary) {setCalendarTask(null);document.querySelector<HTMLCanvasElement>('.app canvas')?.focus()}
       if(event.data.type === 'board-library:reader-closed' && readerEntry && readerEntry[0]===frames.current.reader?.materialId) {
-        setReader(null);setReady(new Set())
+        setReader(null);if(!frames.current.retained)setReady(new Set())
         document.querySelector<HTMLCanvasElement>('.app canvas')?.focus()
       }
     }
@@ -74,10 +80,11 @@ export function useBoardLibrary(boardId: string) {
     <p>{nativeError}</p><button onClick={() => { if (nativeReference.current) openNativeReader(nativeReference.current) }}>Reintentar</button>
     <button onClick={() => setNativeError('')}>Cerrar</button>
   </div>) : <>
-    {splitOpen && <iframe ref={libraryFrame} className="board-material-library" title="Biblioteca de Estudio"
+    {calendarTask && <div className="board-pdf-reader" role="dialog" aria-modal="true" aria-label="Calendario de importantes"><iframe ref={libraryFrame} title="Calendario de importantes" src={`/biblioteca/pizarra?mode=calendar&taskId=${encodeURIComponent(calendarTask)}&session=${session}&boardId=${encodeURIComponent(boardId)}`} /></div>}
+    {splitOpen && !calendarTask && <iframe ref={libraryFrame} className="board-material-library" title="Biblioteca de Estudio"
       src={`/biblioteca/pizarra?session=${session}&boardId=${encodeURIComponent(boardId)}`} />}
     {/* Keep iframe DOM order stable: moving an iframe reloads its document in Chromium. */}
-    {(reader ? [reader] : []).map(reference => {
+    {(reader ?? retained ? [reader ?? retained!] : []).map(reference => {
       const visible = reader?.materialId === reference.materialId && ready.has(reference.materialId)
       return <div key={`${boardId}:${reference.materialId}`} className="board-pdf-reader" role={visible ? 'dialog' : undefined}
         aria-modal={visible || undefined} aria-hidden={!visible} inert={!visible} aria-label={`Leer ${reference.fileName.replace(/\.pdf$/i,'')}`}
@@ -87,12 +94,14 @@ export function useBoardLibrary(boardId: string) {
       </div>
     })}
   </>
-  return {splitOpen,setSplitOpen,reader,openReader:(reference:BoardPdfReference)=>{
+  return {splitOpen,setSplitOpen,reader,openCalendar:(taskId:string)=>{setSplitOpen(false);setCalendarTask(taskId)},openReader:(reference:BoardPdfReference, retain=false)=>{
     if (native) { openNativeReader(reference); return }
+    setRetained(retain?reference:null)
     if(!readerFrames.current.has(reference.materialId))setReady(new Set())
     setReader(reference)
   },panels,
     closeReader:()=>{
+      if(retained?.materialId===reader?.materialId) {setReader(null);document.querySelector<HTMLCanvasElement>('.app canvas')?.focus();return}
       if(!ready.has(reader?.materialId ?? -1)) {setReader(null);setReady(new Set());return}
       readerFrames.current.get(reader?.materialId ?? -1)?.contentWindow?.postMessage({type:'board-library:escape-reader',session,boardId},location.origin)
     }}

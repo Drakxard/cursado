@@ -9,13 +9,13 @@ import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X, Plus } from "lucide
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 
-function HoldableTaskRow({ children, label, onHold, onHover }: { children: ReactNode; label: string; onHold: () => void; onHover: (hovered: boolean) => void }) {
+function HoldableTaskRow({ children, label, onHold }: { children: ReactNode; label: string; onHold: () => void }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const origin = useRef({ x: 0, y: 0 })
   const cancel = () => { if (timer.current !== null) clearTimeout(timer.current); timer.current = null }
   useEffect(() => cancel, [])
   return <div className="relative overflow-hidden bg-card border rounded-lg shadow-sm" role="group" aria-label={`Fila ${label}`} tabIndex={0}
-    onMouseEnter={() => onHover(true)} onMouseLeave={() => { onHover(false); cancel() }}
+    onMouseLeave={cancel}
     onPointerDown={event => {
       if (isNativeReadOnly()) return
       if (!event.isPrimary || event.button !== 0 || (event.target as Element).closest('button, input, textarea, select, a, [data-row-activation-stop="true"]')) return
@@ -252,13 +252,11 @@ import { importantCountdownStyle, importantTaskProgress, readImportantTasks, wri
 import { useLocalWorkspace } from "@/components/local-workspace-provider"
 
 // UI copied from progreso/components/progress-tracker.tsx; only local persistence and study navigation are adapted.
-export default function ImportantProgressView({ active, onBack }: { active: boolean; onBack: () => void }) {
+export default function ImportantProgressView({ active, onBack, initialCalendarTaskId }: { active: boolean; onBack: () => void; initialCalendarTaskId?: string }) {
   const currentTableIndex = 0
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState("")
   const isTransitioning = false
-  const [showAverageLine, setShowAverageLine] = useState(false)
-  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [topicInputs, setTopicInputs] = useState<Record<string, string>>({})
   const [addingTopicId, setAddingTopicId] = useState<string | null>(null)
@@ -275,7 +273,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
   >([])
   const [eventIndex, setEventIndex] = useState(0)
   const [eventZoom, setEventZoom] = useState(2)
-  const [isCalendarMode, setIsCalendarMode] = useState(false)
+  const [isCalendarMode, setIsCalendarMode] = useState(Boolean(initialCalendarTaskId))
   const [calendarDate, setCalendarDate] = useState(new Date())
   const moveCalendarMonth = useCallback((direction: number) => {
     setCalendarDate(prev => new Date(prev.getFullYear(), prev.getMonth() + direction, 1))
@@ -302,6 +300,10 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
     setStorageError("")
     if (rootHandle && isReady) readImportantTasks(rootHandle, isNativeReadOnly()).then(tasks => {
       if (!subscribed) return
+      if(initialCalendarTaskId){
+        const task=tasks.find(task=>task.id===initialCalendarTaskId)
+        if(task){const [year,month,day]=task.dueDate.split('-').map(Number);setCalendarDate(new Date(year,month-1,day))}
+      }
       setTables([{ title: "Importantes", tasks: tasks.map(task => {
         const progress = importantTaskProgress(task)
         return { id: task.id, text: task.text, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
@@ -310,7 +312,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
       setIsLoading(false)
     }).catch(error => { if (subscribed) { setStorageError(String(error)); setIsLoading(false) } })
     return () => { subscribed = false }
-  }, [rootHandle, isReady, active])
+  }, [rootHandle, isReady, active, initialCalendarTaskId])
   useEffect(() => {
     if (!active || !loaded.current) return
     setTables(previous => {
@@ -422,7 +424,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
         if (event.key === "Escape") {
           event.preventDefault()
           setCalendarSelection(null)
-          setIsCalendarMode(false)
+          if(initialCalendarTaskId)onBack();else setIsCalendarMode(false)
           return
         }
         if (event.key === "ArrowRight") {
@@ -499,55 +501,12 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, onBack, active, selectedTopicBoard, deleteTarget])
+  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, onBack, active, selectedTopicBoard, deleteTarget, initialCalendarTaskId])
 
   const currentTable = tables[currentTableIndex]
   const getProgressPercentage = (numerator: number, denominator: number) => {
     if (denominator === 0) return 0
     return Math.min((numerator / denominator) * 100, 100)
-  }
-
-  const calculateAveragePercentage = () => {
-    const currentTasks = currentTable.tasks
-    const totalPercentage = currentTasks.reduce((sum, task) => {
-      return sum + getProgressPercentage(task.numerator, task.denominator)
-    }, 0)
-    return currentTasks.length ? Math.round(totalPercentage / currentTasks.length) : 0
-  }
-
-  const calculatePdfsNeeded = (task: TaskItem) => {
-    const currentTasks = currentTable.tasks
-    const currentPercentage = getProgressPercentage(task.numerator, task.denominator)
-
-    // Calcular la media actual
-    const currentAverage = calculateAveragePercentage()
-
-    if (currentPercentage >= currentAverage) return 0
-
-    let pdfsNeeded = 0
-    let testNumerator = task.numerator
-
-    while (pdfsNeeded < task.denominator) {
-      testNumerator = task.numerator + pdfsNeeded
-
-      const newTotalPercentage = currentTasks.reduce((sum, t) => {
-        if (t.id === task.id) {
-          return sum + getProgressPercentage(testNumerator, t.denominator)
-        }
-        return sum + getProgressPercentage(t.numerator, t.denominator)
-      }, 0)
-
-      const newAverage = newTotalPercentage / currentTasks.length
-      const newTaskPercentage = getProgressPercentage(testNumerator, task.denominator)
-
-      if (newTaskPercentage >= newAverage) {
-        break
-      }
-
-      pdfsNeeded++
-    }
-
-    return pdfsNeeded
   }
 
   const getIconAndColor = (daysRemaining: number) => {
@@ -650,6 +609,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <CalendarGestures onMonthChange={moveCalendarMonth}>
+          {initialCalendarTaskId&&<Button variant="ghost" onClick={onBack}>Volver a la pizarra</Button>}
           <div className="flex items-center justify-between mb-4 gap-2">
             <Button
               variant="ghost"
@@ -699,7 +659,7 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                 size="icon"
                 onClick={() => {
                   setCalendarSelection(null)
-                  setIsCalendarMode(false)
+                  if(initialCalendarTaskId)onBack();else setIsCalendarMode(false)
                 }}
                 aria-label="Cerrar calendario"
               >
@@ -786,19 +746,6 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
         </AlertDialogContent>
       </AlertDialog>
       {storageError && <p role="alert" className="text-red-600">{storageError}</p>}
-      <div className="fixed top-6 right-6 z-30">
-        <Button
-          onClick={() => setShowAverageLine(!showAverageLine)}
-          className="w-16 h-16 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
-          size="lg"
-        >
-          <div className="flex flex-col items-center">
-            <span className="text-xs text-white font-bold">Plus +</span>
-            <span className="text-xs text-white font-bold">{calculateAveragePercentage()}%</span>
-          </div>
-        </Button>
-      </div>
-
       <div className="max-w-4xl mx-auto">
         <h1
           className={`text-3xl font-bold mb-8 text-center transition-all duration-300 ${isTransitioning ? "opacity-0 transform scale-95" : "opacity-100 transform scale-100"}`}
@@ -815,17 +762,11 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                 ? task.days
                 : Math.max(task.denominator - task.numerator, 0)
             const { icon: IconComponent, bgColor, iconColor } = getIconAndColor(daysRemaining)
-            const currentPercentage = getProgressPercentage(task.numerator, task.denominator)
-            const averagePercentage = calculateAveragePercentage()
-            const isBelowAverage = currentPercentage < averagePercentage
-            const isHovered = hoveredTaskId === task.id
-            const missingPdfs = calculatePdfsNeeded(task)
             return (
               <HoldableTaskRow
                 key={task.id}
                 label={task.text || "Sin nombre"}
                 onHold={() => setDeleteTarget({ kind: "task", taskId: task.id, label: task.text })}
-                onHover={hovered => setHoveredTaskId(hovered ? task.id : null)}
               >
                 <div
                   className={`absolute top-0 right-0 z-20 flex items-center gap-1 bg-gradient-to-r ${bgColor} text-white px-2 py-1 rounded-bl-lg text-xs font-bold shadow-lg cursor-pointer`}
@@ -888,28 +829,6 @@ export default function ImportantProgressView({ active, onBack }: { active: bool
                     width: `${getProgressPercentage(task.numerator, task.denominator)}%`,
                   }}
                 />
-
-                {showAverageLine && (
-                  <div
-                    className="absolute top-0 bottom-0 w-0.5 z-15 shadow-sm transition-all duration-300"
-                    style={{
-                      left: `${calculateAveragePercentage()}%`,
-                      background:
-                        showAverageLine && isHovered && isBelowAverage
-                          ? "linear-gradient(to bottom, #374151 0%, #374151 100%)"
-                          : "repeating-linear-gradient(to bottom, #ef4444 0px, #ef4444 4px, transparent 4px, transparent 8px)",
-                    }}
-                  >
-                    {showAverageLine && isHovered && isBelowAverage && (
-                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full bg-gradient-radial from-white via-gray-200 to-gray-800 flex items-center justify-center shadow-lg z-30">
-                        <div className="text-center">
-                          <div className="text-xs font-bold text-gray-800">Faltan</div>
-                          <div className="text-sm font-bold text-gray-900">{missingPdfs} pdfs</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 <div className="relative z-10 grid min-h-[6.5rem] grid-cols-1 gap-3 p-3 pr-6 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2fr)] sm:items-center sm:gap-5 sm:pr-16">
                   <div className="flex min-w-0 flex-col items-start gap-2">
