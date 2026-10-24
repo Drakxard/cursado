@@ -2,7 +2,7 @@
 .math-dock button { width:41px; height:41px; border:0; border-radius:11px; display:grid; place-items:center; background:transparent; color:var(--math-text,#202938); cursor:pointer; }
 .math-dock button.math-dock-active,.math-dock button:hover { background:var(--math-active,#e5e9ff); color:var(--math-accent,#505de3); }
 .math-dock {max-height:calc(100dvh - 180px);}
-.app[data-library-split='true'] .math-dock {right:calc(50vw + 14px);}
+.app[data-library-split='true']:not([data-pdf-reader='true']) .math-dock {right:calc(50vw + 14px);}
 .math-dock>button,.math-dock-pdfs button {flex-shrink:0;}
 .math-dock-pdfs {display:flex;flex-direction:column;gap:7px;min-height:0;max-height:40dvh;overflow-y:auto;border-top:1px solid var(--math-border,#d4d9e2);padding-top:7px;}
 .pinned-pdf-button {touch-action:pan-y;user-select:none;-webkit-touch-callout:none;}
