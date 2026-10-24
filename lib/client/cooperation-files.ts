@@ -85,14 +85,17 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
     if (!safeCooperationPath(path)) throw new Error('Una referencia de la esfera tiene una ruta inválida.')
     const scoped = path.split('/').some(part => ids.has(part) || ids.has(decodeURIComponent(part)))
     const derived = path.startsWith('manifests/pdf-explanations/') || path.startsWith('manifests/subject-voice/pdf/') || path.startsWith('sintesis/images/') || path.startsWith('progreso/pizarras/')
-    if (!scoped && !derived) throw new Error('La esfera referencia un archivo fuera de su carpeta. Reubicá ese archivo en la materia antes de cooperar.')
+    if (!scoped && !derived) throw new Error(`La esfera referencia «${path}», fuera de su carpeta. Reubicá ese archivo en la materia antes de cooperar.`)
     paths.add(path)
     const blob = await readFile(root, path)
     if (!blob) return
     const key = mapBindingText(path, b, false)
     if (path.endsWith('.json')) {
       const raw = await readJson<Json | undefined>(root, path, undefined)
-      if (raw === undefined) throw new Error(`El archivo local «${path}» está vacío. Completalo o restaurá su respaldo antes de compartir.`)
+      if (raw === undefined) {
+        if(path.startsWith('manifests/subject-voice/pdf/') || path.startsWith('manifests/pdf-explanations/'))return
+        throw new Error(`El archivo local «${path}» está vacío. Completalo o restaurá su respaldo antes de compartir.`)
+      }
       if (path.startsWith('progreso/pizarras/') && raw && typeof raw === 'object' && !Array.isArray(raw) && raw.assets && typeof raw.assets === 'object' && !Array.isArray(raw.assets)) {
         for (const [id, data] of Object.entries(raw.assets)) if (typeof data === 'string' && /^data:[^,]*;base64,/.test(data)) {
           const comma = data.indexOf(','), bytes = Uint8Array.from(atob(data.slice(comma + 1)), char => char.charCodeAt(0))
@@ -101,8 +104,9 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
           raw.assets[id] = `cooperation-asset:${hash}`
         }
       }
-      output.push({ key, value: mapBindingJson(stripPersonal(raw), b, false) })
-      await references(raw)
+      const shared=stripPersonal(raw)
+      output.push({ key, value: mapBindingJson(shared, b, false) })
+      await references(shared)
     } else output.push({ key, blob })
   }
   const references = async (value: Json): Promise<void> => {

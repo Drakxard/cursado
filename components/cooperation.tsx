@@ -123,15 +123,16 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
       </div>
       {!group.spheres.length && <p className="text-sm text-muted-foreground">Este grupo está vacío.</p>}
       <div className="flex flex-wrap gap-4">{group.spheres.map(sphere => {
-        const mirror = state.mirrors[sphere.id], ready = mirror && (!mirror.downloading || mirror.metadataReady)
+        const mirror = state.mirrors[sphere.id], ready = mirror && !mirror.copySource && (!mirror.downloading || mirror.metadataReady)
         const deleted = state.deletions.find(d => d.sphereId === sphere.id && d.key === 'sphere.json')
         if (deleted?.decision === 'delete') return null
         return <div key={sphere.id} className="max-w-48 text-center">
           <button className={`min-h-20 min-w-28 rounded-[50%] border-2 p-4 ${!ready || deleted?.decision === 'wait' ? 'opacity-40 grayscale' : ''}`} style={{ borderColor: sphere.color }} onClick={() => {
-            if (!ready) { if (sphere.ready !== false) setInvite(sphere); return }
+            if (!ready) { if (!mirror?.copySource && sphere.ready !== false) setInvite(sphere); return }
             else if (deleted?.decision === 'wait') window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending: deleted, open: () => onOpen(mirror.binding.subjectId, group.id) } }))
             else onOpen(mirror.binding.subjectId, group.id)
           }}>{sphere.name}</button>
+          {mirror?.transfer && <p role="status">{mirror.transfer.phase==='copying'?'Copiando':mirror.transfer.phase==='uploading'?'Subiendo':'Descargando'} {mirror.transfer.total?Math.min(99,Math.floor(100*mirror.transfer.completed/mirror.transfer.total)):0}%</p>}
           {sphere.ready === false && <p role="status" className="mt-1 text-xs">Preparando publicación…</p>}
           {!ready && sphere.ready !== false && <p className="mt-1 text-xs">Pendiente · {(sphere.bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB</p>}
           {deleted?.decision === 'keep' && <p className="text-xs">Personal</p>}

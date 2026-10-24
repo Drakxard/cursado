@@ -13,7 +13,7 @@ export type Resource = { key: string; type: 'json' | 'blob' | 'delete'; value?: 
 type Snapshot = { seq: number; resources: Record<string, Resource>; conflicts: Json[] }
 type Operation = { id: string; changes: (Resource & { base?: Json; baseHash?: string })[] }
 export type PendingDeletion = { id: string; sphereId: string; key: string; selector: string[]; value?: Json; label: string; decision: 'wait' | 'keep' | 'delete'; notified?: boolean }
-type Mirror = { copiedFrom?: string; copySource?: {subjectId:string;storageKey:string}; selection?: WeekSelection; binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; incomingApplied?: string[]; downloading?: boolean; metadataReady?: boolean; transfer?: { phase: 'uploading' | 'downloading'; completed: number; total: number }; error?: string }
+type Mirror = { copiedFrom?: string; copySource?: {subjectId:string;storageKey:string}; selection?: WeekSelection; binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; incomingApplied?: string[]; downloading?: boolean; metadataReady?: boolean; transfer?: { phase: 'copying' | 'uploading' | 'downloading'; completed: number; total: number }; error?: string }
 export type CooperationState = { version: 1; userId: string; groups: CooperativeGroup[]; mirrors: Record<string, Mirror>; deletions: PendingDeletion[]; dismissedSpheres?: string[]; error?: string }
 let state: CooperationState = { version: 1, userId: '', groups: [], mirrors: {}, deletions: [] }
 let activeRoot: FileSystemDirectoryHandle | null = null
@@ -155,6 +155,7 @@ async function prepareCooperationCopy(mirror:Mirror) {
   if(!mirror.copySource)return
   const handle=await root(),source=mirror.copySource,b=mirror.binding
   const files=await scanSphere(handle,{...b,subjectId:source.subjectId,storageKey:source.storageKey,sourceId:source.subjectId,sourceKey:source.storageKey})
+  mirror.transfer={phase:'copying',completed:0,total:files.length};await save()
   const resources=Object.fromEntries(files.map(file=>[file.key,{key:file.key,type:file.blob?'blob':'json',value:file.value}])) as Record<string,Resource>
   const copy:SphereBinding={...b,owner:false,sourceId:source.subjectId,sourceKey:source.storageKey}
   await prepareBinding(copy,resources)
@@ -164,8 +165,10 @@ async function prepareCooperationCopy(mirror:Mirror) {
     const value=file.blob??structuredClone(file.value!)
     if(file.key.startsWith('progreso/pizarras/') && record(value))delete value.sharedBoard
     await applyMirrorFile(handle,copy,file.key,value)
+    mirror.transfer.completed++
+    if(mirror.transfer.completed%10===0)await save();else cooperationChanged()
   }
-  delete mirror.copySource
+  delete mirror.copySource;delete mirror.transfer;delete mirror.error
   await installSubject(b)
   await save()
 }
@@ -189,7 +192,10 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
   await save()
   return binding
   })
-  await withStateLock(()=>prepareCooperationCopy(state.mirrors[binding.id]))
+  await withStateLock(async()=>{
+    const mirror=state.mirrors[binding.id]
+    try{await prepareCooperationCopy(mirror)}catch(reason){mirror.error=reason instanceof Error?reason.message:String(reason);await save();throw reason}
+  })
   await publishSphereMetadata(state.mirrors[binding.id])
   await refreshCooperation()
   if (options.background) { synchronizeInBackground(); return binding }
