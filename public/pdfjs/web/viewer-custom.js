@@ -572,6 +572,23 @@
       link.title = `Abrir ${label}`;
       link.setAttribute("aria-label", `Abrir ${label}`);
       link.textContent = label;
+      if (shortcut.icon === "pencil") {
+        link.textContent = "";
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("width", "18");
+        svg.setAttribute("height", "18");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+        svg.setAttribute("aria-hidden", "true");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "m16 3 5 5M4 15 15.5 3.5a3.54 3.54 0 0 1 5 5L9 20l-7 2z");
+        svg.appendChild(path);
+        link.appendChild(svg);
+      }
       if(shortcut.notebooklm) {
         let timer=null,held=false,start=null;
         const cancel=()=>{clearTimeout(timer);timer=null;};

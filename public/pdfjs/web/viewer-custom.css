@@ -316,6 +316,9 @@
 }
 
 .pdfjs-custom-subject-shortcut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   box-sizing: border-box;
   min-width: 0 !important;
   width: auto !important;

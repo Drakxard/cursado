@@ -1,5 +1,6 @@
 'use client'
 import { uploadCooperationFile } from './cooperation-upload.ts'
+import { cooperationRequest } from './cooperation-request.ts'
 import { cooperationResourceBytes, cooperationSyncLabel } from '../cooperation-sync-status.ts'
 import { projectSelectionTags, selectionResources, type WeekSelection } from './cooperation-selection.ts'
 import { COOPERATIVE_TAB_ID, mergeCooperation, type Json } from '../cooperation-model.ts'
@@ -42,12 +43,7 @@ export async function cooperationSubjectSyncDetails(subjectId: string) {
 export { COOPERATIVE_TAB_ID }
 export const cooperationGroupTab = (id: string) => `cooperative-${id}`
 export function cooperationChanged() { window.dispatchEvent(new CustomEvent('cursado-cooperation-changed', { detail: state })) }
-export async function cooperationApi(path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') {
-  const response = await fetch(`/pizarra/api/cooperation/${path}`, { method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), cache: 'no-store' })
-  const result = await response.json()
-  if (!response.ok) throw new Error(result.detail || result.error || 'No se pudo conectar con Cooperativo.')
-  return result
-}
+export const cooperationApi = cooperationRequest
 async function root() {
   const handle = getReadyWorkspaceHandle() || await loadWorkspaceHandle()
   if (!handle || await queryWorkspacePermission(handle, 'readwrite') !== 'granted') throw new Error('Abrí Estudio y autorizá tu carpeta local para cooperar.')

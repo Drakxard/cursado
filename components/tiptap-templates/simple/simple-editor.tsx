@@ -289,7 +289,7 @@ export function SimpleEditor({
         },
       }),
       HorizontalRule,
-      TableKit.configure({ table: { resizable: true, renderWrapper: true } }),
+      TableKit.configure({ table: { resizable: false, renderWrapper: true } }),
       TextAlign.configure({ types: ["heading", "paragraph", "image"] }),
       TaskList,
       TaskItem.configure({ nested: true }),

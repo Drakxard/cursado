@@ -380,18 +380,23 @@ function EditablePracticeViewerClient({
 
   const publishViewerShortcuts = useCallback(() => {
     const sectionKey = activeContext ? `day:${activeContext.sessionDate}` : ""
+    const shortcuts = viewerShortcuts.filter(shortcut=>shortcut.integrationRole!=="notebooklm"&&shortcut.label.toLowerCase()!=="nlm"&&shortcut.label.trim().toLowerCase()!=="figma")
+      .map((shortcut) => ({ ...shortcut, effectiveUrl: getSubjectShortcutUrl(shortcut, sectionKey) }))
+      .filter((shortcut) => Boolean(shortcut.effectiveUrl?.trim()))
+      .map((shortcut) => ({ id: shortcut.id, label: shortcut.label, url: shortcut.effectiveUrl, icon: undefined as string | undefined }))
+    if (resolvedMaterial && !isNativeReadOnly()) {
+      const params = new URLSearchParams({ subjectId: resolvedMaterial.subjectId, weekNumber: String(resolvedMaterial.weekNumber), materialId: String(resolvedMaterial.id) })
+      shortcuts.splice(Math.min(1, shortcuts.length), 0, { id: 'synthesis-text', label: 'Escribir en el texto relacionado de Síntesis', url: new URL(`/sintesis?${params}`, window.location.origin).href, icon: 'pencil' })
+    }
     postToViewer({
       type: "viewerSubjectShortcuts",
       shortcuts: [
-        ...viewerShortcuts.filter(shortcut=>shortcut.integrationRole!=="notebooklm"&&shortcut.label.toLowerCase()!=="nlm")
-          .map((shortcut) => ({ ...shortcut, effectiveUrl: getSubjectShortcutUrl(shortcut, sectionKey) }))
-          .filter((shortcut) => Boolean(shortcut.effectiveUrl?.trim()))
-          .map((shortcut) => ({ id: shortcut.id, label: shortcut.label, url: shortcut.effectiveUrl })),
+        ...shortcuts,
         {id:"notebooklm",label:"nlm",url:viewerShortcuts.filter(shortcut=>shortcut.integrationRole==="notebooklm"||shortcut.label.toLowerCase()==="nlm")
           .map(shortcut=>getSubjectShortcutUrl(shortcut,`week:${activeContext?.weekNumber}`))[0]||"https://notebook.google.com/",notebooklm:true},
       ],
     })
-  }, [activeContext, postToViewer, viewerShortcuts])
+  }, [activeContext, postToViewer, viewerShortcuts, resolvedMaterial])
 
   const publishViewerMaterialTags = useCallback(() => {
     if (!resolvedMaterial) return
