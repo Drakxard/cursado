@@ -1929,38 +1929,44 @@ export function SubjectWheel({
     return workspaceTabList.filter((tab) => tab.id !== sourceTabId && tab.id !== COOPERATIVE_TAB_ID && !tab.id.startsWith('cooperative-'))
   }, [activeWorkspaceTabId, deleteConfirmationTarget, workspaceTabList])
 
+  const cooperationTransfersRef = useRef(new Set<string>())
   const cooperateDeleteTarget = async (groupId: string, move: boolean) => {
     if (!deleteConfirmationTarget) return
-    setIsPermanentlyDeleting(true)
+    const target = deleteConfirmationTarget
+    const ids = new Set(getDeleteTargetSubjectIds(target))
+    const subjects = [...ids].map(id => customSubjects[id] || SUBJECTS.find(s => s.id === id)).filter((subject): subject is Subject => Boolean(subject))
+    const transferKey = `${groupId}:${move}:${[...ids].sort().join(',')}`
+    if (cooperationTransfersRef.current.has(transferKey)) return
+    cooperationTransfersRef.current.add(transferKey)
+    const destination = cooperationGroupTab(groupId)
+    setDeleteConfirmationTarget(null); setDeleteSummaries([])
+    setActiveWorkspaceTabId(destination)
+    toast({title:move ? 'Moviendo esfera' : 'Copiando esfera',description:'Preparando en segundo plano. Podés seguir usando Estudio.'})
     try {
       const shared:SphereBinding[]=[]
-      for (const id of getDeleteTargetSubjectIds(deleteConfirmationTarget)) {
-        const subject = customSubjects[id] || SUBJECTS.find(s => s.id === id)
+      for (const subject of subjects) {
         if (subject) shared.push(await shareCooperationSphere(groupId, subject, { background: true, copy:!move }))
       }
-      const destination=cooperationGroupTab(groupId), group=cooperative.groups.find(group=>group.id===groupId)!
+      const group=cooperative.groups.find(group=>group.id===groupId)!
       if (move) {
-        const ids = new Set(getDeleteTargetSubjectIds(deleteConfirmationTarget)), destination = cooperationGroupTab(groupId)
         setWorkspaceTabs(previous => {
-          const next = Object.fromEntries(Object.entries(previous).filter(([id]) => deleteConfirmationTarget.type !== 'tab' || id !== deleteConfirmationTarget.id).map(([id, tab]) => [id, { ...tab, subjectIds: tab.subjectIds.filter(s => !ids.has(s)) }]))
+          const next = Object.fromEntries(Object.entries(previous).filter(([id]) => target.type !== 'tab' || id !== target.id).map(([id, tab]) => [id, { ...tab, subjectIds: tab.subjectIds.filter(s => !ids.has(s)) }]))
           const group = cooperative.groups.find(g => g.id === groupId)!
           next[destination] = { ...(next[destination] || { id: destination, name: group.members.map(m => m.display_name).join(', '), color: '#16a34a', createdAt: new Date().toISOString() }), subjectIds: [...new Set([...(next[destination]?.subjectIds || []), ...ids])] }
           return next
         })
         setCustomSubjects(previous => Object.fromEntries(Object.entries(previous).map(([id, subject]) => [id, ids.has(id) ? { ...subject, tabId: destination } : subject])))
         hasUserChangedWorkspaceStateRef.current = true
-        setActiveWorkspaceTabId(destination)
+        toast({title:'Esfera movida',description:'Los archivos se sincronizan en segundo plano.'})
       }
       if(!move){
         setWorkspaceTabs(previous=>({...previous,[destination]:{...(previous[destination]||{id:destination,name:group.members.map(member=>member.display_name).join(', '),color:'#16a34a',createdAt:new Date().toISOString()}),subjectIds:[...new Set([...(previous[destination]?.subjectIds||[]),...shared.map(binding=>binding.subjectId)])]}}))
         setCustomSubjects(previous=>{const next={...previous};for(const binding of shared)next[binding.subjectId]={...(next[binding.subjectId]||{id:binding.subjectId,tabId:destination,createdAt:new Date().toISOString(),targetWeekday:0}),name:binding.name,color:binding.color,storageKey:binding.storageKey};return next})
         hasUserChangedWorkspaceStateRef.current=true
-        setActiveWorkspaceTabId(destination)
         toast({title:'Esfera copiada',description:'Ya aparece en el grupo elegido. Los archivos se sincronizan en segundo plano.'})
       }
-      setDeleteConfirmationTarget(null); setDeleteSummaries([])
-    } catch (error) { setWorkspaceNoticeMessage((error as Error).message) }
-    finally { setIsPermanentlyDeleting(false) }
+    } catch (error) { toast({title:move ? 'No se pudo mover la esfera' : 'No se pudo copiar la esfera',description:error instanceof Error ? error.message : String(error),variant:'destructive'}) }
+    finally { cooperationTransfersRef.current.delete(transferKey) }
   }
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isNextWeekDialogOpen, setIsNextWeekDialogOpen] = useState(false)

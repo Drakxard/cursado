@@ -120,14 +120,25 @@ test('actual Study copies an existing sphere into a group and accepts its local 
     const copyOptions=a.getByRole('dialog',{name:'Opciones de materia'})
     await copyOptions.getByRole('button',{name:'Copiar a',exact:true}).click()
     await expect(a.getByRole('menuitem',{name:/^Cooperar ·/})).toHaveCount(2)
+    let releaseAcceptance, acceptanceStarted
+    const acceptanceGate=new Promise(resolve=>{releaseAcceptance=resolve})
+    const acceptanceRequest=new Promise(resolve=>{acceptanceStarted=resolve})
+    t.after(()=>releaseAcceptance())
+    await a.route(url=>url.pathname===`/pizarra/api/cooperation/groups/${secondGroupId}/accept`,async route=>{
+      acceptanceStarted();await acceptanceGate;await route.fallback()
+    })
     await a.getByRole('menuitem',{name:/Aceptar y copiar$/}).click()
-    await expect(copyOptions).toHaveCount(0,{timeout:30000})
+    await acceptanceRequest
+    await expect(copyOptions).toHaveCount(0,{timeout:1000})
+    await a.locator('[data-study-workspace-tabs]').focus();await a.locator('[data-study-workspace-tabs] button').first().click()
+    await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
+    releaseAcceptance()
     await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
     let secondGroup
     await expect.poll(async()=>{const result=await backend.request('/api/cooperation/groups',{cookie:actors[0].cookie});secondGroup=(await result.json()).groups.find(group=>group.id===secondGroupId);return secondGroup?.accepted&&secondGroup.spheres.length===1},{timeout:15000}).toBe(true)
     const copiedId=secondGroup.spheres[0].id
     const copied=await a.evaluate(async({groupId,copiedId})=>{const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study');const manifests=await root.getDirectoryHandle('manifests');const workspace=JSON.parse(await(await(await manifests.getFileHandle('workspace-state.json')).getFile()).text());const file=await(await(await root.getDirectoryHandle('teoria')).getDirectoryHandle('Cooperativo-'+copiedId)).getFileHandle('uno.pdf');return{active:workspace.activeWorkspaceTabId,original:workspace.customSubjects['algebra-local'].tabId,ids:workspace.workspaceTabs['cooperative-'+groupId].subjectIds,bytes:await(await file.getFile()).text()}},{groupId:secondGroupId,copiedId})
-    assert.equal(copied.active,'cooperative-'+secondGroupId)
+    assert.equal(copied.active,'main')
     assert.equal(copied.original,'main')
     assert.deepEqual(copied.ids,['coop-'+copiedId])
     assert.equal(copied.bytes,'local PDF bytes')

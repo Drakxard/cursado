@@ -16,8 +16,14 @@ export async function readFile(root: FileSystemDirectoryHandle, path: string): P
   catch (error) { if ((error as Error).name === 'NotFoundError') return null; throw error }
 }
 export async function readJson<T>(root: FileSystemDirectoryHandle, path: string, fallback: T): Promise<T> {
-  const file = await readFile(root, path)
-  return file ? JSON.parse(await file.text()) as T : fallback
+  return withWorkspaceFileLock(`write:${path}`, async () => {
+    const file = await readFile(root, path)
+    if (!file) return fallback
+    const text = await file.text()
+    if (!text.trim()) return fallback
+    try { return JSON.parse(text) as T }
+    catch { throw new Error(`El archivo local «${path}» contiene JSON incompleto o inválido. Revisalo o restaurá su respaldo y reintentá la sincronización.`) }
+  })
 }
 export async function writeFile(root: FileSystemDirectoryHandle, path: string, blob: Blob) {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
@@ -85,7 +91,8 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
     if (!blob) return
     const key = mapBindingText(path, b, false)
     if (path.endsWith('.json')) {
-      const raw = JSON.parse(await blob.text()) as Json
+      const raw = await readJson<Json | undefined>(root, path, undefined)
+      if (raw === undefined) throw new Error(`El archivo local «${path}» está vacío. Completalo o restaurá su respaldo antes de compartir.`)
       if (path.startsWith('progreso/pizarras/') && raw && typeof raw === 'object' && !Array.isArray(raw) && raw.assets && typeof raw.assets === 'object' && !Array.isArray(raw.assets)) {
         for (const [id, data] of Object.entries(raw.assets)) if (typeof data === 'string' && /^data:[^,]*;base64,/.test(data)) {
           const comma = data.indexOf(','), bytes = Uint8Array.from(atob(data.slice(comma + 1)), char => char.charCodeAt(0))
