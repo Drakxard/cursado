@@ -1934,7 +1934,7 @@ export function SubjectWheel({
     if (!deleteConfirmationTarget) return
     const target = deleteConfirmationTarget
     const ids = new Set(getDeleteTargetSubjectIds(target))
-    const subjects = [...ids].map(id => customSubjects[id] || SUBJECTS.find(s => s.id === id)).filter((subject): subject is Subject => Boolean(subject))
+    const subjects = [...ids].map(id => customSubjects[id] || SUBJECTS.find(s => s.id === id)).filter(subject => subject !== undefined)
     const transferKey = `${groupId}:${move}:${[...ids].sort().join(',')}`
     if (cooperationTransfersRef.current.has(transferKey)) return
     cooperationTransfersRef.current.add(transferKey)
