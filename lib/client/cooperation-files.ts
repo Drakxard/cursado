@@ -1,6 +1,7 @@
 'use client'
 import { safeCooperationPath, type Json } from '../cooperation-model.ts'
 import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
+import { readWorkspaceJson, writeWorkspaceJson } from '../workspace-json.ts'
 
 export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
 export type MirrorFile = { key: string; value?: Json; blob?: Blob }
@@ -16,14 +17,8 @@ export async function readFile(root: FileSystemDirectoryHandle, path: string): P
   catch (error) { if ((error as Error).name === 'NotFoundError') return null; throw error }
 }
 export async function readJson<T>(root: FileSystemDirectoryHandle, path: string, fallback: T): Promise<T> {
-  return withWorkspaceFileLock(`write:${path}`, async () => {
-    const file = await readFile(root, path)
-    if (!file) return fallback
-    const text = await file.text()
-    if (!text.trim()) return fallback
-    try { return JSON.parse(text) as T }
-    catch { throw new Error(`El archivo local «${path}» contiene JSON incompleto o inválido. Revisalo o restaurá su respaldo y reintentá la sincronización.`) }
-  })
+  if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
+  return readWorkspaceJson(root, path, fallback)
 }
 export async function writeFile(root: FileSystemDirectoryHandle, path: string, blob: Blob) {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
@@ -34,7 +29,10 @@ export async function writeFile(root: FileSystemDirectoryHandle, path: string, b
     if (await digest(await file.getFile()) !== await digest(blob)) throw new Error(`No se pudo verificar ${path}.`)
   })
 }
-export const writeJson = (root: FileSystemDirectoryHandle, path: string, value: unknown) => writeFile(root, path, new Blob([JSON.stringify(value)]))
+export const writeJson = (root: FileSystemDirectoryHandle, path: string, value: unknown) => {
+  if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
+  return writeWorkspaceJson(root, path, value)
+}
 export async function removeFile(root: FileSystemDirectoryHandle, path: string) {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
   const parts = path.split('/')

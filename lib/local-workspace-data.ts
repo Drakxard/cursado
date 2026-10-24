@@ -2,7 +2,7 @@
 
 import { isNativeReadOnly, nativeFileUrl, readOnlyError } from './native-workspace.ts'
 import { COOPERATIVE_TAB_ID } from './cooperation-model.ts'
-import { readWorkspaceFileText } from './workspace-file-read.ts'
+import { readWorkspaceJson, writeWorkspaceJson } from './workspace-json.ts'
 import { withWorkspaceFileLock } from './workspace-file-lock.ts'
 
 import type {
@@ -836,17 +836,7 @@ async function getFileHandleBySegments(
 async function readJsonFile<T>(pathSegments: string[], fallback: T): Promise<T> {
   const rootHandle = await ensureWorkspaceRootHandle()
 
-  try {
-    const fileHandle = await getFileHandleBySegments(rootHandle, pathSegments, false)
-    const text = await readWorkspaceFileText(fileHandle)
-    if (!text.trim()) return fallback
-    return JSON.parse(text) as T
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "NotFoundError") {
-      return fallback
-    }
-    throw error
-  }
+  return readWorkspaceJson(rootHandle, pathSegments.join("/"), fallback, isNativeReadOnly())
 }
 
 const jsonWriteQueues = new Map<string, Promise<unknown>>()
@@ -855,19 +845,11 @@ async function writeJsonFile(pathSegments: string[], value: unknown) {
   if (isNativeReadOnly()) readOnlyError()
   const queueKey = pathSegments.join("/")
   const previous = jsonWriteQueues.get(queueKey) ?? Promise.resolve()
-  const write = previous.catch(() => undefined).then(() => withWorkspaceFileLock(`write:${queueKey}`, async () => {
+  const write = previous.catch(() => undefined).then(async () => {
     const rootHandle = await ensureWorkspaceRootHandle()
-    const fileHandle = await getFileHandleBySegments(rootHandle, pathSegments, true)
-    const writable = await fileHandle.createWritable()
-    try {
-      await writable.write(JSON.stringify(value, null, 2))
-      await writable.close()
-      window.dispatchEvent(new Event('cursado-workspace-saved'))
-    } catch (error) {
-      await writable.abort().catch(() => {})
-      throw error
-    }
-  }))
+    await writeWorkspaceJson(rootHandle, queueKey, value)
+    window.dispatchEvent(new Event('cursado-workspace-saved'))
+  })
   jsonWriteQueues.set(queueKey, write)
   try {
     await write
