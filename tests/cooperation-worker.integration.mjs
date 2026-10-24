@@ -19,6 +19,12 @@ test('real Cloudflare runtime: SQLite, R2 multipart, authenticated WebSockets, p
   await new Promise((resolve,reject)=>{notices.once('open',resolve);notices.once('error',reject)})
   t.after(()=>notices.terminate())
   const group=await api('cooperation/groups',cookieA,{names:b.data.display_name})
+  const pending=await api('cooperation/groups',cookieB)
+  assert.equal(pending.data.groups.find(item=>item.id===group.data.id).accepted,false)
+  await api(`cooperation/groups/${group.data.id}/accept/`,cookieB,{})
+  await api(`cooperation/groups/${group.data.id}/accept`,cookieB,{})
+  const accepted=await api('cooperation/groups',cookieB)
+  assert.equal(accepted.data.groups.find(item=>item.id===group.data.id).accepted,true)
   const sphere=await api('cooperation/spheres',cookieA,{groupId:group.data.id,name:'Live sphere',color:'#2563eb'})
   await api(`cooperation/spheres/${sphere.data.id}/accept`,cookieB,{})
   const connect=async cookie=>{

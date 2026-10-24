@@ -11,7 +11,7 @@ export function initializeCooperation(sql) {
 }
 export async function cooperationRequest(directory,request) {
   const {user}=await directory.authenticated(request), sql=directory.sql, env=directory.env
-  const url=new URL(request.url), parts=url.pathname.slice('/api/cooperation/'.length).split('/')
+  const url=new URL(request.url), parts=url.pathname.replace(/\/+$/, '').slice('/api/cooperation/'.length).split('/')
   if(parts[0]==='groups' && parts.length===3 && parts[2]==='accept' && request.method==='POST') {
     await request.arrayBuffer()
     const membership=directory.first('SELECT accepted FROM cooperation_members WHERE group_id=? AND user_id=?',parts[1],user.id)
@@ -28,7 +28,7 @@ export async function cooperationRequest(directory,request) {
     socket.protocol='wss:';socket.searchParams.set('ticket',token)
     return json({url:socket.href})
   }
-  if(parts[0]==='groups') {
+  if(parts[0]==='groups' && parts.length===1) {
     if(request.method==='GET') {
       const groups=await Promise.all(sql.exec(`SELECT g.*,m.accepted FROM cooperation_groups g JOIN cooperation_members m ON m.group_id=g.id WHERE m.user_id=?`,user.id).toArray().map(async group=>({
         id:group.id,accepted:!!group.accepted,

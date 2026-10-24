@@ -65,7 +65,8 @@ function fingerprint(value: Json) {
   for (const c of JSON.stringify(value)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619)
   return (hash >>> 0).toString(16)
 }
-export function parseCooperationNames(value: string): string[] {
+export function parseCooperationNames(value: unknown): string[] {
+  if (typeof value !== 'string') throw new Error('Escribí entre 1 y 20 nombres de usuario separados por comas.')
   const names = value.trim().replace(/^\[/, '').replace(/\]$/, '').split(',').map(x => x.trim()).filter(Boolean)
   if (!names.length || names.length > 20) throw new Error('Escribí entre 1 y 20 nombres de usuario separados por comas.')
   const normalized = names.map(x => x.normalize('NFKC').toLowerCase().replace(/\s+/g, ' '))

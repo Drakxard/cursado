@@ -8109,7 +8109,7 @@ export function SubjectWheel({
       <Dialog open={Boolean(workspaceNoticeMessage)} onOpenChange={(open) => (!open ? setWorkspaceNoticeMessage("") : undefined)}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
-            <DialogTitle>No se puede borrar</DialogTitle>
+            <DialogTitle>No se pudo completar la acción</DialogTitle>
             <DialogDescription>{workspaceNoticeMessage}</DialogDescription>
           </DialogHeader>
 

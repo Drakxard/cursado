@@ -20,6 +20,11 @@ test('copy accepts an invited empty group, keeps the original, isolates a second
   const first=(await(await api(actors[0],'groups',{names:actors[1].name})).json()).id
   const second=(await(await api(actors[2],'groups',{names:actors[0].name})).json()).id
   assert.equal((await api(actors[3],`groups/${second}/accept`,{})).status,403)
+  assert.equal((await api(actors[3],`groups/${second}/accept/`,{})).status,403)
+  assert.equal((await api(actors[0],`groups/${second}/unknown`,{})).status,404)
+  const malformed=await api(actors[0],'groups',{})
+  assert.equal(malformed.status,422)
+  assert.match((await malformed.json()).detail,/nombres de usuario/)
   assert.equal((await(await api(actors[0],'groups')).json()).groups.find(group=>group.id===second).accepted,false)
   globalThis.fetch=(async(url,options={})=>{
     if(String(url)==='/pizarra/upload-session'){const {sphereId,hash,size,mime}=JSON.parse(String(options.body));return backend.request(`/api/cooperation/spheres/${sphereId}/files/${hash}`,{cookie:actors[0].cookie,body:{size,mime}})}
