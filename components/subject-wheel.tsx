@@ -7,7 +7,7 @@ import { InlinePdfName } from "./inline-pdf-name"
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
 import { CooperationPanel, CooperationSyncStatus, useCooperation } from '@/components/cooperation'
-import { COOPERATIVE_TAB_ID, cooperationGroupTab, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
+import { COOPERATIVE_TAB_ID, cooperationGroupTab, refreshCooperation, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
 import type { SphereBinding } from '@/lib/client/cooperation-files'
 import type { BoardPdfReference } from "@/lib/board-library-contract"
 
@@ -1362,8 +1362,8 @@ export function SubjectWheel({
   const visibleSubjectIds = useMemo(() => visibleSubjects.map((subject) => subject.id), [visibleSubjects])
   const cooperative = useCooperation()
   useEffect(() => {
-    const bindings = Object.values(cooperative.mirrors).filter(m => (!m.downloading || m.metadataReady) && !cooperative.deletions.some(d => d.sphereId === m.binding.id && d.key === 'sphere.json' && d.decision === 'delete')).map(m => m.binding)
-    if (!bindings.length) return
+    const bindings = Object.values(cooperative.mirrors).filter(m => !m.copySource && (!m.downloading || m.metadataReady) && !cooperative.deletions.some(d => d.sphereId === m.binding.id && d.key === 'sphere.json' && d.decision === 'delete')).map(m => m.binding)
+    if (!bindings.length && !cooperative.groups.length) return
     setCustomSubjects(previous => {
       const next = { ...previous }
       for (const b of bindings) next[b.subjectId] = { ...(next[b.subjectId] || { id: b.subjectId, tabId: b.owner ? 'main' : cooperationGroupTab(b.groupId), createdAt: new Date().toISOString(), targetWeekday: 0 }), storageKey: b.storageKey, name: b.name, color: b.color }
@@ -1933,10 +1933,12 @@ export function SubjectWheel({
     if (!deleteConfirmationTarget) return
     setIsPermanentlyDeleting(true)
     try {
+      const shared:SphereBinding[]=[]
       for (const id of getDeleteTargetSubjectIds(deleteConfirmationTarget)) {
         const subject = customSubjects[id] || SUBJECTS.find(s => s.id === id)
-        if (subject) await shareCooperationSphere(groupId, subject, { background: true })
+        if (subject) shared.push(await shareCooperationSphere(groupId, subject, { background: true, copy:!move }))
       }
+      const destination=cooperationGroupTab(groupId), group=cooperative.groups.find(group=>group.id===groupId)!
       if (move) {
         const ids = new Set(getDeleteTargetSubjectIds(deleteConfirmationTarget)), destination = cooperationGroupTab(groupId)
         setWorkspaceTabs(previous => {
@@ -1948,6 +1950,13 @@ export function SubjectWheel({
         setCustomSubjects(previous => Object.fromEntries(Object.entries(previous).map(([id, subject]) => [id, ids.has(id) ? { ...subject, tabId: destination } : subject])))
         hasUserChangedWorkspaceStateRef.current = true
         setActiveWorkspaceTabId(destination)
+      }
+      if(!move){
+        setWorkspaceTabs(previous=>({...previous,[destination]:{...(previous[destination]||{id:destination,name:group.members.map(member=>member.display_name).join(', '),color:'#16a34a',createdAt:new Date().toISOString()}),subjectIds:[...new Set([...(previous[destination]?.subjectIds||[]),...shared.map(binding=>binding.subjectId)])]}}))
+        setCustomSubjects(previous=>{const next={...previous};for(const binding of shared)next[binding.subjectId]={...(next[binding.subjectId]||{id:binding.subjectId,tabId:destination,createdAt:new Date().toISOString(),targetWeekday:0}),name:binding.name,color:binding.color,storageKey:binding.storageKey};return next})
+        hasUserChangedWorkspaceStateRef.current=true
+        setActiveWorkspaceTabId(destination)
+        toast({title:'Esfera copiada',description:'Ya aparece en el grupo elegido. Los archivos se sincronizan en segundo plano.'})
       }
       setDeleteConfirmationTarget(null); setDeleteSummaries([])
     } catch (error) { setWorkspaceNoticeMessage((error as Error).message) }
@@ -7923,9 +7932,9 @@ export function SubjectWheel({
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={isPermanentlyDeleting}>Cancelar</Button>
             </DialogClose>
-            <DropdownMenu>
+            <DropdownMenu onOpenChange={open=>{if(open)void refreshCooperation().catch(error=>setWorkspaceNoticeMessage(error instanceof Error?error.message:String(error)))}}>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.filter(g => g.accepted).length === 0 || isPermanentlyDeleting}>
+                <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.length === 0 || isPermanentlyDeleting}>
                   Mover
                 </Button>
               </DropdownMenuTrigger>
@@ -7937,12 +7946,12 @@ export function SubjectWheel({
                     {tab.name}
                   </DropdownMenuItem>
                 ))}
-                {cooperative.groups.filter(g => g.accepted).map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, true)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}</DropdownMenuItem>)}
+                {cooperative.groups.map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, true)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}{!group.accepted?' · Aceptar grupo':''}</DropdownMenuItem>)}
               </DropdownMenuContent>
             </DropdownMenu>
-            <DropdownMenu>
+            <DropdownMenu onOpenChange={open=>{if(open)void refreshCooperation().catch(error=>setWorkspaceNoticeMessage(error instanceof Error?error.message:String(error)))}}>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.filter(g => g.accepted).length === 0 || isPermanentlyDeleting}>
+                <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.length === 0 || isPermanentlyDeleting}>
                   <Copy className="h-4 w-4" />
                   Copiar a
                 </Button>
@@ -7955,7 +7964,7 @@ export function SubjectWheel({
                     {tab.name}
                   </DropdownMenuItem>
                 ))}
-                {cooperative.groups.filter(g => g.accepted).map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, false)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}</DropdownMenuItem>)}
+                {cooperative.groups.map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, false)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}{!group.accepted?' · Aceptar y copiar':''}</DropdownMenuItem>)}
               </DropdownMenuContent>
             </DropdownMenu>
             <Button

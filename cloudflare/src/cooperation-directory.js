@@ -12,6 +12,16 @@ export function initializeCooperation(sql) {
 export async function cooperationRequest(directory,request) {
   const {user}=await directory.authenticated(request), sql=directory.sql, env=directory.env
   const url=new URL(request.url), parts=url.pathname.slice('/api/cooperation/'.length).split('/')
+  if(parts[0]==='groups' && parts.length===3 && parts[2]==='accept' && request.method==='POST') {
+    await request.arrayBuffer()
+    const membership=directory.first('SELECT accepted FROM cooperation_members WHERE group_id=? AND user_id=?',parts[1],user.id)
+    if(!membership)return json({detail:'No tenés una invitación a este grupo.'},403)
+    if(!membership.accepted){
+      sql.exec('UPDATE cooperation_members SET accepted=1 WHERE group_id=? AND user_id=?',parts[1],user.id)
+      await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',parts[1]).toArray().map(member=>member.user_id))
+    }
+    return json({ok:true})
+  }
   if(parts[0]==='notifications' && parts[1]==='ticket' && request.method==='POST') {
     const token=await env.CONTENT_ROOMS.getByName(`notifications:${user.id}`).ticket(user.id)
     const socket=new URL(`/api/cooperation/notifications/socket/${user.id}`,request.url)

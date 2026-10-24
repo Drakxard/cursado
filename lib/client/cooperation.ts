@@ -13,7 +13,7 @@ export type Resource = { key: string; type: 'json' | 'blob' | 'delete'; value?: 
 type Snapshot = { seq: number; resources: Record<string, Resource>; conflicts: Json[] }
 type Operation = { id: string; changes: (Resource & { base?: Json; baseHash?: string })[] }
 export type PendingDeletion = { id: string; sphereId: string; key: string; selector: string[]; value?: Json; label: string; decision: 'wait' | 'keep' | 'delete'; notified?: boolean }
-type Mirror = { selection?: WeekSelection; binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; incomingApplied?: string[]; downloading?: boolean; metadataReady?: boolean; transfer?: { phase: 'uploading' | 'downloading'; completed: number; total: number }; error?: string }
+type Mirror = { copiedFrom?: string; copySource?: {subjectId:string;storageKey:string}; selection?: WeekSelection; binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; incomingApplied?: string[]; downloading?: boolean; metadataReady?: boolean; transfer?: { phase: 'uploading' | 'downloading'; completed: number; total: number }; error?: string }
 export type CooperationState = { version: 1; userId: string; groups: CooperativeGroup[]; mirrors: Record<string, Mirror>; deletions: PendingDeletion[]; dismissedSpheres?: string[]; error?: string }
 let state: CooperationState = { version: 1, userId: '', groups: [], mirrors: {}, deletions: [] }
 let activeRoot: FileSystemDirectoryHandle | null = null
@@ -99,6 +99,10 @@ export async function createCooperationGroup(names: string) {
   await refreshCooperation()
   return result.id as string
 }
+export async function acceptCooperationGroup(groupId: string) {
+  await cooperationApi(`groups/${groupId}/accept`, {})
+  await refreshCooperation()
+}
 async function installSubject(b: SphereBinding) {
   const handle = await root(), timestamp = new Date().toISOString()
   const catalog = await readJson<{ version: number; subjects: Record<string, Record<string, unknown>> }>(handle, 'manifests/subject-catalog.json', { version: 2, subjects: {} })
@@ -112,26 +116,49 @@ async function installSubject(b: SphereBinding) {
   const tabId = cooperationGroupTab(b.groupId), group = state.groups.find(g => g.id === b.groupId)
   tabs[tabId] ||= { id: tabId, name: group?.members.map(m => m.display_name).join(', ') || 'Cooperativo', color: '#16a34a', createdAt: timestamp, subjectIds: [] }
   tabs[tabId].subjectIds = [...new Set([...(tabs[tabId].subjectIds as string[]), b.subjectId])]
-  subjects[b.subjectId] = { id: b.subjectId, tabId: b.owner ? 'main' : tabId, createdAt: timestamp, targetWeekday: 0, ...subjects[b.subjectId], storageKey: b.storageKey, name: b.name, color: b.color }
+  subjects[b.subjectId] = { id: b.subjectId, tabId: b.owner && !state.mirrors[b.id]?.copiedFrom ? 'main' : tabId, createdAt: timestamp, targetWeekday: 0, ...subjects[b.subjectId], storageKey: b.storageKey, name: b.name, color: b.color }
   if (JSON.stringify(workspace) !== before) await writeJson(handle, 'manifests/workspace-state.json', workspace)
   window.dispatchEvent(new CustomEvent('cursado-cooperation-subject', { detail: b }))
 }
-export async function shareCooperationSphere(groupId: string, subject: { id: string; name: string; color: string; storageKey?: string }, options: { background?: boolean } = {}) {
+async function prepareCooperationCopy(mirror:Mirror) {
+  if(!mirror.copySource)return
+  const handle=await root(),source=mirror.copySource,b=mirror.binding
+  const files=await scanSphere(handle,{...b,subjectId:source.subjectId,storageKey:source.storageKey,sourceId:source.subjectId,sourceKey:source.storageKey})
+  const resources=Object.fromEntries(files.map(file=>[file.key,{key:file.key,type:file.blob?'blob':'json',value:file.value}])) as Record<string,Resource>
+  const copy:SphereBinding={...b,owner:false,sourceId:source.subjectId,sourceKey:source.storageKey}
+  await prepareBinding(copy,resources)
+  // Binary assets precede manifests that reference them. The pending marker
+  // survives failures, so a retry reuses this destination instead of duplicating it.
+  for(const file of [...files.filter(file=>file.blob),...files.filter(file=>!file.blob)]) {
+    const value=file.blob??structuredClone(file.value!)
+    if(file.key.startsWith('progreso/pizarras/') && record(value))delete value.sharedBoard
+    await applyMirrorFile(handle,copy,file.key,value)
+  }
+  delete mirror.copySource
+  await installSubject(b)
+  await save()
+}
+export async function shareCooperationSphere(groupId: string, subject: { id: string; name: string; color: string; storageKey?: string }, options: { background?: boolean; copy?: boolean } = {}) {
   await refreshCooperation()
+  const group=state.groups.find(group=>group.id===groupId)
+  if(!group)throw new Error('Este grupo ya no está disponible. Volvé a abrir Copiar a.')
+  if(!group.accepted)await acceptCooperationGroup(groupId)
   const binding = await withStateLock(async () => {
-  const already = Object.values(state.mirrors).find(m => m.binding.groupId === groupId && m.binding.subjectId === subject.id)
-  if (already) return already.binding
+  const already = Object.values(state.mirrors).find(m => m.binding.groupId === groupId && (m.binding.subjectId === subject.id || m.copiedFrom===subject.id))
+  if (already) {if(!already.copySource)await installSubject(already.binding);await save();return already.binding}
   const sharedElsewhere = Object.values(state.mirrors).find(m => m.binding.subjectId === subject.id)
-  if (sharedElsewhere) throw new Error('Esta esfera ya coopera con otro grupo. Usá ese grupo para mantener un único espejo.')
+  if (sharedElsewhere && !options.copy) throw new Error('Esta esfera ya coopera con otro grupo. Usá Copiar a para crear una copia independiente.')
   const result = await cooperationApi('spheres', { groupId, name: subject.name, color: subject.color })
   const catalog = await readJson<{ subjects: Record<string, { storageKey: string }> }>(await root(), 'manifests/subject-catalog.json', { subjects: {} })
   const key = subject.storageKey || catalog.subjects[subject.id]?.storageKey || subject.id
-  const binding: SphereBinding = { id: result.id, groupId, subjectId: subject.id, storageKey: key, sourceId: subject.id, sourceKey: key, name: subject.name, color: subject.color, owner: true }
-  state.mirrors[result.id] = { binding, baseline: { seq: 0, resources: {}, conflicts: [] } }
-  await installSubject(binding)
+  const subjectId=sharedElsewhere?`coop-${result.id}`:subject.id,storageKey=sharedElsewhere?`Cooperativo-${result.id}`:key
+  const binding: SphereBinding = { id: result.id, groupId, subjectId, storageKey, sourceId: subjectId, sourceKey: storageKey, name: subject.name, color: subject.color, owner: true }
+  state.mirrors[result.id] = { binding, baseline: { seq: 0, resources: {}, conflicts: [] },...(sharedElsewhere?{copiedFrom:subject.id,copySource:{subjectId:subject.id,storageKey:key}}:{}) }
+  if(!sharedElsewhere)await installSubject(binding)
   await save()
   return binding
   })
+  await withStateLock(()=>prepareCooperationCopy(state.mirrors[binding.id]))
   await publishSphereMetadata(state.mirrors[binding.id])
   await refreshCooperation()
   if (options.background) { synchronizeInBackground(); return binding }
@@ -555,6 +582,7 @@ export function synchronizeCooperation(): Promise<void> {
       if (!state.userId || navigator.onLine === false) return
       const execute = async () => {
         for (const mirror of Object.values(state.mirrors)) {
+          if(mirror.copySource)continue
           try { while (await synchronizeMirror(mirror)) { /* Drain queued resource batches in this run. */ } }
           catch (error) { confirmedMirrors.delete(mirror.binding.id); mirror.error = error instanceof Error ? error.message : String(error); await save(); retryBackground?.() }
         }

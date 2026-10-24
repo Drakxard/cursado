@@ -6,7 +6,7 @@ import { chromium } from '@playwright/test'
 test('cooperative UI accepts username lists, keeps declined spheres gray and offers deletion review and personal copies', async () => {
   const fixture = `
     const sphere={id:'sphere-1',group_id:'group-1',name:'Álgebra',color:'#2563eb',created_by:'a',bytes:2500000,ready:false};
-    const state={version:1,userId:'b',groups:[{id:'group-1',accepted:false,members:[{id:'a',display_name:'PersonaA'},{id:'b',display_name:'PersonaB'}],spheres:[sphere]}],mirrors:{},deletions:[]};
+    const state={version:1,userId:'b',groups:[{id:'group-1',accepted:false,members:[{id:'a',display_name:'PersonaA'},{id:'b',display_name:'PersonaB'}],spheres:[sphere]},{id:'empty-group',accepted:false,members:[{id:'c',display_name:'PersonaC'}],spheres:[]}],mirrors:{},deletions:[]};
     const changed=()=>dispatchEvent(new Event('cursado-cooperation-changed'));
     window.publishSphere=()=>{sphere.ready=true;changed()};
     window.resetInvitation=()=>{state.mirrors={};state.deletions=[];state.dismissedSpheres=[];changed()};
@@ -14,6 +14,7 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     export const cooperationSubjectSyncLabel=()=> '100%';
     export const cooperationSubjectSyncDetails=async()=>({name:'Álgebra',bytes:2500000});
     export const refreshCooperation=async()=>state;
+    export const acceptCooperationGroup=async id=>{if(window.failGroupAccept)throw new Error('Sin conexión. Reintentá.');state.groups.find(group=>group.id===id).accepted=true;window.acceptedGroup=id;changed()};
     export const synchronizeCooperation=async()=>{};
     export const createCooperationGroup=async names=>{window.createdNames=names;return 'group-1'};
     export const dismissCooperationSphere=async id=>{state.dismissedSpheres=[id];changed()};
@@ -35,6 +36,21 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     await page.addScriptTag({ content: bundled.outputFiles[0].text })
     assert.equal(await page.getByLabel(/^Sincronización (?:100%|sin confirmar)$/).count(), 0)
     const invitation = page.getByRole('dialog', { name: 'Nuevo contenido cooperativo' })
+    const emptyGroup = page.locator('[data-cooperation-group="empty-group"]')
+    await emptyGroup.getByRole('button', { name: 'Aceptar invitación', exact: true }).waitFor()
+    await page.evaluate(() => (window as any).failGroupAccept=true)
+    await emptyGroup.getByRole('button', { name: 'Aceptar invitación', exact: true }).click()
+    await emptyGroup.getByRole('alert').getByText('Sin conexión. Reintentá.', { exact: true }).waitFor()
+    await page.evaluate(() => (window as any).failGroupAccept=false)
+    await emptyGroup.getByRole('button', { name: 'Aceptar invitación', exact: true }).click()
+    await emptyGroup.getByRole('button', { name: 'Aceptar invitación', exact: true }).waitFor({ state: 'detached' })
+    assert.equal(await page.evaluate(() => (window as any).acceptedGroup), 'empty-group')
+    await emptyGroup.getByText('Este grupo está vacío.', { exact: true }).waitFor()
+    assert.equal(await page.evaluate(() => (window as any).downloads || 0), 0)
+    const populatedGroup = page.locator('[data-cooperation-group="group-1"]')
+    await populatedGroup.getByRole('button', { name: 'Aceptar invitación', exact: true }).click()
+    await populatedGroup.getByRole('button', { name: 'Aceptar invitación', exact: true }).waitFor({ state: 'detached' })
+    assert.equal(await page.evaluate(() => (window as any).acceptedGroup), 'group-1')
     await page.getByText('Preparando publicación…', { exact: true }).waitFor()
     await page.getByRole('button', { name: 'Álgebra', exact: true }).click()
     assert.equal(await invitation.count(),0)
