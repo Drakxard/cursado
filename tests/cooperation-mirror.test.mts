@@ -123,6 +123,19 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
     assert.ok(JSON.stringify(synthesis).includes(`synthesis-local-image:synthesis-image-${binding.id.slice(0, 8)}`))
     assert.equal(await actor.fs.files.get(`sintesis/images/synthesis-image-${binding.id.slice(0, 8)}.png`).text(), 'synthesis image')
   }
+  await t.test('a metadata-only receiver discovers and downloads a PDF published after acceptance', async () => {
+    const mirror = b.client.cooperationState().mirrors[binding.id]
+    b.fs.files.delete(`teoria/Cooperativo-${binding.id}/uno.pdf`)
+    delete mirror.baseline.resources['teoria/Algebra/uno.pdf']
+    mirror.baseline.seq--
+    await b.fs.put(`.cooperation/${b.client.cooperationState().userId}/state.json`, b.client.cooperationState())
+    await use(b, () => b.client.synchronizeCooperation())
+    const recovered = b.client.cooperationState().mirrors[binding.id]
+    assert.equal(recovered.error, undefined)
+    assert.equal(await b.fs.files.get(`teoria/Cooperativo-${binding.id}/uno.pdf`).text(), 'test pdf')
+    assert.ok(recovered.baseline.resources['teoria/Algebra/uno.pdf']?.blob)
+    assert.equal(b.client.cooperationState().deletions.length, 0)
+  })
   const pathA = 'manifests/materials/Algebra/week-1.json', pathB = `manifests/materials/Cooperativo-${binding.id}/week-1.json`
   const localA = await a.fs.json(pathA), localB = await b.fs.json(pathB)
   localA.materials.push({ id: 101, file_name: 'Dos.pdf' }); localB.materials.push({ id: 102, file_name: 'Tres.pdf' })

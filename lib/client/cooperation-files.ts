@@ -99,6 +99,12 @@ function stripPersonal(value: Json): Json {
 }
 type ScanResource = { key: string; deleted?: boolean; blob?: { hash: string; size: number; mime: string } }
 type ScanOptions = { resources?: Record<string, ScanResource>; restore?: (resource: ScanResource, path: string) => Promise<void> }
+export class MissingCooperationFileError extends Error {
+  constructor(path: string) {
+    super(`No se encuentra el archivo referenciado «${path}». No se publicaron eliminaciones. Revisá su ubicación en la carpeta de Estudio y reintentá.`)
+    this.name = 'MissingCooperationFileError'
+  }
+}
 export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBinding, options: ScanOptions = {}): Promise<MirrorFile[]> {
   const output: MirrorFile[] = [], paths = new Set<string>(), ids = new Set([b.subjectId, b.storageKey])
   const repairedReferences = new Map<string, string>()
@@ -176,7 +182,7 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
             if (file && file.size === known[0].blob!.size && await digest(file) === known[0].blob!.hash) recovered = destination
           }
         }
-        if (!recovered) throw new Error(`No se encuentra el archivo referenciado «${path}». No se publicaron eliminaciones. Revisá su ubicación en la carpeta de Estudio y reintentá.`)
+        if (!recovered) throw new MissingCooperationFileError(path)
         repairedReferences.set(value, `workspace://${recovered}`)
         path = recovered
         value = `workspace://${recovered}`

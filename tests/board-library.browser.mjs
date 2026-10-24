@@ -14,7 +14,6 @@ function pdfBytes() {
 }
 async function setup(t) {
   const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})
-  t.after(()=>browser.close())
   const context=await browser.newContext({viewport:{width:1440,height:900},serviceWorkers:'block'})
   const errors=[]
   context.on('page',page=>page.on('pageerror',error=>{errors.push(error.message);console.error('Excepción de navegador:',error.stack)}))
@@ -45,7 +44,12 @@ async function setup(t) {
     db.close()
   },pdfBytes())
   t.after(async()=>{
-    if(t.error){await mkdir('test-results',{recursive:true});await page.screenshot({path:'test-results/board-library-failure.png'}).catch(()=>{});console.error((await page.locator('body').innerText().catch(()=>'' )).slice(-4500))}
+    try {
+      if(t.error){
+        await mkdir('test-results',{recursive:true});await page.screenshot({path:'test-results/board-library-failure.png'}).catch(()=>{})
+        for(const frame of page.frames())console.error('Board library diagnostics:',frame.url(),(await frame.locator('body').innerText().catch(()=>'' )).slice(-4500),await frame.evaluate(()=>({failTopicSave:window.failTopicSave,writes:window.topicTestWrites})).catch(()=>({})))
+      }
+    } finally { await browser.close() }
   })
   return {page,context,errors}
 }
@@ -146,10 +150,14 @@ test('topic boards use the floating arrow, retain Escape, split with real Study 
 
 test('topic arrow keeps the board open on a save failure and closes after a successful retry',{timeout:60000},async t=>{
   const {page}=await setup(t),board=await openTopic(page)
-  await board.locator('canvas').first().evaluate(()=>{
+  // The directory handle is transferred from Study. Its file methods can use
+  // either frame's realm, so inject the disk failure in both realms.
+  for(const frame of page.frames())await frame.evaluate(()=>{
     const original=FileSystemFileHandle.prototype.createWritable
     window.failTopicSave=true
+    window.topicTestWrites=[]
     FileSystemFileHandle.prototype.createWritable=function(...args){
+      window.topicTestWrites.push(this.name)
       if(window.failTopicSave&&this.name==='test-integrales.json')return Promise.reject(new Error('No se pudo escribir la pizarra de prueba.'))
       return original.apply(this,args)
     }
@@ -157,7 +165,7 @@ test('topic arrow keeps the board open on a save failure and closes after a succ
   await page.getByRole('button',{name:'Volver a Temas',exact:true}).click()
   await expect(page.getByRole('alert').filter({hasText:'No se pudo escribir la pizarra de prueba.'}).first()).toBeVisible()
   await expect(board.locator('.app')).toBeVisible()
-  await board.locator('canvas').first().evaluate(()=>{window.failTopicSave=false})
+  for(const frame of page.frames())await frame.evaluate(()=>{window.failTopicSave=false})
   await page.getByRole('button',{name:'Volver a Temas',exact:true}).click()
   await expect(page.locator('iframe[title^="Pizarra de"]')).toHaveCount(0)
 })

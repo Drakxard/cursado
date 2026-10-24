@@ -455,8 +455,8 @@ async function preserveUnavailableMirror(mirror: Mirror): Promise<boolean> {
 }
 async function scanCooperationMirror(handle: FileSystemDirectoryHandle, mirror: Mirror) {
   const b = mirror.binding
-  return scanSphere(handle, b, {
-    resources: { ...mirror.baseline.resources, ...mirror.incoming?.resources },
+  const scan = (resources: Record<string, Resource>) => scanSphere(handle, b, {
+    resources,
     restore: async (resource, path) => {
       const response = await fetch(`/pizarra/api/cooperation/spheres/${b.id}/files/${resource.blob!.hash}`, { cache: 'no-store' })
       if (!response.ok) throw new Error(`No se pudo recuperar el archivo local «${path}» (HTTP ${response.status}).`)
@@ -465,6 +465,21 @@ async function scanCooperationMirror(handle: FileSystemDirectoryHandle, mirror: 
       await writeFile(handle, path, blob, true)
     },
   })
+  try { return await scan({ ...mirror.baseline.resources, ...mirror.incoming?.resources }) }
+  catch (error) {
+    if ((error as Error).name !== 'MissingCooperationFileError' || mirror.incoming) throw error
+    // A sphere exposes metadata before its uploads finish. A receiver must be
+    // able to discover those later files before treating a local absence as a
+    // deletion or blocking on its older, metadata-only snapshot.
+    const latest = await cooperationApi(`spheres/${b.id}/snapshot`) as Snapshot
+    if (latest.seq <= mirror.baseline.seq) throw error
+    await prepareBinding(b, latest.resources)
+    const files = await scan({ ...mirror.baseline.resources, ...latest.resources })
+    mirror.incoming = latest
+    mirror.incomingApplied = []
+    await save()
+    return files
+  }
 }
 async function synchronizeMirror(mirror: Mirror) {
   const revision = syncRevision
