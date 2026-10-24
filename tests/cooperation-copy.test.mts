@@ -10,7 +10,8 @@ test('sharing across groups reuses one sphere, local files and remote content',a
     builder.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const getReadyWorkspaceHandle=()=>globalThis.__copyRoot;export const loadWorkspaceHandle=async()=>globalThis.__copyRoot;export const queryWorkspacePermission=async()=>"granted";export const getReadyInscreenConfigToken=()=>"";export const loadServicesFile=async()=>null'}))
   }}]})
   const backend=authRuntime(),fs=memoryWorkspace(),previous={fetch:globalThis.fetch,window:globalThis.window,storage:globalThis.localStorage,socket:globalThis.WebSocket}
-  globalThis.window=new EventTarget() as any;globalThis.localStorage={getItem:()=>null,setItem(){}} as any;globalThis.WebSocket=class{close(){}} as any
+  const localValues=new Map<string,string>()
+  globalThis.window=new EventTarget() as any;globalThis.localStorage={getItem:(key:string)=>localValues.get(key)||null,setItem(key:string,value:string){localValues.set(key,value)}} as any;globalThis.WebSocket=class{close(){}} as any
   ;(globalThis as any).__copyRoot=fs.root
   Object.defineProperty(navigator,'onLine',{value:true,configurable:true})
   t.after(()=>{backend.close();globalThis.fetch=previous.fetch;globalThis.window=previous.window;globalThis.localStorage=previous.storage;globalThis.WebSocket=previous.socket;delete (globalThis as any).__copyRoot})
@@ -195,12 +196,14 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   const active=client.synchronizeCooperation()
   await ready
   const undo=client.undoCooperationSphere(race.id)
+  assert.deepEqual(JSON.parse(localValues.get(`cursado-cooperation-undo:${saved.userId}`)!),[race.id],'undo intent survives reload before the active transfer stops')
   assert.equal(client.cooperationUndoStatus(race.id),'stopping','undo reports progress before waiting on an active transfer')
   await new Promise(resolve=>setTimeout(resolve,10))
   assert.equal(undoRequests,0,'remote undo must wait for the in-flight commit')
   release()
   await Promise.all([active,undo])
   await client.synchronizeCooperation()
+  assert.deepEqual(JSON.parse(localValues.get(`cursado-cooperation-undo:${saved.userId}`)!),[],'clear durable intent only after saving local cleanup')
   assert.equal(undoRequests,1)
   assert.equal(lateCommits,0)
   assert.equal(client.cooperationState().mirrors[race.id],undefined)
@@ -256,5 +259,12 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   await client.synchronizeCooperation()
   assert.match(client.cooperationState().mirrors[checked.id].error,/403/)
   assert.equal((await fs.json('manifests/subject-catalog.json')).subjects['access-check'].cooperationId,checked.id,'a rejected request must not detach a sphere still present in the authenticated directory')
+  globalThis.fetch=fetchBefore403
+  localValues.set(`cursado-cooperation-undo:${saved.userId}`,JSON.stringify([checked.id]))
+  const reloaded=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}#reload`)
+  await reloaded.refreshCooperation()
+  assert.equal(reloaded.cooperationState().mirrors[checked.id],undefined,'reload completes an undo saved before cleanup')
+  assert.equal((await fs.json('manifests/materials/AccessCheck/week-1.json')).materials[0].file_name,'Keep association')
+
 
 })

@@ -14,7 +14,7 @@ export type Resource = { key: string; type: 'json' | 'blob' | 'delete'; value?: 
 type Snapshot = { seq: number; resources: Record<string, Resource>; conflicts: Json[] }
 type Operation = { id: string; changes: (Resource & { base?: Json; baseHash?: string })[] }
 export type PendingDeletion = { id: string; sphereId: string; key: string; selector: string[]; value?: Json; label: string; decision: 'wait' | 'keep' | 'delete'; notified?: boolean }
-type Mirror = { repair?: { originalId: string; groupIds: string[]; seq: number; files: { path: string; hash: string; sourcePath: string; sourceHash: string }[] }; copiedFrom?: string; copySource?: {subjectId:string;storageKey:string}; selection?: WeekSelection; binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; incomingApplied?: string[]; downloading?: boolean; metadataReady?: boolean; transfer?: { phase: 'copying' | 'uploading' | 'downloading'; completed: number; total: number }; error?: string }
+type Mirror = { repair?: { originalId: string; groupIds: string[]; seq: number; files: { path: string; hash: string; sourcePath: string; sourceHash: string }[] }; copiedFrom?: string; copySource?: {subjectId:string;storageKey:string}; selection?: WeekSelection; binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; incomingApplied?: string[]; downloading?: boolean; metadataReady?: boolean; transfer?: { phase: 'copying' | 'uploading' | 'checking' | 'downloading'; completed: number; total: number }; error?: string }
 export type CooperationState = { version: 1; userId: string; groups: CooperativeGroup[]; mirrors: Record<string, Mirror>; deletions: PendingDeletion[]; dismissedSpheres?: string[]; removedSpheres?: string[]; error?: string }
 let state: CooperationState = { version: 1, userId: '', groups: [], mirrors: {}, deletions: [] }
 let activeRoot: FileSystemDirectoryHandle | null = null
@@ -30,6 +30,20 @@ const presences = new Map<string, { users: { id: string; name: string; color: st
 export const cooperationState = () => state
 const confirmedMirrors = new Set<string>()
 const undoingSpheres = new Set<string>()
+// Persist cancellation synchronously, before waiting for a transfer or disk lock.
+function pendingUndoIds(): string[] {
+  try { return JSON.parse(localStorage.getItem(`cursado-cooperation-undo:${state.userId}`) || '[]') } catch { return [] }
+}
+function persistUndo(ids: string[]) {
+  localStorage.setItem(`cursado-cooperation-undo:${state.userId}`, JSON.stringify(ids))
+}
+async function resumePendingUndos() {
+  for (const id of pendingUndoIds()) {
+    if (state.mirrors[id]?.binding.owner) await undoCooperationSphere(id)
+  }
+}
+const isUndoPending = (id: string) => undoingSpheres.has(id) || pendingUndoIds().includes(id)
+
 type UndoStage = 'stopping' | 'remote' | 'local'
 const undoStages = new Map<string, UndoStage>()
 export const cooperationUndoStatus = (sphereId: string) => undoStages.get(sphereId)
@@ -60,6 +74,7 @@ async function root() {
 }
 let saveQueue: Promise<unknown> = Promise.resolve()
 async function save() {
+  cooperationChanged()
   const handle = activeRoot, userId = state.userId, snapshot = structuredClone(state)
   if (handle && userId) {
     const write = () => writeJson(handle, `.cooperation/${userId}/state.json`, snapshot)
@@ -101,6 +116,7 @@ export async function refreshCooperation() {
     localStorage.setItem('cursado-cooperation-user', result.user.id)
   }
   await withStateLock(async () => { state.groups = result.groups.map(group=>({...group,spheres:group.spheres.filter(sphere=>!state.removedSpheres?.includes(sphere.id))})); delete state.error; await save() })
+  await resumePendingUndos()
   return state
 }
 export async function restoreCooperationOffline() {
@@ -109,6 +125,7 @@ export async function restoreCooperationOffline() {
   activeRoot = await root()
   state = await readJson(activeRoot, `.cooperation/${userId}/state.json`, { version: 1, userId, groups: [], mirrors: {}, deletions: [] } as CooperationState)
   cooperationChanged()
+  await resumePendingUndos()
 }
 export async function createCooperationGroup(names: string) {
   const result = await cooperationApi('groups', { names })
@@ -145,6 +162,7 @@ export async function undoCooperationSphere(sphereId: string) {
   const mirror=state.mirrors[sphereId]
   if(!mirror?.binding.owner)throw new Error('Solo se puede deshacer un intento propio.')
   if(undoingSpheres.has(sphereId))return
+  persistUndo([...new Set([...pendingUndoIds(), sphereId])])
   undoingSpheres.add(sphereId)
   const stage = (value: UndoStage) => { undoStages.set(sphereId, value); cooperationChanged() }
   delete state.error
@@ -187,6 +205,7 @@ export async function undoCooperationSphere(sphereId: string) {
       for(const group of state.groups)group.spheres=group.spheres.filter(sphere=>sphere.id!==sphereId)
       sockets.get(sphereId)?.close();sockets.delete(sphereId);confirmedMirrors.delete(sphereId)
       await save()
+      persistUndo(pendingUndoIds().filter(id => id !== sphereId))
       window.dispatchEvent(new CustomEvent('cursado-cooperation-undone',{detail:{binding:b,removedCopy}}))
     })
   } catch (error) { state.error=error instanceof Error?error.message:String(error);throw error }
@@ -507,7 +526,7 @@ async function synchronizeMirror(mirror: Mirror) {
   const revision = syncRevision
   const handle = await root(), b = mirror.binding
   let moreChanges = false
-  if (undoingSpheres.has(b.id) || state.removedSpheres?.includes(b.id)) return
+  if (isUndoPending(b.id) || state.removedSpheres?.includes(b.id)) return
   if (state.deletions.some(d => d.sphereId === b.id && d.key === 'sphere.json' && d.decision !== 'wait')) return
   if (mirror.selection?.choosing) {
     const snapshot = await cooperationApi(`spheres/${b.id}/snapshot`) as Snapshot
@@ -600,7 +619,7 @@ async function synchronizeMirror(mirror: Mirror) {
     mirror.transfer = { phase: 'uploading', completed: 0, total: mirror.outbox.changes.filter(change => change.blob).length }
     await save()
     for (const change of mirror.outbox.changes) if (change.blob) {
-      if (undoingSpheres.has(b.id)) return
+      if (isUndoPending(b.id)) return
       const file = current.get(change.key)?.blob
       // A queued file may have changed while offline. Its exact bytes live in staging.
       const staging = `.cooperation/${state.userId}/uploads/${change.blob.hash}`
@@ -627,7 +646,7 @@ async function synchronizeMirror(mirror: Mirror) {
         delete change[field]
       }
     }
-    if (undoingSpheres.has(b.id)) return
+    if (isUndoPending(b.id)) return
     await cooperationApi(`spheres/${b.id}/operations`, wire)
     // Do not clear the durable outbox until the corresponding snapshot is local.
   }
@@ -653,7 +672,28 @@ async function synchronizeMirror(mirror: Mirror) {
   const incomingSelection = mirror.selection ? await selectionResources(remote.resources, mirror.selection.excludedWeeks) : null
   const incomingAllowed = incomingSelection?.allowed
   const incomingResources = Object.entries(remote.resources).filter(([key]) => !incomingAllowed || incomingAllowed.has(key)).sort(([, a], [, b]) => priority(a) - priority(b))
-  mirror.transfer = { phase: 'downloading', completed: 0, total: incomingResources.filter(([key,r]) => r.blob && !mirror.incomingApplied!.includes(key) && (!eq(previous.resources[key],r) || mirror.downloading)).length }
+  const binaries = incomingResources.filter(([key, r]) => !r.deleted && r.blob && (!eq(previous.resources[key], r) || mirror.downloading))
+  const applied = new Set(mirror.incomingApplied)
+  mirror.transfer = { phase: 'checking', completed: 0, total: binaries.length }
+  cooperationChanged()
+  // Validate local bytes first, including the publisher's own files. Only missing
+  // or different content needs a network transfer. Keep one denominator on retry.
+  for (const [key, resource] of binaries) {
+    if (isUndoPending(b.id)) return
+    if (!applied.has(key)) {
+      const destination = key.startsWith('scope/board-assets/') ? `.cooperation/assets/${b.id}/${resource.blob!.hash}` : mapBindingText(key, b, true)
+      const existing = await readFile(handle, destination)
+      const file = existing || current.get(key)?.blob
+      if (file && file.size === resource.blob!.size && await digest(file) === resource.blob!.hash) {
+        if (!existing) await applyMirrorFile(handle, b, key, file)
+        mirror.incomingApplied.push(key); applied.add(key)
+      }
+    }
+    mirror.transfer.completed++
+    cooperationChanged()
+  }
+  mirror.transfer = { phase: 'downloading', completed: binaries.filter(([key]) => applied.has(key)).length, total: binaries.length }
+  await save()
   let metadataExposed = false
   const changedMetadata = incomingResources.some(([key,r]) => metadataResource(r) && !eq(previous.resources[key],r))
   const exposeMetadata = async () => {
@@ -666,7 +706,7 @@ async function synchronizeMirror(mirror: Mirror) {
     window.dispatchEvent(new CustomEvent('cursado-cooperation-applied', { detail: b }))
   }
   for (const [key, rawResource] of incomingResources) {
-    if (undoingSpheres.has(b.id)) return
+    if (isUndoPending(b.id)) return
     const resource = key === 'scope/tags.json' && incomingSelection ? { ...rawResource, value: projectSelectionTags(rawResource.value, incomingSelection.materialIds) } : rawResource
     if (!metadataResource(resource)) await exposeMetadata()
     if (mirror.incomingApplied.includes(key)) continue
@@ -835,12 +875,12 @@ async function repairLegacyCooperationCopies() {
   }
 }
 async function connectMirror(id: string) {
-  if (undoingSpheres.has(id) || (state.removedSpheres || []).includes(id) || sockets.has(id) || connectingSockets.has(id) || navigator.onLine === false) return
+  if (isUndoPending(id) || (state.removedSpheres || []).includes(id) || sockets.has(id) || connectingSockets.has(id) || navigator.onLine === false) return
   connectingSockets.add(id)
   const userId = state.userId, directory = id === '@directory', generation = connectionGeneration
   try {
     const { url } = await cooperationApi(directory ? 'notifications/ticket' : `spheres/${id}/ticket`, {})
-    if (undoingSpheres.has(id) || (!directory && !state.mirrors[id]) || sockets.has(id) || state.userId !== userId || generation !== connectionGeneration) return
+    if (isUndoPending(id) || (!directory && !state.mirrors[id]) || sockets.has(id) || state.userId !== userId || generation !== connectionGeneration) return
     const socket = new WebSocket(url); sockets.set(id, socket)
     socket.onopen = () => connectedBackground?.()
     socket.onmessage = event => { try {
@@ -879,9 +919,9 @@ export function synchronizeCooperation(): Promise<void> {
       const execute = async () => {
         await repairLegacyCooperationCopies()
         for (const mirror of Object.values(state.mirrors)) {
-          if(mirror.repair || mirror.copySource || state.removedSpheres?.includes(mirror.binding.id) || undoingSpheres.has(mirror.binding.id))continue
+          if(mirror.repair || mirror.copySource || state.removedSpheres?.includes(mirror.binding.id) || isUndoPending(mirror.binding.id))continue
           for (let attempt = 0; attempt < 3; attempt++) {
-            try { while (await synchronizeMirror(mirror)) { if(undoingSpheres.has(mirror.binding.id))break }; break }
+            try { while (await synchronizeMirror(mirror)) { if(isUndoPending(mirror.binding.id))break }; break }
             catch (error) {
               // An atomic local save can invalidate a File snapshot kept by a
               // long transfer. Re-scan with fresh handles before showing an error.

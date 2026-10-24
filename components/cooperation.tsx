@@ -139,11 +139,11 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
             else if (deleted?.decision === 'wait') window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending: deleted, open: () => onOpen(mirror.binding.subjectId, group.id) } }))
             else onOpen(mirror.binding.subjectId, group.id)
           }}>{sphere.name}</button>
-          {mirror?.transfer && <p role="status">{mirror.transfer.phase==='copying'?'Preparando acceso':mirror.transfer.phase==='uploading'?'Subiendo':'Descargando'} {mirror.transfer.total?Math.min(99,Math.floor(100*mirror.transfer.completed/mirror.transfer.total)):0}%</p>}
+          {mirror?.transfer && <p role="status">{mirror.transfer.phase==='copying'?'Preparando acceso':mirror.transfer.phase==='uploading'?'Subiendo':mirror.transfer.phase==='checking'?'Validando archivos locales':'Sincronizando'} {mirror.transfer.total?Math.min(100,Math.floor(100*mirror.transfer.completed/mirror.transfer.total)):0}%</p>}
           {sphere.ready === false && <p role="status" className="mt-1 text-xs">Preparando publicación…</p>}
           {!ready && sphere.ready !== false && <p className="mt-1 text-xs">Pendiente · {(sphere.bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB</p>}
           {deleted?.decision === 'keep' && <p className="text-xs">Personal</p>}
-          {mirror?.transfer && <p role="status" className="mt-1 text-xs">{mirror.transfer.phase === 'copying' ? 'Preparando acceso' : mirror.transfer.phase === 'uploading' ? 'Subiendo' : 'Descargando'} archivos en segundo plano: {mirror.transfer.completed}/{mirror.transfer.total}</p>}
+          {mirror?.transfer && <p role="status" className="mt-1 text-xs">{mirror.transfer.phase === 'copying' ? 'Preparando acceso' : mirror.transfer.phase === 'uploading' ? 'Subiendo' : mirror.transfer.phase === 'checking' ? 'Validando' : 'Sincronizando'} archivos en segundo plano: {mirror.transfer.completed}/{mirror.transfer.total}</p>}
           {mirror?.error && <div role="alert" className="text-xs text-red-600">{mirror.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button>{mirror.binding.owner&&<UndoCooperationButton sphereId={sphere.id}/>}</div>}
           {mirror && mirror.baseline.conflicts.length > 0 && <details className="mt-2 text-left text-xs"><summary>Versiones recuperadas ({mirror.baseline.conflicts.length})</summary>{mirror.baseline.conflicts.map((entry, index) => <button key={index} className="mt-2 block underline" onClick={async () => {
             const item = entry as { key?: string; blob?: { hash: string } }

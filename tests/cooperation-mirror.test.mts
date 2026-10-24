@@ -42,6 +42,7 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
         actor.uploads = (actor.uploads || 0) + 1
         if (actor.beforeUpload) await actor.beforeUpload(String(url))
       }
+      if (String(url).includes('/files/') && !options.method) actor.downloads = (actor.downloads || 0) + 1
       const response = await backend.fetch(request)
       if (actor.corruptDownload && String(url).includes('/files/') && !options.method) { actor.corruptDownload = false; return new Response('corrupted bytes', { status: 200 }) }
       return response
@@ -85,6 +86,7 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   }
   const binding = await use(a, () => a.client.shareCooperationSphere(groupId, { id: 'algebra', name: 'Álgebra', color: '#2563eb' }))
   assert.ok(binding.id)
+  assert.equal(a.downloads || 0, 0, 'publisher validates its local bytes without downloading its own files')
   assert.equal(checkedPublication, true)
   for (const actor of [b, c]) {
     await actor.fs.put('manifests/subject-catalog.json', { version: 2, subjects: { algebra: { id: 'algebra', name: 'Personal', storageKey: 'Personal' } } })
