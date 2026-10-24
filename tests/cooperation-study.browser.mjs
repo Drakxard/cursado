@@ -12,14 +12,22 @@ test('actual Study references one sphere across groups and accepts its local mir
     request(path,{body,cookie}={}){return fetch(origin+'/pizarra'+path,{method:body===undefined?'GET':'POST',headers:{Origin:origin,...(cookie?{Cookie:cookie}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})})},
   }:authRuntime(origin);t.after(()=>backend.close())
   const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})});t.after(async()=>{
-    if(production){
+    if(production||t.error){
       const diagnostics=[]
       for(const context of browser.contexts())for(const page of context.pages())diagnostics.push(await page.evaluate(async()=>{
         const user=localStorage.getItem('cursado-cooperation-user');let state
         try{const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study');const dir=await(await root.getDirectoryHandle('.cooperation')).getDirectoryHandle(user);state=JSON.parse(await(await(await dir.getFileHandle('state.json')).getFile()).text())}catch{}
-        return {url:location.href,body:document.body.innerText,user,state}
+        let catalog,files=[]
+        try {
+          const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study')
+          catalog=JSON.parse(await(await(await(await root.getDirectoryHandle('manifests')).getFileHandle('subject-catalog.json')).getFile()).text())
+          const walk=async(dir,prefix='')=>{for await(const [name,entry]of dir.entries()){const path=prefix+name;if(entry.kind==='directory')await walk(entry,path+'/');else files.push(path)}}
+          for(const name of ['teoria','manifests/materials']){let dir=root;for(const segment of name.split('/'))dir=await dir.getDirectoryHandle(segment);await walk(dir,name+'/')}
+        } catch {}
+        return {url:location.href,body:document.body.innerText,user,state,catalog,files}
       }).catch(error=>({error:error.message})))
-      await mkdir('.cache',{recursive:true});await writeFile('.cache/cooperation-production-diagnostics.json',JSON.stringify(diagnostics,null,2))
+      await mkdir('test-results',{recursive:true});await writeFile('test-results/cooperation-study-diagnostics.json',JSON.stringify(diagnostics,null,2))
+      if(t.error)console.error('Cooperation diagnostics:',JSON.stringify(diagnostics.map(({state,...diagnostic})=>({...diagnostic,mirrors:Object.values(state?.mirrors||{}).map(m=>({binding:m.binding,error:m.error,downloading:m.downloading,transfer:m.transfer,resources:Object.keys(m.baseline.resources)}))}))))
     }
     await browser.close()
   })
@@ -151,7 +159,9 @@ test('actual Study references one sphere across groups and accepts its local mir
     },sphereId),false)
     await a.evaluate(async()=>{
       const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study')
-      const materials=await(await(await root.getDirectoryHandle('manifests')).getDirectoryHandle('materials')).getDirectoryHandle('Algebra')
+      const manifests=await root.getDirectoryHandle('manifests')
+      const catalog=JSON.parse(await(await(await manifests.getFileHandle('subject-catalog.json')).getFile()).text())
+      const materials=await(await manifests.getDirectoryHandle('materials')).getDirectoryHandle(catalog.subjects['algebra-local'].storageKey)
       const writer=await(await materials.getFileHandle('week-999.json',{create:true})).createWritable()
       await writer.write('{"materials":');await writer.close()
       window.dispatchEvent(new Event('cursado-workspace-saved'))
@@ -170,7 +180,9 @@ test('actual Study references one sphere across groups and accepts its local mir
     await expect(a.getByText(/week-999.json/).first()).toBeVisible()
     await a.evaluate(async()=>{
       const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study')
-      const materials=await(await(await root.getDirectoryHandle('manifests')).getDirectoryHandle('materials')).getDirectoryHandle('Algebra')
+      const manifests=await root.getDirectoryHandle('manifests')
+      const catalog=JSON.parse(await(await(await manifests.getFileHandle('subject-catalog.json')).getFile()).text())
+      const materials=await(await manifests.getDirectoryHandle('materials')).getDirectoryHandle(catalog.subjects['algebra-local'].storageKey)
       await materials.removeEntry('week-999.json')
       window.dispatchEvent(new Event('cursado-workspace-saved'))
     })

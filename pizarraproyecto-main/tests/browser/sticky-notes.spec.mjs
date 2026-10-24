@@ -58,6 +58,8 @@ test('write on the note, preview its appearance, save outside and preserve undo 
   await page.keyboard.press('Control+y')
   await expect.poll(async () => (await shapes(page))[0]?.note?.text).toBe('Cambio confirmado con Escape')
   await page.reload()
+  await expect(page.locator('.toolbar')).toBeVisible()
+  await expect.poll(async () => (await shapes(page))[0]?.note?.text).toBe('Cambio confirmado con Escape')
   await page.mouse.dblclick(note.x + 50, note.y + 50)
   await expect(text).toHaveValue('Cambio confirmado con Escape')
   await text.fill('Cambio descartado con el botón')
