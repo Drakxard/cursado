@@ -134,6 +134,22 @@ test('actual Study copies an existing sphere into a group and accepts its local 
     await a.reload();await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
     await a.locator('[data-study-workspace-tabs]').focus();await a.locator('[data-study-workspace-tabs] button').first().click()
     await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
+    const invited=await backend.request('/api/cooperation/groups',{cookie:actors[1].cookie,body:{names:actors[0].name}})
+    assert.equal(invited.status,201)
+    const invitedGroupId=(await invited.json()).id
+    await a.reload()
+    await a.locator('[data-study-workspace-tabs]').focus()
+    await a.getByRole('button',{name:'Cooperativo',exact:true}).click()
+    const pendingGroup=a.locator(`[data-cooperation-group="${invitedGroupId}"]`)
+    await pendingGroup.getByRole('button',{name:'Aceptar invitación',exact:true}).click()
+    await expect(pendingGroup.getByRole('button',{name:'Aceptar invitación',exact:true})).toHaveCount(0)
+    const acceptedGroups=await(await backend.request('/api/cooperation/groups',{cookie:actors[0].cookie})).json()
+    assert.equal(acceptedGroups.groups.find(group=>group.id===invitedGroupId).accepted,true)
+    await a.reload()
+    await a.locator('[data-study-workspace-tabs]').focus()
+    await a.getByRole('button',{name:'Cooperativo',exact:true}).click()
+    await expect(pendingGroup.getByText('Este grupo está vacío.',{exact:true})).toBeVisible()
+    await expect(pendingGroup.getByRole('button',{name:'Aceptar invitación',exact:true})).toHaveCount(0)
     return
   }
   const c=await setup(actors[2]);await c.goto(origin+'/estudio')

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { ListChecks, RefreshCw, X } from 'lucide-react'
-import { acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
+import { acceptCooperationGroup, acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
 import { isNativeReadOnly } from '@/lib/native-workspace'
 import { cooperationSubjectSyncDetails, cooperationSubjectSyncLabel } from '@/lib/client/cooperation'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -90,6 +90,18 @@ export function CooperationInvitation({ sphere, onClose, onAccepted }: { sphere:
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
   </section>
 }
+function CooperationGroupInvitation({ groupId }: { groupId: string }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('')
+  return <div className="max-w-xs space-y-2 text-right">
+    <button type="button" disabled={busy} className="rounded-lg border px-3 py-2 text-sm hover:bg-accent disabled:opacity-50" onClick={async () => {
+      setBusy(true); setError('')
+      try { await acceptCooperationGroup(groupId) }
+      catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
+      finally { setBusy(false) }
+    }}>{busy ? 'Aceptando…' : 'Aceptar invitación'}</button>
+    {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+  </div>
+}
 export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, groupId: string) => void }) {
   const state = useCooperation(), [invite, setInvite] = useState<CooperativeSphere | null>(null), [error, setError] = useState('')
   return <section className="relative z-10 mx-auto w-full max-w-2xl space-y-5 rounded-2xl border bg-background p-6 shadow-sm" aria-label="Estudio cooperativo">
@@ -97,8 +109,11 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
     <CooperationGroupForm />
     {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
     {!state.groups.length && <p className="text-muted-foreground">Todavía no hay esferas compartidas. Agregá compañeros y copiá o mové una esfera al grupo.</p>}
-    {state.groups.map(group => <section key={group.id} className="space-y-3 rounded-xl border p-4">
-      <h2>{group.members.map(m => m.display_name).join(', ')}</h2>
+    {state.groups.map(group => <section key={group.id} data-cooperation-group={group.id} className="space-y-3 rounded-xl border p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h2 className="min-w-0 break-words">{group.members.map(m => m.display_name).join(', ')}</h2>
+        {!group.accepted && <CooperationGroupInvitation groupId={group.id} />}
+      </div>
       {!group.spheres.length && <p className="text-sm text-muted-foreground">Este grupo está vacío.</p>}
       <div className="flex flex-wrap gap-4">{group.spheres.map(sphere => {
         const mirror = state.mirrors[sphere.id], ready = mirror && (!mirror.downloading || mirror.metadataReady)

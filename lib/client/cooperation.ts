@@ -99,6 +99,10 @@ export async function createCooperationGroup(names: string) {
   await refreshCooperation()
   return result.id as string
 }
+export async function acceptCooperationGroup(groupId: string) {
+  await cooperationApi(`groups/${groupId}/accept`, {})
+  await refreshCooperation()
+}
 async function installSubject(b: SphereBinding) {
   const handle = await root(), timestamp = new Date().toISOString()
   const catalog = await readJson<{ version: number; subjects: Record<string, Record<string, unknown>> }>(handle, 'manifests/subject-catalog.json', { version: 2, subjects: {} })
@@ -138,7 +142,7 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
   await refreshCooperation()
   const group=state.groups.find(group=>group.id===groupId)
   if(!group)throw new Error('Este grupo ya no está disponible. Volvé a abrir Copiar a.')
-  if(!group.accepted){await cooperationApi(`groups/${groupId}/accept`,{});await refreshCooperation()}
+  if(!group.accepted)await acceptCooperationGroup(groupId)
   const binding = await withStateLock(async () => {
   const already = Object.values(state.mirrors).find(m => m.binding.groupId === groupId && (m.binding.subjectId === subject.id || m.copiedFrom===subject.id))
   if (already) {if(!already.copySource)await installSubject(already.binding);await save();return already.binding}
