@@ -1810,6 +1810,7 @@ export function SubjectWheel({
       setDeleteSummaries([])
       return
     }
+    if(Object.values(cooperative.mirrors).some(m=>m.binding.owner&&(m.error||m.copySource)&&getDeleteTargetSubjectIds(deleteConfirmationTarget).includes(m.binding.subjectId))){setDeleteSummaries([]);setIsPreparingPermanentDelete(false);return}
     let cancelled = false
     setIsPreparingPermanentDelete(true)
     void Promise.all(getDeleteTargetSubjectIds(deleteConfirmationTarget).map(getLocalSubjectDeletionSummary))
