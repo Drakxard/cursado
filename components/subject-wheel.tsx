@@ -1,4 +1,6 @@
 "use client"
+import { useMaterialImagesDialog } from "./material-images-dialog"
+import { createPdfFromImages, isMaterialImage } from "@/lib/client/images-to-pdf"
 import { HoldActionButton } from "./hold-action-button"
 import { InlinePdfName } from "./inline-pdf-name"
 
@@ -2313,6 +2315,8 @@ export function SubjectWheel({
     removeSubjectShortcut: persistRemovedSubjectShortcut,
   } = useSubjectEntries()
   const { isUploadingMaterialType, uploadMaterials } = useMaterialUploads()
+  const materialImages = useMaterialImagesDialog()
+  const [isConvertingImages, setIsConvertingImages] = useState(false)
   const materialTags = useMaterialTags({
     subjectId: isDialogOpen ? currentSubject?.id : undefined,
     weekNumber: isDialogOpen ? dialogSelectedWeekNumber : undefined,
@@ -5036,10 +5040,11 @@ export function SubjectWheel({
     if ((!currentSubject && !contextSnapshot) || files.length === 0) return
 
     const validFiles = files.filter((file) => isPdfFile(file))
-    const skippedFiles = files.filter((file) => !isPdfFile(file))
+    const images = files.filter((file) => !isPdfFile(file) && isMaterialImage(file))
+    const skippedFiles = files.filter((file) => !isPdfFile(file) && !isMaterialImage(file))
 
-    if (validFiles.length === 0) {
-      setEntriesError("Solo se permiten archivos PDF.")
+    if (validFiles.length === 0 && images.length === 0) {
+      setEntriesError("Solo se permiten PDF, JPG, PNG y WebP.")
       return
     }
 
@@ -5051,6 +5056,30 @@ export function SubjectWheel({
     const weekdayIndex = contextSnapshot?.weekdayIndex ?? (subjectDialogDayIndex >= 0 ? subjectDialogDayIndex : 0)
 
     setEntriesError("")
+    const conversionErrors: string[] = []
+    if (images.length) {
+      const choice = images.length === 1
+        ? { files: images, combined: false, name: "Apuntes" }
+        : await materialImages.choose(images)
+      if (!choice) return
+      setIsConvertingImages(true)
+      try {
+        const batches = choice.combined ? [choice.files] : choice.files.map(file => [file])
+        for (const batch of batches) {
+          try {
+            const result = await createPdfFromImages(batch, choice.combined ? choice.name : batch[0].name.replace(/\.[^.]+$/, ""))
+            if (result.file) validFiles.push(result.file)
+            conversionErrors.push(...result.errors)
+          } catch (error) {
+            conversionErrors.push(`${batch.map(file => file.name).join(", ")}: ${error instanceof Error ? error.message : "No se pudo convertir."}`)
+          }
+        }
+      } finally { setIsConvertingImages(false) }
+    }
+    if (!validFiles.length) {
+      setEntriesError(conversionErrors.join(" | "))
+      return
+    }
     const failedUploads = await uploadMaterials({
       subjectId,
       subjectName,
@@ -5097,8 +5126,8 @@ export function SubjectWheel({
       setPendingMaterials,
     })
 
-    if (failedUploads.length > 0) {
-      setEntriesError(failedUploads.join(" | "))
+    if (failedUploads.length > 0 || conversionErrors.length > 0) {
+      setEntriesError([...conversionErrors, ...failedUploads].join(" | "))
     } else if (skippedFiles.length > 0) {
       setEntriesError("")
     }
@@ -5109,8 +5138,8 @@ export function SubjectWheel({
         title: "Archivos ignorados",
         description:
           skippedFiles.length === 1
-            ? `${skippedFiles[0].name} no es un PDF valido.`
-            : `Se ignoraron ${skippedFiles.length} archivos que no eran PDF.`,
+            ? `${skippedFiles[0].name} no es un PDF o una imagen compatible.`
+            : `Se ignoraron ${skippedFiles.length} archivos no compatibles.`,
         variant: "destructive",
       })
     }
@@ -6930,6 +6959,14 @@ export function SubjectWheel({
               </button>
             )}
             <div className="ml-auto flex items-center gap-1">
+              <label data-workspace-write={isNativeReadOnly() || undefined} className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg hover:bg-muted" title="Subir archivos">
+                <Plus className="h-4 w-4" aria-hidden />
+                <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" aria-label={`Subir archivos a ${title}`} disabled={isConvertingImages || isUploadingMaterialType !== null || isNativeReadOnly()} className="absolute inset-0 w-full cursor-pointer opacity-0" onChange={event => {
+                  const selected = Array.from(event.currentTarget.files ?? [])
+                  event.currentTarget.value = ""
+                  void handleMaterialUpload(mode, selected, container?.id ?? null)
+                }} />
+              </label>
               {localWorkspace.rootHandle && currentSubject && <button type="button"
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-muted"
                 aria-label={`Abrir pizarra de ${title}`} title={`Abrir pizarra de ${title}`}
@@ -7446,6 +7483,8 @@ export function SubjectWheel({
       )}
       aria-busy={isRefreshingCachedHome}
     >
+      {materialImages.dialog}
+      {isConvertingImages && <div role="status" className="fixed bottom-4 left-1/2 z-[100] -translate-x-1/2 rounded-lg border bg-background px-4 py-2 text-sm">Convirtiendo imágenes…</div>}
       {isRefreshingCachedHome ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-2 z-50 text-center text-xs text-muted-foreground">
           Actualizando datos locales…
