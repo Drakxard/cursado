@@ -6,7 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 
 const origin=process.env.CURSADO_TEST_URL || 'http://localhost:3007'
 const production=process.env.COOP_PRODUCTION_TEST==='1'
-test('actual Study copies an existing sphere into a group and accepts its local mirror in another browser',{timeout:production?240000:90000},async t=>{
+test('actual Study references one sphere across groups and accepts its local mirror in another browser',{timeout:production?240000:90000},async t=>{
   const backend=production?{
     close(){},
     request(path,{body,cookie}={}){return fetch(origin+'/pizarra'+path,{method:body===undefined?'GET':'POST',headers:{Origin:origin,...(cookie?{Cookie:cookie}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})})},
@@ -85,7 +85,7 @@ test('actual Study copies an existing sphere into a group and accepts its local 
   await sphere.waitFor()
   await sphere.hover();await a.mouse.down();await a.waitForTimeout(900);await a.mouse.up()
   const options=a.getByRole('dialog',{name:'Opciones de materia'})
-  await options.getByRole('button',{name:'Copiar a',exact:true}).click()
+  await options.getByRole('button',{name:'Referenciar archivos en…',exact:true}).click()
   await a.getByRole('menuitem',{name:/^Cooperar ·/}).click()
   await expect(options).toHaveCount(0,{timeout:20000})
   let group
@@ -118,7 +118,7 @@ test('actual Study copies an existing sphere into a group and accepts its local 
     const originalSphere=a.getByRole('button',{name:/Álgebra cooperativa/}).first()
     await originalSphere.waitFor();await originalSphere.hover();await a.mouse.down();await a.waitForTimeout(900);await a.mouse.up()
     const copyOptions=a.getByRole('dialog',{name:'Opciones de materia'})
-    await copyOptions.getByRole('button',{name:'Copiar a',exact:true}).click()
+    await copyOptions.getByRole('button',{name:'Referenciar archivos en…',exact:true}).click()
     await expect(a.getByRole('menuitem',{name:/^Cooperar ·/})).toHaveCount(2)
     let releaseAcceptance, acceptanceStarted
     const acceptanceGate=new Promise(resolve=>{releaseAcceptance=resolve})
@@ -127,49 +127,53 @@ test('actual Study copies an existing sphere into a group and accepts its local 
     await a.route(url=>url.pathname===`/pizarra/api/cooperation/groups/${secondGroupId}/accept`,async route=>{
       acceptanceStarted();await acceptanceGate;await route.fallback()
     })
-    await a.getByRole('menuitem',{name:/Aceptar y copiar$/}).click()
+    await a.getByRole('menuitem',{name:/Aceptar y referenciar$/}).click()
     await acceptanceRequest
     await expect(copyOptions).toHaveCount(0,{timeout:1000})
     await expect(a.getByRole('button',{name:'Álgebra cooperativa',exact:true})).toBeVisible()
-    await expect(a.getByText('Preparando 0%',{exact:true})).toBeVisible()
     await a.locator('[data-study-workspace-tabs]').focus();await a.locator('[data-study-workspace-tabs] button').first().click()
     await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
     releaseAcceptance()
     await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
     let secondGroup
     await expect.poll(async()=>{const result=await backend.request('/api/cooperation/groups',{cookie:actors[0].cookie});secondGroup=(await result.json()).groups.find(group=>group.id===secondGroupId);return secondGroup?.accepted&&secondGroup.spheres.length===1},{timeout:15000}).toBe(true)
-    const copiedId=secondGroup.spheres[0].id
-    let copied
-    await expect.poll(async()=>{try{
-      copied=await a.evaluate(async({groupId,copiedId})=>{const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study');const manifests=await root.getDirectoryHandle('manifests');const workspace=JSON.parse(await(await(await manifests.getFileHandle('workspace-state.json')).getFile()).text());const file=await(await(await root.getDirectoryHandle('teoria')).getDirectoryHandle('Cooperativo-'+copiedId)).getFileHandle('uno.pdf');return{active:workspace.activeWorkspaceTabId,original:workspace.customSubjects['algebra-local'].tabId,ids:workspace.workspaceTabs['cooperative-'+groupId].subjectIds,bytes:await(await file.getFile()).text()}},{groupId:secondGroupId,copiedId})
-      return copied.active==='main' && copied.ids?.includes('coop-'+copiedId)
-    }catch{return false}},{timeout:30000}).toBe(true)
-    assert.equal(copied.active,'main')
-    assert.equal(copied.original,'main')
-    assert.deepEqual(copied.ids,['coop-'+copiedId])
-    assert.equal(copied.bytes,'local PDF bytes')
-    await a.reload();await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
-    await a.locator('[data-study-workspace-tabs]').focus();await a.locator('[data-study-workspace-tabs] button').first().click()
-    await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
-    await a.evaluate(async copiedId=>{
+    assert.equal(secondGroup.spheres[0].id,sphereId)
+    await expect.poll(async()=>a.evaluate(async groupId=>{
       const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study')
-      const manifests=await(await(await root.getDirectoryHandle('manifests')).getDirectoryHandle('materials')).getDirectoryHandle('Cooperativo-'+copiedId)
-      const writer=await(await manifests.getFileHandle('week-0.json')).createWritable()
+      const manifests=await root.getDirectoryHandle('manifests')
+      const workspace=JSON.parse(await(await(await manifests.getFileHandle('workspace-state.json')).getFile()).text())
+      return workspace.workspaceTabs['cooperative-'+groupId]?.subjectIds
+    },secondGroupId),{timeout:15000}).toEqual(['algebra-local'])
+    assert.equal(await a.evaluate(async id=>{
+      const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study')
+      const theory=await root.getDirectoryHandle('teoria')
+      return !!await theory.getDirectoryHandle('Cooperativo-'+id).catch(()=>null)
+    },sphereId),false)
+    await a.evaluate(async()=>{
+      const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study')
+      const materials=await(await(await root.getDirectoryHandle('manifests')).getDirectoryHandle('materials')).getDirectoryHandle('Algebra')
+      const writer=await(await materials.getFileHandle('week-999.json',{create:true})).createWritable()
       await writer.write('{"materials":');await writer.close()
       window.dispatchEvent(new Event('cursado-workspace-saved'))
-    },copiedId)
-    await expect(a.getByRole('complementary',{name:'Sincronización cooperativa'}).getByText(/week-0.json/)).toBeVisible({timeout:15000})
-    await a.locator('[data-study-workspace-tabs]').focus()
-    await a.getByRole('button',{name:secondGroup.members.map(member=>member.display_name).join(', '),exact:true}).click()
-    const failedSphere=a.getByRole('button',{name:/Álgebra cooperativa/}).first()
-    await failedSphere.hover();await a.mouse.down();await a.waitForTimeout(900);await a.mouse.up()
-    const undoOptions=a.getByRole('dialog',{name:'Opciones de materia'})
-    await undoOptions.getByRole('button',{name:'Deshacer cooperación',exact:true}).click()
-    await expect(undoOptions).toHaveCount(0)
-    await expect.poll(async()=>{const groups=await(await backend.request('/api/cooperation/groups',{cookie:actors[0].cookie})).json();return groups.groups.find(group=>group.id===secondGroupId).spheres.length},{timeout:15000}).toBe(0)
+    })
+    await expect.poll(()=>a.evaluate(async id=>{
+      const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study')
+      const user=localStorage.getItem('cursado-cooperation-user')
+      const folder=await(await root.getDirectoryHandle('.cooperation')).getDirectoryHandle(user)
+      const state=JSON.parse(await(await(await folder.getFileHandle('state.json')).getFile()).text())
+      return state.mirrors[id]?.error || ''
+    },sphereId),{timeout:15000}).toMatch(/week-999.json/)
     await expect(a.getByRole('complementary',{name:'Sincronización cooperativa'})).toHaveCount(0)
-    await a.locator('[data-study-workspace-tabs]').focus();await a.locator('[data-study-workspace-tabs] button').first().click()
-    await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
+    await expect(a.getByText(/week-999.json/)).toHaveCount(0)
+    await a.locator('[data-study-workspace-tabs]').focus()
+    await a.getByRole('button',{name:'Cooperativo',exact:true}).click()
+    await expect(a.getByText(/week-999.json/).first()).toBeVisible()
+    await a.evaluate(async()=>{
+      const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study')
+      const materials=await(await(await root.getDirectoryHandle('manifests')).getDirectoryHandle('materials')).getDirectoryHandle('Algebra')
+      await materials.removeEntry('week-999.json')
+      window.dispatchEvent(new Event('cursado-workspace-saved'))
+    })
     const invited=await backend.request('/api/cooperation/groups',{cookie:actors[1].cookie,body:{names:actors[0].name}})
     assert.equal(invited.status,201)
     const invitedGroupId=(await invited.json()).id

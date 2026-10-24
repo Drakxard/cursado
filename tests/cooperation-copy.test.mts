@@ -159,4 +159,70 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   assert.equal(repairedGroups.find(g=>g.id===second).spheres.some(sphere=>sphere.id===legacyId),false)
   assert.equal((await api(actors[0],`spheres/${legacyId}/snapshot`)).status,403)
 
+  await client.removeLocalCooperationSubjects(['prog'])
+  const deletedCatalog=await fs.json('manifests/subject-catalog.json')
+  delete deletedCatalog.subjects.prog
+  await fs.put('manifests/subject-catalog.json',deletedCatalog)
+  fs.files.delete('manifests/materials/Prog3/week-1.json')
+  await client.refreshCooperation()
+  await client.synchronizeCooperation()
+  assert.equal(client.cooperationState().mirrors[canonical.id],undefined)
+  assert.ok(client.cooperationState().removedSpheres.includes(canonical.id))
+  assert.equal(client.cooperationState().groups.some(group=>group.spheres.some(sphere=>sphere.id===canonical.id)),false)
+  assert.equal((await fs.json('manifests/subject-catalog.json')).subjects.prog,undefined,'an explicitly deleted sphere must not be recreated by its mirror')
+  assert.ok((await(await api(actors[0],`spheres/${canonical.id}/snapshot`)).json()).resources['manifests/materials/Prog3/week-1.json'],'a local removal must not delete collaborators material')
+
+  const raceSource={id:'race',name:'Race',storageKey:'Race',color:'#2563eb'}
+  await fs.put('manifests/materials/Race/week-1.json',{materials:[]})
+  const race=await client.shareCooperationSphere(first,raceSource)
+  await fs.put('manifests/materials/Race/week-1.json',{materials:[{id:5,file_name:'latest local edit'}]})
+  const raceState=await fs.json(`.cooperation/${saved.userId}/state.json`)
+  raceState.mirrors[race.id].error='Cancelled publication'
+  await fs.put(`.cooperation/${saved.userId}/state.json`,raceState)
+  await client.refreshCooperation()
+  let release!:()=>void,started!:()=>void,undoRequests=0,retired=false,lateCommits=0
+  const hold=new Promise<void>(resolve=>{release=resolve}),ready=new Promise<void>(resolve=>{started=resolve})
+  const fetchBeforeUndo=globalThis.fetch
+  let held=false
+  globalThis.fetch=(async(url,options={})=>{
+    if(String(url).includes(`spheres/${race.id}/operations`)&&options.method==='POST'){
+      if(retired)lateCommits++
+      if(!held){held=true;started();await hold}
+    }
+    if(String(url).includes(`spheres/${race.id}/undo`)){undoRequests++;retired=true}
+    return fetchBeforeUndo(url,options)
+  }) as typeof fetch
+  const active=client.synchronizeCooperation()
+  await ready
+  const undo=client.undoCooperationSphere(race.id)
+  await new Promise(resolve=>setTimeout(resolve,10))
+  assert.equal(undoRequests,0,'remote undo must wait for the in-flight commit')
+  release()
+  await Promise.all([active,undo])
+  await client.synchronizeCooperation()
+  assert.equal(undoRequests,1)
+  assert.equal(lateCommits,0)
+  assert.equal(client.cooperationState().mirrors[race.id],undefined)
+  assert.equal((await fs.json('manifests/subject-catalog.json')).subjects.race.cooperationId,undefined)
+  assert.equal((await fs.json('manifests/materials/Race/week-1.json')).materials[0].file_name,'latest local edit')
+
+  const revokedSource={id:'revoked',name:'Revoked',storageKey:'Revoked',color:'#2563eb'}
+  await fs.put('manifests/materials/Revoked/week-1.json',{materials:[{id:12,file_name:'Keep local'}]})
+  const revoked=await client.shareCooperationSphere(first,revokedSource)
+  await api(actors[0],`spheres/${revoked.id}/undo`,{})
+  await client.synchronizeCooperation()
+  assert.equal(client.cooperationState().mirrors[revoked.id],undefined,'a confirmed remote cancellation must not leave a mirror retrying 403 forever')
+  assert.equal((await fs.json('manifests/subject-catalog.json')).subjects.revoked.cooperationId,undefined)
+  assert.equal((await fs.json('manifests/materials/Revoked/week-1.json')).materials[0].file_name,'Keep local')
+
+  const checkedSource={id:'access-check',name:'Access check',storageKey:'AccessCheck',color:'#2563eb'}
+  await fs.put('manifests/materials/AccessCheck/week-1.json',{materials:[]})
+  const checked=await client.shareCooperationSphere(first,checkedSource)
+  await fs.put('manifests/materials/AccessCheck/week-1.json',{materials:[{id:33,file_name:'Keep association'}]})
+  const fetchBefore403=globalThis.fetch
+  globalThis.fetch=(async(url,options={})=>String(url).includes(`spheres/${checked.id}/operations`) ? Response.json({detail:'Temporary forbidden'},{status:403}) : fetchBefore403(url,options)) as typeof fetch
+  await client.synchronizeCooperation()
+  assert.match(client.cooperationState().mirrors[checked.id].error,/403/)
+  assert.equal((await fs.json('manifests/subject-catalog.json')).subjects['access-check'].cooperationId,checked.id,'a rejected request must not detach a sphere still present in the authenticated directory')
+
 })

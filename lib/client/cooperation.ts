@@ -15,7 +15,7 @@ type Snapshot = { seq: number; resources: Record<string, Resource>; conflicts: J
 type Operation = { id: string; changes: (Resource & { base?: Json; baseHash?: string })[] }
 export type PendingDeletion = { id: string; sphereId: string; key: string; selector: string[]; value?: Json; label: string; decision: 'wait' | 'keep' | 'delete'; notified?: boolean }
 type Mirror = { repair?: { originalId: string; groupIds: string[]; seq: number; files: { path: string; hash: string; sourcePath: string; sourceHash: string }[] }; copiedFrom?: string; copySource?: {subjectId:string;storageKey:string}; selection?: WeekSelection; binding: SphereBinding; baseline: Snapshot; outbox?: Operation; incoming?: Snapshot; incomingApplied?: string[]; downloading?: boolean; metadataReady?: boolean; transfer?: { phase: 'copying' | 'uploading' | 'downloading'; completed: number; total: number }; error?: string }
-export type CooperationState = { version: 1; userId: string; groups: CooperativeGroup[]; mirrors: Record<string, Mirror>; deletions: PendingDeletion[]; dismissedSpheres?: string[]; error?: string }
+export type CooperationState = { version: 1; userId: string; groups: CooperativeGroup[]; mirrors: Record<string, Mirror>; deletions: PendingDeletion[]; dismissedSpheres?: string[]; removedSpheres?: string[]; error?: string }
 let state: CooperationState = { version: 1, userId: '', groups: [], mirrors: {}, deletions: [] }
 let activeRoot: FileSystemDirectoryHandle | null = null
 const sockets = new Map<string, WebSocket>()
@@ -45,6 +45,10 @@ export async function cooperationSubjectSyncDetails(subjectId: string) {
 export { COOPERATIVE_TAB_ID }
 export const cooperationGroupTab = (id: string) => `cooperative-${id}`
 export function cooperationChanged() { window.dispatchEvent(new CustomEvent('cursado-cooperation-changed', { detail: state })) }
+export function reportCooperationError(reason: unknown) {
+  state.error = reason instanceof Error ? reason.message : String(reason)
+  cooperationChanged()
+}
 export const cooperationApi = cooperationRequest
 async function root() {
   const handle = getReadyWorkspaceHandle() || await loadWorkspaceHandle()
@@ -61,12 +65,19 @@ async function save() {
   }
   cooperationChanged()
 }
+let stateLockQueue: Promise<unknown> = Promise.resolve()
+async function withCooperationLock<T>(work: () => Promise<T>): Promise<T> {
+  if (navigator.locks) return navigator.locks.request(`cooperation:${state.userId}`, work)
+  const pending = stateLockQueue.then(work, work)
+  stateLockQueue = pending.then(() => undefined, () => undefined)
+  return pending
+}
 async function withStateLock<T>(work: () => Promise<T>): Promise<T> {
   const run = async () => {
     if (activeRoot && state.userId) state = await readJson(activeRoot, `.cooperation/${state.userId}/state.json`, state)
     return work()
   }
-  return navigator.locks ? navigator.locks.request(`cooperation:${state.userId}`, run) : run()
+  return withCooperationLock(run)
 }
 export async function refreshCooperation() {
   const result = await cooperationApi('groups') as { user: { id: string }; groups: CooperativeGroup[] }
@@ -74,7 +85,7 @@ export async function refreshCooperation() {
   if (syncing && state.userId === result.user.id && activeRoot === handle) {
     // Discovery must stay responsive while a PDF is transferring. The active
     // synchronization persists this directory update with its next checkpoint.
-    state.groups = result.groups; delete state.error; cooperationChanged(); return state
+    state.groups = result.groups.map(group=>({...group,spheres:group.spheres.filter(sphere=>!state.removedSpheres?.includes(sphere.id))})); delete state.error; cooperationChanged(); return state
   }
   if (syncing) await syncing
   if (state.userId !== result.user.id || activeRoot !== handle) {
@@ -86,14 +97,14 @@ export async function refreshCooperation() {
     state = await readJson(handle, `.cooperation/${result.user.id}/state.json`, { version: 1, userId: result.user.id, groups: [], mirrors: {}, deletions: [] } as CooperationState)
     localStorage.setItem('cursado-cooperation-user', result.user.id)
   }
-  await withStateLock(async () => { state.groups = result.groups; delete state.error; await save() })
+  await withStateLock(async () => { state.groups = result.groups.map(group=>({...group,spheres:group.spheres.filter(sphere=>!state.removedSpheres?.includes(sphere.id))})); delete state.error; await save() })
   return state
 }
 export async function restoreCooperationOffline() {
   const userId = localStorage.getItem('cursado-cooperation-user')
   if (!userId) return
   activeRoot = await root()
-  state = await readJson(activeRoot, `.cooperation/${userId}/state.json`, state)
+  state = await readJson(activeRoot, `.cooperation/${userId}/state.json`, { version: 1, userId, groups: [], mirrors: {}, deletions: [] } as CooperationState)
   cooperationChanged()
 }
 export async function createCooperationGroup(names: string) {
@@ -105,16 +116,39 @@ export async function acceptCooperationGroup(groupId: string) {
   await cooperationApi(`groups/${groupId}/accept`, {})
   await refreshCooperation()
 }
+export async function removeLocalCooperationSubjects(subjectIds: string[]) {
+  if (!state.userId || activeRoot !== await root()) await restoreCooperationOffline()
+  const ids = new Set(subjectIds)
+  const pending = Object.values(state.mirrors).filter(m => ids.has(m.binding.subjectId)).map(m => m.binding.id)
+  for (const id of pending) undoingSpheres.add(id)
+  try {
+    if (syncing) await syncing
+    await withStateLock(async () => {
+      const mirrors = Object.values(state.mirrors).filter(m => ids.has(m.binding.subjectId))
+      const removed = new Set([...(state.removedSpheres || []), ...mirrors.map(m => m.binding.id)])
+      state.removedSpheres = [...removed]
+      state.dismissedSpheres = [...new Set([...(state.dismissedSpheres || []), ...removed])]
+      for (const mirror of mirrors) {
+        delete state.mirrors[mirror.binding.id]
+        sockets.get(mirror.binding.id)?.close(); sockets.delete(mirror.binding.id); confirmedMirrors.delete(mirror.binding.id)
+      }
+      state.deletions = state.deletions.filter(item => !removed.has(item.sphereId))
+      state.groups = state.groups.map(group => ({ ...group, spheres: group.spheres.filter(sphere => !removed.has(sphere.id)) }))
+      await save()
+    })
+  } finally { for (const id of pending) undoingSpheres.delete(id) }
+}
 export async function undoCooperationSphere(sphereId: string) {
   const mirror=state.mirrors[sphereId]
   if(!mirror?.binding.owner || (!mirror.error && !mirror.copySource))throw new Error('Solo se puede deshacer un intento propio con errores.')
   if(undoingSpheres.has(sphereId))return
   undoingSpheres.add(sphereId)
   try {
-    await cooperationApi(`spheres/${sphereId}/undo`,{})
+    if(syncing)await syncing
     await withStateLock(async()=>{
+      await cooperationApi(`spheres/${sphereId}/undo`,{})
       const current=state.mirrors[sphereId]
-      if(!current)return
+      if(!current){cooperationChanged();return}
       const b=current.binding,removedCopy=!!current.copiedFrom,handle=await root()
       const catalog=await readJson<{version:number;subjects:Record<string,Record<string,unknown>>}>(handle,'manifests/subject-catalog.json',{version:2,subjects:{}})
       if(removedCopy)delete catalog.subjects[b.subjectId]
@@ -181,14 +215,18 @@ async function prepareCooperationCopy(mirror:Mirror) {
 export async function shareCooperationSphere(groupId: string, subject: { id: string; name: string; color: string; storageKey?: string }, options: { background?: boolean; copy?: boolean } = {}) {
   await refreshCooperation()
   const group=state.groups.find(group=>group.id===groupId)
-  if(!group)throw new Error('Este grupo ya no está disponible. Volvé a abrir Copiar a.')
+  if(!group)throw new Error('Este grupo ya no está disponible. Volvé a abrir Referenciar archivos en….')
   if(!group.accepted)await acceptCooperationGroup(groupId)
   // The catalogue is the durable identity of an installed sphere, even when
   // its sync checkpoint was lost. Reattach it before considering publication.
   const localCatalog = await readJson<{ subjects: Record<string, { cooperationId?: string }> }>(await root(), 'manifests/subject-catalog.json', { subjects: {} })
   const installedId = localCatalog.subjects[subject.id]?.cooperationId
   if (installedId && !state.mirrors[installedId]) {
-    const installed = state.groups.flatMap(group => group.spheres).find(sphere => sphere.id === installedId)
+    let installed = state.groups.flatMap(group => group.spheres).find(sphere => sphere.id === installedId)
+    if (!installed) {
+      const directory = await cooperationApi('groups') as { groups: CooperativeGroup[] }
+      installed = directory.groups.flatMap(group => group.spheres).find(sphere => sphere.id === installedId)
+    }
     if (!installed) throw new Error('No se pudo recuperar el acceso a la esfera compartida. Reintentá para conservar su identidad.')
     await acceptCooperationSphere(installed)
   }
@@ -230,6 +268,8 @@ export async function acceptCooperationSphere(sphere: CooperativeSphere, options
   const meta = snapshot.resources['sphere.json']?.value as Record<string, Json> | undefined
   if (!meta) throw new Error('La esfera todavía se está preparando. Reintentá en unos instantes.')
   await withStateLock(async () => {
+  state.removedSpheres = state.removedSpheres?.filter(id => id !== sphere.id)
+  state.dismissedSpheres = state.dismissedSpheres?.filter(id => id !== sphere.id)
   if (state.mirrors[sphere.id]) await installSubject(state.mirrors[sphere.id].binding, sphere.group_id)
   if (!state.mirrors[sphere.id]) {
     const catalog = await readJson<{ subjects: Record<string, { storageKey: string; cooperationId?: string }> }>(handle, 'manifests/subject-catalog.json', { subjects: {} })
@@ -388,10 +428,49 @@ function withoutPersonal(sphereId: string, key: string, value: Json | undefined)
   for (const pending of state.deletions.filter(d => d.sphereId === sphereId && d.key === key)) value = setSelected(value, pending.selector, undefined)
   return value
 }
+async function preserveUnavailableMirror(mirror: Mirror): Promise<boolean> {
+  // A rejected request alone can mean an expired session. Only detach after
+  // an authenticated directory read confirms that access really disappeared.
+  let directory: { groups: CooperativeGroup[] }
+  try { directory = await cooperationApi('groups') as { groups: CooperativeGroup[] } } catch { return false }
+  const b = mirror.binding
+  if (directory.groups.some(group => group.spheres.some(sphere => sphere.id === b.id))) return false
+  const handle = await root()
+  await writeJson(handle, `.cooperation/${state.userId}/recovery/unavailable-${b.id}.json`, mirror)
+  const catalog = await readJson<{ subjects: Record<string, { cooperationId?: string }> }>(handle, 'manifests/subject-catalog.json', { subjects: {} })
+  if (catalog.subjects[b.subjectId]?.cooperationId === b.id) delete catalog.subjects[b.subjectId].cooperationId
+  await writeJson(handle, 'manifests/subject-catalog.json', catalog)
+  const workspace = await readJson<Record<string, any>>(handle, 'manifests/workspace-state.json', {})
+  if (workspace.customSubjects?.[b.subjectId]) { workspace.customSubjects[b.subjectId].tabId = 'main'; workspace.isMainWorkspaceTabVisible = true }
+  for (const [id, tab] of Object.entries(workspace.workspaceTabs || {}) as [string, { subjectIds?: string[] }][]) if (id.startsWith('cooperative-')) tab.subjectIds = (tab.subjectIds || []).filter(subjectId => subjectId !== b.subjectId)
+  await writeJson(handle, 'manifests/workspace-state.json', workspace)
+  state.removedSpheres = [...new Set([...(state.removedSpheres || []), b.id])]
+  state.groups = directory.groups.map(group => ({ ...group, spheres: group.spheres.filter(sphere => !state.removedSpheres?.includes(sphere.id)) }))
+  delete state.mirrors[b.id]
+  state.deletions = state.deletions.filter(item => item.sphereId !== b.id)
+  sockets.get(b.id)?.close(); sockets.delete(b.id); confirmedMirrors.delete(b.id)
+  await save()
+  window.dispatchEvent(new CustomEvent('cursado-cooperation-undone', { detail: { binding: b, removedCopy: false } }))
+  return true
+}
+async function scanCooperationMirror(handle: FileSystemDirectoryHandle, mirror: Mirror) {
+  const b = mirror.binding
+  return scanSphere(handle, b, {
+    resources: { ...mirror.baseline.resources, ...mirror.incoming?.resources },
+    restore: async (resource, path) => {
+      const response = await fetch(`/pizarra/api/cooperation/spheres/${b.id}/files/${resource.blob!.hash}`, { cache: 'no-store' })
+      if (!response.ok) throw new Error(`No se pudo recuperar el archivo local «${path}» (HTTP ${response.status}).`)
+      const blob = await response.blob()
+      if (blob.size !== resource.blob!.size || await digest(blob) !== resource.blob!.hash) throw new Error(`La recuperación de «${path}» no pasó la verificación.`)
+      await writeFile(handle, path, blob, true)
+    },
+  })
+}
 async function synchronizeMirror(mirror: Mirror) {
   const revision = syncRevision
   const handle = await root(), b = mirror.binding
   let moreChanges = false
+  if (undoingSpheres.has(b.id) || state.removedSpheres?.includes(b.id)) return
   if (state.deletions.some(d => d.sphereId === b.id && d.key === 'sphere.json' && d.decision !== 'wait')) return
   if (mirror.selection?.choosing) {
     const snapshot = await cooperationApi(`spheres/${b.id}/snapshot`) as Snapshot
@@ -421,7 +500,7 @@ async function synchronizeMirror(mirror: Mirror) {
       b.pathAliases = { ...b.pathAliases, [sourceHash]: localHash }
     }
   }
-  let files = mirror.downloading && !mirror.metadataReady ? [] : await scanSphere(handle, b)
+  let files = mirror.downloading && !mirror.metadataReady ? [] : await scanCooperationMirror(handle, mirror)
   if (!mirror.downloading) {
     const catalog = await readJson<{ subjects: Record<string, unknown> }>(handle, 'manifests/subject-catalog.json', { subjects: {} })
     const workspace = await readJson<{ customSubjects: Record<string, { color: string }> }>(handle, 'manifests/workspace-state.json', { customSubjects: {} })
@@ -484,6 +563,7 @@ async function synchronizeMirror(mirror: Mirror) {
     mirror.transfer = { phase: 'uploading', completed: 0, total: mirror.outbox.changes.filter(change => change.blob).length }
     await save()
     for (const change of mirror.outbox.changes) if (change.blob) {
+      if (undoingSpheres.has(b.id)) return
       const file = current.get(change.key)?.blob
       // A queued file may have changed while offline. Its exact bytes live in staging.
       const staging = `.cooperation/${state.userId}/uploads/${change.blob.hash}`
@@ -510,6 +590,7 @@ async function synchronizeMirror(mirror: Mirror) {
         delete change[field]
       }
     }
+    if (undoingSpheres.has(b.id)) return
     await cooperationApi(`spheres/${b.id}/operations`, wire)
     // Do not clear the durable outbox until the corresponding snapshot is local.
   }
@@ -548,6 +629,7 @@ async function synchronizeMirror(mirror: Mirror) {
     window.dispatchEvent(new CustomEvent('cursado-cooperation-applied', { detail: b }))
   }
   for (const [key, rawResource] of incomingResources) {
+    if (undoingSpheres.has(b.id)) return
     const resource = key === 'scope/tags.json' && incomingSelection ? { ...rawResource, value: projectSelectionTags(rawResource.value, incomingSelection.materialIds) } : rawResource
     if (!metadataResource(resource)) await exposeMetadata()
     if (mirror.incomingApplied.includes(key)) continue
@@ -595,7 +677,7 @@ async function synchronizeMirror(mirror: Mirror) {
       mirror.transfer.completed++; await save()
     } else if (resource.type === 'json' && resource.value !== undefined) {
       let localValue = local?.value
-      if (key.startsWith('scope/') && (!mirror.downloading || mirror.metadataReady)) localValue = (await scanSphere(handle, b)).find(file => file.key === key)?.value
+      if (key.startsWith('scope/') && (!mirror.downloading || mirror.metadataReady)) localValue = (await scanCooperationMirror(handle, mirror)).find(file => file.key === key)?.value
       if (!key.startsWith('scope/') && key !== 'sphere.json' && (!mirror.downloading || mirror.metadataReady)) {
         const latest = await readJson<Json | undefined>(handle, mapBindingText(key, b, true), undefined)
         localValue = latest === undefined ? undefined : mapBindingJson(latest, b, false)
@@ -697,6 +779,7 @@ async function repairLegacyCooperationCopies() {
         group.spheres = group.spheres.filter(sphere => sphere.id !== copy.binding.id && sphere.id !== original.binding.id)
         group.spheres.push({ ...old, id: original.binding.id, name: original.binding.name, color: original.binding.color })
       }
+      original.binding.legacyStorageKeys = [...new Set([...(original.binding.legacyStorageKeys || []), copy.binding.storageKey])]
       state.deletions = state.deletions.filter(item => item.sphereId !== copy.binding.id)
       sockets.get(copy.binding.id)?.close(); sockets.delete(copy.binding.id); confirmedMirrors.delete(copy.binding.id)
       for (const group of groups) await installSubject(original.binding, group.id)
@@ -715,12 +798,12 @@ async function repairLegacyCooperationCopies() {
   }
 }
 async function connectMirror(id: string) {
-  if (sockets.has(id) || connectingSockets.has(id) || navigator.onLine === false) return
+  if (undoingSpheres.has(id) || (state.removedSpheres || []).includes(id) || sockets.has(id) || connectingSockets.has(id) || navigator.onLine === false) return
   connectingSockets.add(id)
   const userId = state.userId, directory = id === '@directory', generation = connectionGeneration
   try {
     const { url } = await cooperationApi(directory ? 'notifications/ticket' : `spheres/${id}/ticket`, {})
-    if (sockets.has(id) || state.userId !== userId || generation !== connectionGeneration) return
+    if (undoingSpheres.has(id) || (!directory && !state.mirrors[id]) || sockets.has(id) || state.userId !== userId || generation !== connectionGeneration) return
     const socket = new WebSocket(url); sockets.set(id, socket)
     socket.onopen = () => connectedBackground?.()
     socket.onmessage = event => { try {
@@ -759,12 +842,13 @@ export function synchronizeCooperation(): Promise<void> {
       const execute = async () => {
         await repairLegacyCooperationCopies()
         for (const mirror of Object.values(state.mirrors)) {
-          if(mirror.repair || mirror.copySource || undoingSpheres.has(mirror.binding.id))continue
+          if(mirror.repair || mirror.copySource || state.removedSpheres?.includes(mirror.binding.id) || undoingSpheres.has(mirror.binding.id))continue
           for (let attempt = 0; attempt < 3; attempt++) {
             try { while (await synchronizeMirror(mirror)) { if(undoingSpheres.has(mirror.binding.id))break }; break }
             catch (error) {
               // An atomic local save can invalidate a File snapshot kept by a
               // long transfer. Re-scan with fresh handles before showing an error.
+              if ((error as { status?: number })?.status === 403 && await preserveUnavailableMirror(mirror)) break
               const name = (error as { name?: string })?.name
               if ((name === 'NotFoundError' || name === 'NotReadableError') && attempt < 2) continue
               confirmedMirrors.delete(mirror.binding.id); mirror.error = error instanceof Error ? error.message : String(error); await save(); retryBackground?.()
@@ -773,11 +857,7 @@ export function synchronizeCooperation(): Promise<void> {
           }
         }
       }
-      if (navigator.locks) await navigator.locks.request(`cooperation:${state.userId}`, async () => {
-        // Another tab may have acknowledged operations while this tab waited.
-        if (activeRoot) state = await readJson(activeRoot, `.cooperation/${state.userId}/state.json`, state)
-        await execute()
-      }); else await execute()
+      await withStateLock(execute)
     } while (syncAgain)
   }
   syncing = work().finally(() => { syncing = null })

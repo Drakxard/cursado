@@ -6,7 +6,7 @@ las cuentas de Pizarra; el campo admite `PersonaA, PersonaB` o
 `[PersonaA, PersonaB]`. La misma lista de participantes reutiliza el grupo.
 
 En Estudio, Cooperativo muestra los grupos. Mantener pulsada una esfera permite
-copiarla o moverla al grupo. Copiar agrega un acceso al mismo material; mover
+referenciar sus archivos en el grupo o moverla. Referenciar agrega un acceso a la misma esfera y al mismo material; mover
 retira el acceso anterior. Una esfera puede pertenecer a varios grupos. Todos acceden a la misma sala, archivos R2 y réplica local; compartirla con otro grupo no crea una copia ni reinicia la transferencia. Los participantes de esos grupos colaboran sobre el mismo contenido.
 
 La primera descarga requiere Confirmar y muestra el tamaño en MB. Cancelar
@@ -151,3 +151,7 @@ Con la aplicación iniciada, `node --test tests/cooperation-weeks.browser.mjs`
 comprueba el recorrido en la esfera real, incluidos los listados previos a la descarga.
 
 La aceptación recupera la carpeta existente si el catálogo ya identifica esa esfera. Para materias locales anteriores sin asociación, se reutiliza el identificador y la carpeta cuando coinciden los identificadores originales y el contenido comprobado. No se deduce identidad solamente del nombre. Antes de descargar se verifica el archivo de destino con SHA-256; los bytes existentes no se descargan de nuevo. Las copias temporales de subida se retiran después de confirmar el estado remoto y persistirlo localmente. Las copias antiguas con procedencia registrada y contenido redundante se reparan automáticamente: se vinculan sus grupos con el original y se retira la copia. La reparación conserva un registro de recuperación y puede continuar tras una interrupción. La sala comprueba la versión y rechaza retirar copias con cambios de otros participantes. Los archivos modificados después de la comprobación se conservan; no se borran objetos antiguos de R2 como parte de esta reparación.
+
+Deshacer una publicación fallida espera el cierre de las operaciones activas y conserva los archivos originales. Borrar localmente detiene la réplica y guarda una exclusión persistente por usuario antes de retirar archivos, sin eliminar el contenido de los compañeros. Un 403 solo retira la asociación si una consulta autenticada confirma que ya no hay acceso; el material se conserva como personal. Las referencias obsoletas se reparan con contenido verificado, y una reparación no sobrescribe un listado editado mientras se recuperaba un archivo.
+
+Los errores generales de sincronización aparecen dentro de la pestaña Cooperativo. No se superponen a las materias, PDF o pizarras. El menú «Referenciar archivos en…» agrega accesos tanto en pestañas locales como en grupos, manteniendo la identidad y los archivos de la esfera.

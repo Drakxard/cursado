@@ -7,7 +7,7 @@ import { InlinePdfName } from "./inline-pdf-name"
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
 import { CooperationPanel, CooperationSyncStatus, useCooperation } from '@/components/cooperation'
-import { undoCooperationSphere, COOPERATIVE_TAB_ID, cooperationGroupTab, refreshCooperation, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
+import { reportCooperationError, removeLocalCooperationSubjects, undoCooperationSphere, COOPERATIVE_TAB_ID, cooperationGroupTab, refreshCooperation, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
 import type { SphereBinding } from '@/lib/client/cooperation-files'
 import type { BoardPdfReference } from "@/lib/board-library-contract"
 
@@ -1859,7 +1859,7 @@ export function SubjectWheel({
     setDeleteSummaries([])
   }, [deleteConfirmationTarget, getDeleteTargetSubjectIds, workspaceTabs])
 
-  const copyDeleteTarget = useCallback((destinationTabId: string) => {
+  const referenceDeleteTarget = useCallback((destinationTabId: string) => {
     if (!deleteConfirmationTarget || destinationTabId === deleteConfirmationTarget.id) return
     const subjectIds = getDeleteTargetSubjectIds(deleteConfirmationTarget)
     if (subjectIds.length === 0) return
@@ -1886,14 +1886,8 @@ export function SubjectWheel({
     }
 
     hasUserChangedWorkspaceStateRef.current = true
-    const copiedLabel = deleteConfirmationTarget.label
-    const copiedType = deleteConfirmationTarget.type
     setDeleteConfirmationTarget(null)
     setDeleteSummaries([])
-    toast({
-      title: copiedType === "tab" ? "Contenido copiado" : "Materia copiada",
-      description: `${copiedLabel} también está disponible en la pestaña destino; usa los mismos archivos locales.`,
-    })
   }, [deleteConfirmationTarget, getDeleteTargetSubjectIds])
 
   const confirmPermanentSubjectDelete = useCallback(async () => {
@@ -1902,6 +1896,7 @@ export function SubjectWheel({
     setIsPermanentlyDeleting(true)
     try {
       const summaries: LocalSubjectDeletionSummary[] = []
+      await removeLocalCooperationSubjects(subjectIds)
       for (const subjectId of subjectIds) summaries.push(await deleteLocalSubjectPermanently(subjectId))
       hasUserChangedWorkspaceStateRef.current = true
       setCustomSubjects((previous) => Object.fromEntries(
@@ -1935,6 +1930,7 @@ export function SubjectWheel({
     }
   }, [activeWorkspaceTabId, deleteConfirmationTarget, getDeleteTargetSubjectIds, isPreparingPermanentDelete, workspaceTabList])
 
+  const failedCooperationTarget = deleteConfirmationTarget?.type === 'subject' ? Object.values(cooperative.mirrors).find(m => m.binding.owner && (m.error || m.copySource) && getDeleteTargetSubjectIds(deleteConfirmationTarget).includes(m.binding.subjectId)) : undefined
   const deleteMoveDestinationTabs = useMemo(() => {
     if (!deleteConfirmationTarget) return []
     const sourceTabId = deleteConfirmationTarget.type === "tab"
@@ -1959,7 +1955,7 @@ export function SubjectWheel({
     try {
       const shared:SphereBinding[]=[]
       for (const subject of subjects) {
-        if (subject) shared.push(await shareCooperationSphere(groupId, subject, { background: true, copy:!move }))
+        if (subject) shared.push(await shareCooperationSphere(groupId, subject, { background: true }))
       }
       const group=cooperative.groups.find(group=>group.id===groupId)!
       if (move) {
@@ -1977,7 +1973,7 @@ export function SubjectWheel({
         setCustomSubjects(previous=>{const next={...previous};for(const binding of shared)next[binding.subjectId]={...(next[binding.subjectId]||{id:binding.subjectId,tabId:destination,createdAt:new Date().toISOString(),targetWeekday:0}),name:binding.name,color:binding.color,storageKey:binding.storageKey};return next})
         hasUserChangedWorkspaceStateRef.current=true
       }
-    } catch (error) { toast({title:move ? 'No se pudo mover la esfera' : 'No se pudo compartir la esfera',description:error instanceof Error ? error.message : String(error),variant:'destructive'}) }
+    } catch (error) { reportCooperationError(error) }
     finally { cooperationTransfersRef.current.delete(transferKey);setQueuedCooperationSubjects(previous=>previous.filter(task=>task.key!==transferKey)) }
   }
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -7949,11 +7945,7 @@ export function SubjectWheel({
             </DialogDescription>
           </DialogHeader>
 
-          {deleteConfirmationTarget && Object.values(cooperative.mirrors).filter(m=>m.binding.owner&&(m.error||m.copySource)&&getDeleteTargetSubjectIds(deleteConfirmationTarget).includes(m.binding.subjectId)).map(m=><Button key={m.binding.id} type="button" variant="outline" onClick={()=>{
-            setDeleteConfirmationTarget(null);setDeleteSummaries([])
-            void undoCooperationSphere(m.binding.id).catch(reason=>toast({title:'No se pudo deshacer',description:reason instanceof Error?reason.message:String(reason),variant:'destructive'}))
-          }}>Deshacer cooperación</Button>)}
-          <DialogFooter>
+          <DialogFooter className="sm:flex-wrap">
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={isPermanentlyDeleting}>Cancelar</Button>
             </DialogClose>
@@ -7977,29 +7969,34 @@ export function SubjectWheel({
             <DropdownMenu onOpenChange={open=>{if(open)void refreshCooperation().catch(error=>setWorkspaceNoticeMessage(error instanceof Error?error.message:String(error)))}}>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.length === 0 || isPermanentlyDeleting}>
-                  <Copy className="h-4 w-4" />
-                  Copiar a
+                  <Link2 className="h-4 w-4" />
+                  Referenciar archivos en…
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Copiar a</DropdownMenuLabel>
+                <DropdownMenuLabel>Referenciar archivos en…</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {deleteMoveDestinationTabs.map((tab) => (
-                  <DropdownMenuItem key={tab.id} onClick={() => copyDeleteTarget(tab.id)}>
+                  <DropdownMenuItem key={tab.id} onClick={() => referenceDeleteTarget(tab.id)}>
                     {tab.name}
                   </DropdownMenuItem>
                 ))}
-                {cooperative.groups.map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, false)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}{!group.accepted?' · Aceptar y copiar':''}</DropdownMenuItem>)}
+                {cooperative.groups.map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, false)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}{!group.accepted?' · Aceptar y referenciar':''}</DropdownMenuItem>)}
               </DropdownMenuContent>
             </DropdownMenu>
             <Button
               type="button"
               variant="destructive"
-              onClick={() => void confirmPermanentSubjectDelete()}
+              onClick={() => {
+                if (failedCooperationTarget) {
+                  setDeleteConfirmationTarget(null); setDeleteSummaries([])
+                  void undoCooperationSphere(failedCooperationTarget.binding.id).catch(reportCooperationError)
+                } else void confirmPermanentSubjectDelete()
+              }}
               disabled={!LOCAL_STORAGE_MODE || isPreparingPermanentDelete || isPermanentlyDeleting}
             >
               {isPermanentlyDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Borrar
+              {failedCooperationTarget ? 'Deshacer' : 'Borrar'}
             </Button>
           </DialogFooter>
         </DialogContent>

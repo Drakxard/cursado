@@ -115,7 +115,7 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
     <h1 className="text-xl font-medium">Cooperativo</h1>
     <CooperationGroupForm />
     {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
-    {!state.groups.length && <p className="text-muted-foreground">Todavía no hay esferas compartidas. Agregá compañeros y copiá o mové una esfera al grupo.</p>}
+    {!state.groups.length && <p className="text-muted-foreground">Todavía no hay esferas compartidas. Agregá compañeros y referenciá una esfera en el grupo. Los archivos se mantienen compartidos.</p>}
     {state.groups.map(group => <section key={group.id} data-cooperation-group={group.id} className="space-y-3 rounded-xl border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 className="min-w-0 break-words">{group.members.map(m => m.display_name).join(', ')}</h2>
@@ -132,11 +132,11 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
             else if (deleted?.decision === 'wait') window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending: deleted, open: () => onOpen(mirror.binding.subjectId, group.id) } }))
             else onOpen(mirror.binding.subjectId, group.id)
           }}>{sphere.name}</button>
-          {mirror?.transfer && <p role="status">{mirror.transfer.phase==='copying'?'Copiando':mirror.transfer.phase==='uploading'?'Subiendo':'Descargando'} {mirror.transfer.total?Math.min(99,Math.floor(100*mirror.transfer.completed/mirror.transfer.total)):0}%</p>}
+          {mirror?.transfer && <p role="status">{mirror.transfer.phase==='copying'?'Preparando acceso':mirror.transfer.phase==='uploading'?'Subiendo':'Descargando'} {mirror.transfer.total?Math.min(99,Math.floor(100*mirror.transfer.completed/mirror.transfer.total)):0}%</p>}
           {sphere.ready === false && <p role="status" className="mt-1 text-xs">Preparando publicación…</p>}
           {!ready && sphere.ready !== false && <p className="mt-1 text-xs">Pendiente · {(sphere.bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB</p>}
           {deleted?.decision === 'keep' && <p className="text-xs">Personal</p>}
-          {mirror?.transfer && <p role="status" className="mt-1 text-xs">{mirror.transfer.phase === 'copying' ? 'Copiando' : mirror.transfer.phase === 'uploading' ? 'Subiendo' : 'Descargando'} archivos en segundo plano: {mirror.transfer.completed}/{mirror.transfer.total}</p>}
+          {mirror?.transfer && <p role="status" className="mt-1 text-xs">{mirror.transfer.phase === 'copying' ? 'Preparando acceso' : mirror.transfer.phase === 'uploading' ? 'Subiendo' : 'Descargando'} archivos en segundo plano: {mirror.transfer.completed}/{mirror.transfer.total}</p>}
           {mirror?.error && <div role="alert" className="text-xs text-red-600">{mirror.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button>{mirror.binding.owner&&<UndoCooperationButton sphereId={sphere.id}/>}</div>}
           {mirror && mirror.baseline.conflicts.length > 0 && <details className="mt-2 text-left text-xs"><summary>Versiones recuperadas ({mirror.baseline.conflicts.length})</summary>{mirror.baseline.conflicts.map((entry, index) => <button key={index} className="mt-2 block underline" onClick={async () => {
             const item = entry as { key?: string; blob?: { hash: string } }
@@ -179,18 +179,7 @@ export function CooperationRuntime() {
     if (sphere) { setError(''); setInvitation(sphere) }
   }, [state, invitation, review])
   if (invitation && !review) return <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><CooperationInvitation sphere={invitation} onClose={() => { void dismissCooperationSphere(invitation.id); setInvitation(null) }} onAccepted={() => setInvitation(null)} /></div>
-  if (!review) {
-    const transfers = Object.values(state.mirrors).filter(m => m.error)
-    if (!transfers.length && !(state.error && state.groups.length)) return null
-    return <aside aria-label="Sincronización cooperativa" className="fixed bottom-4 left-4 z-[240] max-w-sm space-y-2 rounded-xl border bg-background p-3 text-sm text-foreground shadow-lg">
-      {state.error && <p role="alert">{state.error}</p>}
-      {transfers.map(m => <div key={m.binding.id}>
-        <strong>{m.binding.name}</strong>
-        {m.error ? <div role="alert">{m.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button>{m.binding.owner&&<UndoCooperationButton sphereId={m.binding.id}/>}</div>
-          : <p role="status">{m.metadataReady && 'Metadatos disponibles. '}{m.transfer?.phase === 'uploading' ? 'Subiendo' : 'Descargando'} en segundo plano: {m.transfer?.completed}/{m.transfer?.total} archivos.</p>}
-      </div>)}
-    </aside>
-  }
+  if (!review) return null
   const decide = async (decision: 'wait' | 'keep' | 'delete') => {
     try { await decideCooperationDeletion(review.pending.id, decision); setReview(null); setError('') } catch (reason) { setError((reason as Error).message) }
   }

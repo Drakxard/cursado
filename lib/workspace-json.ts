@@ -81,3 +81,19 @@ export async function writeWorkspaceJson(root: FileSystemDirectoryHandle, path: 
     await remember(root, path, raw)
   })
 }
+
+
+/** Apply a repair only if the document still matches the version we inspected. */
+export async function writeWorkspaceJsonIfUnchanged(root: FileSystemDirectoryHandle, path: string, expected: unknown, value: unknown): Promise<boolean> {
+  return withWorkspaceFileLock(`write:${path}`, async () => {
+    const previous = await text(root, path)
+    if (!previous?.trim()) return false
+    try { if (JSON.stringify(parse(previous)) !== JSON.stringify(expected)) return false } catch { return false }
+    const raw = JSON.stringify(value, null, 2)
+    if (raw === undefined) throw new Error('No se puede guardar un valor JSON indefinido.')
+    await remember(root, path, previous)
+    await put(root, path, raw)
+    await remember(root, path, raw)
+    return true
+  })
+}

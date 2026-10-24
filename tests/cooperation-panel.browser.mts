@@ -26,7 +26,7 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     export const startCooperationBackground=()=>{queueMicrotask(changed);return ()=>{}};
     window.prepareDeletion=()=>{state.deletions.push({id:'delete-1',sphereId:sphere.id,key:'sphere.json',selector:[],label:'Álgebra',decision:'wait'});changed()};
   `
-  const bundled = await build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {CooperationPanel,CooperationRuntime,CooperationSyncStatus} from './components/cooperation';createRoot(document.getElementById('root')).render(<><CooperationSyncStatus subjectId="coop-subject"/><CooperationRuntime/><CooperationPanel onOpen={id=>window.openedSubject=id}/></>)`, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, platform: 'browser', format: 'iife', define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'cooperation-ui', setup(builder) {
+  const bundled = await build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {CooperationPanel,CooperationRuntime,CooperationSyncStatus} from './components/cooperation';function App(){const [visible,setVisible]=React.useState(true);window.showCooperationPanel=setVisible;return <><CooperationSyncStatus subjectId="coop-subject"/><CooperationRuntime/>{visible&&<CooperationPanel onOpen={id=>window.openedSubject=id}/>}</>};createRoot(document.getElementById('root')).render(<App/>)`, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, platform: 'browser', format: 'iife', define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'cooperation-ui', setup(builder) {
     builder.onResolve({ filter: /^@\/lib\/client\/cooperation$/ }, () => ({ path: 'cooperation', namespace: 'fixture' }))
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: fixture }))
   } }] })
@@ -98,14 +98,20 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     assert.equal(await page.evaluate(() => (window as any).downloadOptions.choose), true)
     assert.equal(await page.evaluate(() => (window as any).downloadOptions.background), undefined)
     await page.evaluate(() => (window as any).failPublication())
-    const failed=page.getByRole('complementary',{name:'Sincronización cooperativa'})
+    await page.getByText('Unexpected end of JSON input',{exact:false}).first().waitFor()
+    assert.equal(await page.getByRole('complementary',{name:'Sincronización cooperativa'}).count(),0)
+    await page.evaluate(()=>(window as any).showCooperationPanel(false))
+    await page.getByText('Unexpected end of JSON input',{exact:false}).waitFor({state:'detached'})
+    assert.equal(await page.getByRole('alert').count(),0)
+    await page.evaluate(()=>(window as any).showCooperationPanel(true))
+    const failed=page.locator('[data-cooperation-group="group-1"]')
     await failed.getByRole('button',{name:'Deshacer',exact:true}).waitFor()
     await page.evaluate(() => (window as any).failUndo=true)
     await failed.getByRole('button',{name:'Deshacer',exact:true}).click()
     await failed.getByText('No se pudo deshacer. Reintentá.',{exact:true}).waitFor()
     await page.evaluate(() => (window as any).failUndo=false)
     await failed.getByRole('button',{name:'Deshacer',exact:true}).click()
-    await failed.waitFor({state:'detached'})
+    await failed.getByRole('button',{name:'Deshacer',exact:true}).waitFor({state:'detached'})
     assert.equal(await page.evaluate(() => (window as any).undoneSphere),'sphere-1')
   } finally { await browser.close() }
 })

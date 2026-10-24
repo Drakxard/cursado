@@ -4,7 +4,7 @@ export async function cooperationRequest(path: string, body?: unknown, method = 
     !!body && typeof body === 'object' && 'id' in body && typeof body.id === 'string' && !!body.id
   const options: RequestInit = { method, headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), cache: 'no-store' }
   const maxRetries = 3
-  const failure = (attempt: number, detail: string) => new Error(`Cooperativo: ${method} ${path.split('?')[0]}. ${detail} (${attempt + 1} intento${attempt ? 's' : ''}; ${attempt} reintentos).`)
+  const failure = (attempt: number, detail: string, status?: number) => Object.assign(new Error(`Cooperativo: ${method} ${path.split('?')[0]}. ${detail} (${attempt + 1} intento${attempt ? 's' : ''}; ${attempt} reintentos).`), { status })
   for (let attempt = 0; ; attempt++) {
     let response: Response
     try {
@@ -22,7 +22,7 @@ export async function cooperationRequest(path: string, body?: unknown, method = 
     const result = await response.json().catch(() => null)
     if (!response.ok) {
       const detail = result?.detail || result?.error || 'El servidor no devolvió un detalle de error.'
-      throw failure(attempt, `HTTP ${response.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`)
+      throw failure(attempt, `HTTP ${response.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, response.status)
     }
     if (result === null) throw failure(attempt, `HTTP ${response.status}: respuesta JSON inválida`)
     return result

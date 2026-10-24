@@ -1,9 +1,9 @@
 'use client'
 import { safeCooperationPath, type Json } from '../cooperation-model.ts'
 import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
-import { readWorkspaceJson, writeWorkspaceJson } from '../workspace-json.ts'
+import { readWorkspaceJson, writeWorkspaceJson, writeWorkspaceJsonIfUnchanged } from '../workspace-json.ts'
 
-export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; reuseLocalIds?: boolean; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
+export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; reuseLocalIds?: boolean; legacyStorageKeys?: string[]; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
 export type MirrorFile = { key: string; value?: Json; blob?: Blob }
 function localFileError(error: unknown, path: string, action: string): Error {
   const cause = error as { name?: string; message?: string }
@@ -38,10 +38,11 @@ export async function readJson<T>(root: FileSystemDirectoryHandle, path: string,
   try { return await readWorkspaceJson(root, path, fallback) }
   catch (error) { throw localFileError(error, path, 'leer') }
 }
-export async function writeFile(root: FileSystemDirectoryHandle, path: string, blob: Blob) {
+export async function writeFile(root: FileSystemDirectoryHandle, path: string, blob: Blob, onlyIfMissing = false) {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
   return withWorkspaceFileLock(`write:${path}`, async () => {
     try {
+      if (onlyIfMissing && await readFile(root, path)) return
       const parts = path.split('/'), dir = await directory(root, parts.slice(0, -1), true)
       const file = await dir.getFileHandle(parts.at(-1)!, { create: true }), writer = await file.createWritable()
       try { await writer.write(blob); await writer.close() } catch (error) { await writer.abort().catch(() => {}); throw error }
@@ -96,8 +97,11 @@ function stripPersonal(value: Json): Json {
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([key]) => !ephemeral.has(key)).map(([key, v]) => [key, stripPersonal(v)]))
   return value
 }
-export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBinding): Promise<MirrorFile[]> {
+type ScanResource = { key: string; deleted?: boolean; blob?: { hash: string; size: number; mime: string } }
+type ScanOptions = { resources?: Record<string, ScanResource>; restore?: (resource: ScanResource, path: string) => Promise<void> }
+export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBinding, options: ScanOptions = {}): Promise<MirrorFile[]> {
   const output: MirrorFile[] = [], paths = new Set<string>(), ids = new Set([b.subjectId, b.storageKey])
+  const repairedReferences = new Map<string, string>()
   const add = async (path: string, sharedPath = path) => {
     if (paths.has(path)) return
     if (!safeCooperationPath(path)) throw new Error('Una referencia de la esfera tiene una ruta inválida.')
@@ -114,6 +118,7 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
         if(path.startsWith('manifests/subject-voice/pdf/') || path.startsWith('manifests/pdf-explanations/'))return
         throw new Error(`El archivo local «${path}» está vacío. Completalo o restaurá su respaldo antes de compartir.`)
       }
+      const originalRaw = structuredClone(raw)
       if (path.startsWith('progreso/pizarras/') && raw && typeof raw === 'object' && !Array.isArray(raw) && raw.assets && typeof raw.assets === 'object' && !Array.isArray(raw.assets)) {
         for (const [id, data] of Object.entries(raw.assets)) if (typeof data === 'string' && /^data:[^,]*;base64,/.test(data)) {
           const comma = data.indexOf(','), bytes = Uint8Array.from(atob(data.slice(comma + 1)), char => char.charCodeAt(0))
@@ -123,16 +128,55 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
         }
       }
       const shared=await isolateReferences(stripPersonal(raw))
+      if (repairedReferences.size) {
+        const repair = (value: Json): Json => typeof value === 'string' ? repairedReferences.get(value) || value : Array.isArray(value) ? value.map(repair) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, ephemeral.has(key) ? child : repair(child)])) : value
+        const repaired = repair(originalRaw)
+        if (JSON.stringify(repaired) !== JSON.stringify(originalRaw) && !await writeWorkspaceJsonIfUnchanged(root, path, originalRaw, repaired)) throw Object.assign(new Error(`El archivo «${path}» cambió durante la reparación; se volverá a leer.`), { name: 'NotReadableError' })
+      }
       output.push({ key, value: mapBindingJson(shared, b, false) })
       await references(shared)
     } else output.push({ key, blob })
   }
   // Older imports can retain references to files outside the subject folder.
   // Publish only those explicit attachments, under deterministic subject paths.
-  const isolateReferences = async (value: Json): Promise<Json> => {
+  const isolateReferences = async (value: Json, expectedHash?: string): Promise<Json> => {
     if (typeof value === 'string' && value.startsWith('workspace://')) {
-      const path = value.slice(12)
+      let path = value.slice(12)
       if (!safeCooperationPath(path)) throw new Error('Una referencia de la esfera tiene una ruta inválida.')
+      const scopedReference = path.split('/').some(part => ids.has(part) || ids.has(decodeURIComponent(part)))
+      if (!scopedReference && /^(?:teoria|practica|audio)\//.test(path)) {
+        const segments = path.split('/'), currentPath = [segments[0], b.storageKey, ...segments.slice(2)].join('/')
+        const source = await readFile(root, path), current = await readFile(root, currentPath)
+        if (current && (b.legacyStorageKeys?.includes(segments[1]) || source && await digest(source) === await digest(current))) {
+          repairedReferences.set(value, `workspace://${currentPath}`)
+          path = currentPath; value = `workspace://${currentPath}`
+        }
+      }
+      if (/^(?:teoria|practica|audio)\//.test(path) && !await readFile(root, path)) {
+        const segments = path.split('/'), mapped = mapBindingText(path, b, true)
+        const known = Object.values(options.resources || {}).filter(resource => !resource.deleted && resource.blob && resource.key.split('/')[0] === segments[0] && resource.key.split('/').at(-1) === segments.at(-1) && (resource.key === mapBindingText(path, b, false) || resource.key.split('/').slice(2).join('/') === segments.slice(2).join('/') || !!expectedHash) && (!expectedHash || resource.blob.hash === expectedHash))
+        const hashes = new Set(known.map(resource => resource.blob!.hash))
+        if (expectedHash) hashes.add(expectedHash)
+        const candidates = new Set([mapped, ...[b.storageKey, b.subjectId].map(key => [segments[0], key, ...segments.slice(2)].join('/')), ...known.map(resource => mapBindingText(resource.key, b, true))])
+        let recovered: string | undefined
+        for (const candidate of candidates) {
+          if (candidate === path || !candidate.split('/').some(part => ids.has(part))) continue
+          const file = await readFile(root, candidate)
+          if (file && (candidate === mapped && mapped !== path || hashes.size === 1 && hashes.has(await digest(file)))) { recovered = candidate; break }
+        }
+        if (!recovered && known.length === 1 && options.restore) {
+          const destination = mapBindingText(known[0].key, b, true)
+          if (destination.split('/').some(part => ids.has(part))) {
+            await options.restore(known[0], destination)
+            const file = await readFile(root, destination)
+            if (file && file.size === known[0].blob!.size && await digest(file) === known[0].blob!.hash) recovered = destination
+          }
+        }
+        if (!recovered) throw new Error(`No se encuentra el archivo referenciado «${path}». No se publicaron eliminaciones. Revisá su ubicación en la carpeta de Estudio y reintentá.`)
+        repairedReferences.set(value, `workspace://${recovered}`)
+        path = recovered
+        value = `workspace://${recovered}`
+      }
       if (path.split('/').some(part => ids.has(part) || ids.has(decodeURIComponent(part)))) return value
       if (!/^(?:teoria|practica|audio)\//.test(path) || path.endsWith('.json')) return value
       const sharedPath = `${path.split('/')[0]}/${b.storageKey}/cooperation-imports/${await digest(new Blob([path]))}/${path.split('/').at(-1)}`
@@ -140,10 +184,11 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
       await add(path, sharedPath)
       return `workspace://${sharedPath}`
     }
-    if (Array.isArray(value)) return Promise.all(value.map(isolateReferences))
+    if (Array.isArray(value)) return Promise.all(value.map(child => isolateReferences(child)))
     if (value && typeof value === 'object') {
       const entries: [string, Json][] = []
-      for (const [key, child] of Object.entries(value)) entries.push([key, await isolateReferences(child)])
+      const hash = [value.sha256, value.hash].find(candidate => typeof candidate === 'string' && /^[a-f0-9]{64}$/.test(candidate)) as string | undefined
+      for (const [key, child] of Object.entries(value)) entries.push([key, await isolateReferences(child, typeof child === 'string' && child.startsWith('workspace://') ? hash : undefined)])
       return Object.fromEntries(entries)
     }
     return value

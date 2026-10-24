@@ -71,3 +71,38 @@ test('boards with the same sphere name follow their explicit identity instead of
   assert.ok(paths.includes('progreso/pizarras/legacy.json'))
   assert.equal(paths.includes('progreso/pizarras/copy.json'),false)
 })
+
+
+test('repairs obsolete cooperative paths only with verified sphere content and persists the local reference', async () => {
+  const fs=memoryWorkspace()
+  const {digest}=await import('../lib/client/cooperation-files.ts')
+  const binding={id:'sphere',groupId:'group',subjectId:'prog3',storageKey:'Prog3',sourceId:'prog3',sourceKey:'Prog3',name:'Prog 3',color:'#ff6600',owner:true}
+  const pdf=new Blob(['verified PDF']),hash=await digest(pdf)
+  const key='teoria/Prog3/week-28/file.pdf',old='teoria/Cooperativo-old/week-28/file.pdf'
+  const resource={key,type:'blob',blob:{hash,size:pdf.size,mime:'application/pdf'}}
+  await fs.put(key,pdf)
+  await fs.put('manifests/materials/Prog3/week-28.json',{materials:[{id:1,drive_file_id:`workspace://${old}`}],r2:{personal:'keep'}})
+  const files=await scanSphere(fs.root,binding,{resources:{[key]:resource}})
+  assert.equal((await fs.json('manifests/materials/Prog3/week-28.json')).materials[0].drive_file_id,`workspace://${key}`)
+  assert.deepEqual((await fs.json('manifests/materials/Prog3/week-28.json')).r2,{personal:'keep'})
+  assert.equal(files.some(file=>file.key.includes('cooperation-imports')),false)
+  fs.files.delete(key)
+  let restored=0
+  await scanSphere(fs.root,binding,{resources:{[key]:resource},restore:async(_resource,path)=>{restored++;await fs.put(path,pdf)}})
+  assert.equal(restored,1)
+  await fs.put(key,new Blob(['different file']))
+  await fs.put('manifests/materials/Prog3/week-28.json',{materials:[{id:1,drive_file_id:`workspace://${old}`}]})
+  await assert.rejects(scanSphere(fs.root,binding,{resources:{[key]:resource}}),/No se encuentra el archivo/)
+  assert.equal(await fs.files.get(key).text(),'different file')
+})
+
+test('reference repairs cannot overwrite a manifest edited during recovery', async () => {
+  const fs=memoryWorkspace(),{digest}=await import('../lib/client/cooperation-files.ts')
+  const binding={id:'sphere',groupId:'group',subjectId:'prog3',storageKey:'Prog3',sourceId:'prog3',sourceKey:'Prog3',name:'Prog 3',color:'#ff6600',owner:true}
+  const pdf=new Blob(['verified PDF']),key='teoria/Prog3/file.pdf',path='manifests/materials/Prog3/week-1.json'
+  const resource={key,type:'blob',blob:{hash:await digest(pdf),size:pdf.size,mime:'application/pdf'}}
+  await fs.put(path,{materials:[{id:1,drive_file_id:'workspace://teoria/Cooperativo-old/file.pdf'}]})
+  const edited={materials:[{id:2,file_name:'new local edit'}]}
+  await assert.rejects(scanSphere(fs.root,binding,{resources:{[key]:resource},restore:async()=>{await fs.put(key,pdf);await fs.put(path,edited)}}),error=>error instanceof Error && error.name==='NotReadableError')
+  assert.deepEqual(await fs.json(path),edited)
+})
