@@ -22,6 +22,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  worker-package:
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' }}
+    name: Preparar servicio Cloudflare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Compilar Worker para despliegue
+        run: npm run cloudflare:check -- --outdir "$RUNNER_TEMP/cursado-worker"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cursado-worker
+          path: ${{ runner.temp }}/cursado-worker/
+
   checks:
     if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' }}
     runs-on: ubuntu-latest
