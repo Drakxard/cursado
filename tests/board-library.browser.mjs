@@ -29,15 +29,17 @@ async function setup(t) {
       const writer=await (await directory.getFileHandle(parts.at(-1),{create:true})).createWritable()
       await writer.write(typeof value==='string'||value instanceof Blob?value:JSON.stringify(value));await writer.close()
     }
-    const now=new Date().toISOString(),subject={id:'custom-calculo3',name:'Cálculo 3',color:'#0f766e',storageKey:'calculo3',tabId:'main',createdAt:now,targetWeekday:0}
+    // These checks exercise the library, not a legacy folder migration running
+    // in the background while the embedded frame starts reading its materials.
+    const now=new Date().toISOString(),subject={id:'custom-calculo3',name:'Cálculo 3',color:'#0f766e',storageKey:'Cálculo 3',tabId:'main',createdAt:now,targetWeekday:0}
     await write('manifests/workspace-state.json',{workspaceTabs:{},activeWorkspaceTabId:'main',isMainWorkspaceTabVisible:true,subjectWeekdays:{'custom-calculo3':0},customSubjects:{'custom-calculo3':subject}})
     await write('manifests/subject-catalog.json',{version:2,subjects:{'custom-calculo3':{...subject,normalizedName:'calculo 3',updatedAt:now}}})
-    for(let week=1;week<=60;week++) await write(`manifests/materials/calculo3/week-${week}.json`,{version:1,subjectId:'custom-calculo3',weekNumber:week,materials:[
-      {id:100+week,subject_id:'custom-calculo3',file_name:'Guía de integrales.PDF',drive_file_id:'workspace://teoria/calculo3/guia.pdf',material_type:'theory',week_number:week,weekday_index:0,session_date:now.slice(0,10),created_at:now,updated_at:now,order_index:0},
-      {id:200+week,subject_id:'custom-calculo3',file_name:'Resumen.pdf',drive_file_id:'workspace://teoria/calculo3/resumen.pdf',material_type:'theory',week_number:week,weekday_index:0,session_date:now.slice(0,10),created_at:now,updated_at:now,order_index:1},
+    for(let week=1;week<=60;week++) await write(`manifests/materials/Cálculo 3/week-${week}.json`,{version:1,subjectId:'Cálculo 3',weekNumber:week,materials:[
+      {id:100+week,subject_id:'Cálculo 3',file_name:'Guía de integrales.PDF',drive_file_id:'workspace://teoria/Cálculo 3/guia.pdf',material_type:'theory',week_number:week,weekday_index:0,session_date:now.slice(0,10),created_at:now,updated_at:now,order_index:0},
+      {id:200+week,subject_id:'Cálculo 3',file_name:'Resumen.pdf',drive_file_id:'workspace://teoria/Cálculo 3/resumen.pdf',material_type:'theory',week_number:week,weekday_index:0,session_date:now.slice(0,10),created_at:now,updated_at:now,order_index:1},
     ]})
-    await write('teoria/calculo3/guia.pdf',new Blob([new Uint8Array(bytes)],{type:'application/pdf'}))
-    await write('teoria/calculo3/resumen.pdf',new Blob([new Uint8Array(bytes)],{type:'application/pdf'}))
+    await write('teoria/Cálculo 3/guia.pdf',new Blob([new Uint8Array(bytes)],{type:'application/pdf'}))
+    await write('teoria/Cálculo 3/resumen.pdf',new Blob([new Uint8Array(bytes)],{type:'application/pdf'}))
     await write('progreso/importantes.json',{version:1,tasks:[{id:'exam',text:'Parcial de Cálculo',startDate:'2026-10-01',dueDate:'2026-12-01',url:'',topics:['Integrales'],topicBoardIds:['test-integrales']}]})
     const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('local-workspace',1);request.onupgradeneeded=()=>request.result.createObjectStore('workspace',{keyPath:'id'});request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)})
     await new Promise((resolve,reject)=>{const tx=db.transaction('workspace','readwrite');tx.objectStore('workspace').put({id:'root-handle',handle:root});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})
@@ -274,7 +276,7 @@ test('NotebookLM resolves the PDF week, configures by hold and falls back withou
     const root=await (await navigator.storage.getDirectory()).getDirectoryHandle('board-library-test')
     const dir=await root.getDirectoryHandle('manifests')
     const writer=await (await dir.getFileHandle('subject-shortcuts.json',{create:true})).createWritable()
-    await writer.write(JSON.stringify({calculo3:{subjectId:'calculo3',buttons:[{id:'nlm-test',label:'nlm',orderIndex:0,url:null,sectionScoped:true,sectionUrls:{'week:1':'https://notebook.google.com/notebook/week-one','week:2':'https://notebook.google.com/notebook/week-two'},integrationRole:'notebooklm',activeSectionKey:'week:2'}]}}));await writer.close()
+    await writer.write(JSON.stringify({'Cálculo 3':{subjectId:'Cálculo 3',buttons:[{id:'nlm-test',label:'nlm',orderIndex:0,url:null,sectionScoped:true,sectionUrls:{'week:1':'https://notebook.google.com/notebook/week-one','week:2':'https://notebook.google.com/notebook/week-two'},integrationRole:'notebooklm',activeSectionKey:'week:2'}]}}));await writer.close()
   })
   await page.goto(origin+'/practice/viewer?materialId=101')
   let viewer=page.frameLocator('iframe[title^="Visor PDF:"]')
