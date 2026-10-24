@@ -34,11 +34,22 @@ test('actual Study copies an existing sphere into a group and accepts its local 
   async function setup(actor,source=false) {
     const context=await browser.newContext({serviceWorkers:'block',viewport:{width:1440,height:900}})
     await context.addCookies([{name:'pizarra_sid',value:actor.cookie.split('=')[1],domain:new URL(origin).hostname,path:'/pizarra/',httpOnly:true}])
-    if(!production)await context.route('**/pizarra/api/**',async route=>{
-      const incoming=route.request(), path=new URL(incoming.url()).pathname.replace(/^\/pizarra/,'')
+    if(!production)await context.route(url=>url.pathname.startsWith('/pizarra/api/')||url.pathname==='/pizarra/upload-session',async route=>{
+      const incoming=route.request()
+      let path=new URL(incoming.url()).pathname.replace(/^\/pizarra/,'')+new URL(incoming.url()).search
       const headers=new Headers(incoming.headers());headers.set('Origin',origin);headers.set('Cookie',actor.cookie);headers.set('CF-Connecting-IP','192.0.2.1')
-      const body=incoming.postDataBuffer()
+      let body=incoming.postDataBuffer()
+      if(path==='/upload-session'){
+        const {sphereId,hash,size,mime}=incoming.postDataJSON()
+        path=`/api/cooperation/spheres/${sphereId}/files/${hash}`
+        body=Buffer.from(JSON.stringify({size,mime}))
+      }
       const response=await backend.fetch(new Request(`https://backend.test${path}`,{method:incoming.method(),headers,...(body?{body}: {})}))
+      if(new URL(incoming.url()).pathname==='/pizarra/upload-session'){
+        const result=await response.json()
+        if(result.uploadUrl){const upload=new URL(result.uploadUrl);result.uploadUrl=origin+'/pizarra'+upload.pathname+upload.search}
+        await route.fulfill({status:response.status,json:result});return
+      }
       await route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.from(await response.arrayBuffer())})
     })
     const page=await context.newPage()
@@ -100,7 +111,32 @@ test('actual Study copies an existing sphere into a group and accepts its local 
   await b.locator('[data-study-workspace-tabs]').focus()
   await b.getByRole('button',{name:'Cooperativo',exact:true}).click()
   await expect(b.getByRole('button',{name:'Álgebra cooperativa',exact:true})).toBeVisible()
-  if(!production)return
+  if(!production){
+    const created=await backend.request('/api/cooperation/groups',{cookie:actors[2].cookie,body:{names:actors[0].name}})
+    assert.equal(created.status,201)
+    const secondGroupId=(await created.json()).id
+    await a.reload()
+    const originalSphere=a.getByRole('button',{name:/Álgebra cooperativa/}).first()
+    await originalSphere.waitFor();await originalSphere.hover();await a.mouse.down();await a.waitForTimeout(900);await a.mouse.up()
+    const copyOptions=a.getByRole('dialog',{name:'Opciones de materia'})
+    await copyOptions.getByRole('button',{name:'Copiar a',exact:true}).click()
+    await expect(a.getByRole('menuitem',{name:/^Cooperar ·/})).toHaveCount(2)
+    await a.getByRole('menuitem',{name:/Aceptar y copiar$/}).click()
+    await expect(copyOptions).toHaveCount(0,{timeout:30000})
+    await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
+    let secondGroup
+    await expect.poll(async()=>{const result=await backend.request('/api/cooperation/groups',{cookie:actors[0].cookie});secondGroup=(await result.json()).groups.find(group=>group.id===secondGroupId);return secondGroup?.accepted&&secondGroup.spheres.length===1},{timeout:15000}).toBe(true)
+    const copiedId=secondGroup.spheres[0].id
+    const copied=await a.evaluate(async({groupId,copiedId})=>{const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study');const manifests=await root.getDirectoryHandle('manifests');const workspace=JSON.parse(await(await(await manifests.getFileHandle('workspace-state.json')).getFile()).text());const file=await(await(await root.getDirectoryHandle('teoria')).getDirectoryHandle('Cooperativo-'+copiedId)).getFileHandle('uno.pdf');return{active:workspace.activeWorkspaceTabId,original:workspace.customSubjects['algebra-local'].tabId,ids:workspace.workspaceTabs['cooperative-'+groupId].subjectIds,bytes:await(await file.getFile()).text()}},{groupId:secondGroupId,copiedId})
+    assert.equal(copied.active,'cooperative-'+secondGroupId)
+    assert.equal(copied.original,'main')
+    assert.deepEqual(copied.ids,['coop-'+copiedId])
+    assert.equal(copied.bytes,'local PDF bytes')
+    await a.reload();await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
+    await a.locator('[data-study-workspace-tabs]').focus();await a.locator('[data-study-workspace-tabs] button').first().click()
+    await expect(a.getByRole('button',{name:/Álgebra cooperativa/}).first()).toBeVisible()
+    return
+  }
   const c=await setup(actors[2]);await c.goto(origin+'/estudio')
   const inviteC=c.getByRole('dialog',{name:'Nuevo contenido cooperativo'})
   await inviteC.getByRole('button',{name:'Cancelar',exact:true}).click({timeout:30000})

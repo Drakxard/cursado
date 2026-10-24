@@ -151,6 +151,7 @@ jobs:
           done
           curl --silent --fail http://localhost:3000/ > /dev/null
           node --test tests/cooperation-weeks.browser.mjs
+          CURSADO_TEST_URL=http://localhost:3000 node --test tests/cooperation-study.browser.mjs
           node --test tests/board-library.browser.mjs
       - name: Guardar capturas y diagnósticos de cooperación
         if: always()
