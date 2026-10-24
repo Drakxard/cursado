@@ -488,6 +488,9 @@ async function synchronizeMirror(mirror: Mirror) {
       // A queued file may have changed while offline. Its exact bytes live in staging.
       const staging = `.cooperation/${state.userId}/uploads/${change.blob.hash}`
       let blob = await readFile(handle, staging)
+      if (blob && (blob.size !== change.blob.size || await digest(blob) !== change.blob.hash)) {
+        await removeFile(handle, staging); blob = null
+      }
       if (!blob) {
         if (!file || await digest(file) !== change.blob.hash) { mirror.outbox = undefined; await save(); return }
         await writeFile(handle, staging, file); blob = await readFile(handle, staging)
@@ -757,8 +760,17 @@ export function synchronizeCooperation(): Promise<void> {
         await repairLegacyCooperationCopies()
         for (const mirror of Object.values(state.mirrors)) {
           if(mirror.repair || mirror.copySource || undoingSpheres.has(mirror.binding.id))continue
-          try { while (await synchronizeMirror(mirror)) { if(undoingSpheres.has(mirror.binding.id))break } }
-          catch (error) { confirmedMirrors.delete(mirror.binding.id); mirror.error = error instanceof Error ? error.message : String(error); await save(); retryBackground?.() }
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try { while (await synchronizeMirror(mirror)) { if(undoingSpheres.has(mirror.binding.id))break }; break }
+            catch (error) {
+              // An atomic local save can invalidate a File snapshot kept by a
+              // long transfer. Re-scan with fresh handles before showing an error.
+              const name = (error as { name?: string })?.name
+              if ((name === 'NotFoundError' || name === 'NotReadableError') && attempt < 2) continue
+              confirmedMirrors.delete(mirror.binding.id); mirror.error = error instanceof Error ? error.message : String(error); await save(); retryBackground?.()
+              break
+            }
+          }
         }
       }
       if (navigator.locks) await navigator.locks.request(`cooperation:${state.userId}`, async () => {

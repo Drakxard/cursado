@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { build } from 'esbuild'
 import { memoryWorkspace } from './helpers/cooperation-filesystem.mjs'
-import { writeFile } from '../lib/client/cooperation-files.ts'
+import { digest, writeFile } from '../lib/client/cooperation-files.ts'
 import { withWorkspaceFileLock } from '../lib/workspace-file-lock.ts'
 
 test('a concurrent local save cannot replace a cooperative file before its verification', async () => {
@@ -48,4 +48,11 @@ test('shortcut reads do not rewrite unchanged files and concurrent shared update
   const saved = await fs.json('manifests/subject-shortcuts.json')
   assert.deepEqual(saved.Prog3, shortcut)
   assert.deepEqual(saved.Algebra, { subjectId: 'Algebra', buttons: [] })
+})
+
+
+test('persistent binary read failures identify the file and retain the failure type', async () => {
+  const file=new File(['pdf'],'fallido.pdf')
+  file.arrayBuffer=async()=>{throw new DOMException('A requested file or directory could not be found','NotFoundError')}
+  await assert.rejects(digest(file),error=>error instanceof Error && error.name==='NotFoundError' && /fallido.pdf/.test(error.message) && /carpeta de Estudio/.test(error.message))
 })

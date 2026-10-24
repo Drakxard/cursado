@@ -39,8 +39,21 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   await fs.put('progreso/pizarras/original.json',{version:1,boardId:'original',name:'Ecuaciones - Teoría',cooperationSubjectId:'ecu',sharedBoard:{id:'private-link-association'},assets:{},content:{strokes:[],texts:[],media:[],shapes:[],camera:{x:0,y:0,zoom:1}}})
   const client=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
   const source={id:'ecu',name:'Ecuaciones',color:'#2563eb',storageKey:'Ecu'}
+  const uploadUser=(await(await api(actors[0],'groups')).json()).user.id
+  const pdfHash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('PDF original')))].map(value=>value.toString(16).padStart(2,'0')).join('')
+  await fs.put(`.cooperation/${uploadUser}/uploads/${pdfHash}`,new Blob(['incomplete staging']))
+  const originalArrayBuffer=File.prototype.arrayBuffer
+  let staleSnapshot=true
+  File.prototype.arrayBuffer=async function(){
+    if(this.name==='uno.pdf' && staleSnapshot){staleSnapshot=false;throw new DOMException('The file snapshot was invalidated','NotFoundError')}
+    return originalArrayBuffer.call(this)
+  }
+  t.after(()=>{File.prototype.arrayBuffer=originalArrayBuffer})
   const firstBinding=await client.shareCooperationSphere(first,source)
   assert.equal(firstBinding.subjectId,'ecu')
+  assert.equal(staleSnapshot,false,'the stale file snapshot must have been encountered and retried')
+  assert.equal(client.cooperationState().mirrors[firstBinding.id].error,undefined)
+  assert.equal(await(await api(actors[0],`spheres/${firstBinding.id}/files/${pdfHash}`)).text(),'PDF original','an interrupted staging file must be rebuilt from the verified original')
   const beforeFiles=[...fs.files.keys()].sort()
   const beforeSnapshot=await (await api(actors[0],`spheres/${firstBinding.id}/snapshot`)).json()
   const linked=await client.shareCooperationSphere(second,source,{copy:true})

@@ -5,33 +5,53 @@ import { readWorkspaceJson, writeWorkspaceJson } from '../workspace-json.ts'
 
 export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; reuseLocalIds?: boolean; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
 export type MirrorFile = { key: string; value?: Json; blob?: Blob }
-export const digest = async (blob: Blob) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map(x => x.toString(16).padStart(2, '0')).join('')
+function localFileError(error: unknown, path: string, action: string): Error {
+  const cause = error as { name?: string; message?: string }
+  const missing = cause?.name === 'NotFoundError'
+  const detail = missing ? 'El archivo o la carpeta ya no está disponible. Revisá la carpeta de Estudio y reintentá.' : cause?.message || String(error)
+  return Object.assign(new Error(`No se pudo ${action} «${path}». ${detail}`, { cause: error }), { name: cause?.name || 'Error' })
+}
+export async function digest(blob: Blob) {
+  try { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map(x => x.toString(16).padStart(2, '0')).join('') }
+  catch (error) {
+    const filename = (blob as File).name
+    if (filename) throw localFileError(error, filename, 'leer')
+    throw error
+  }
+}
 export async function directory(root: FileSystemDirectoryHandle, parts: string[], create = false) {
   let dir = root
-  for (const part of parts) { if (!safeCooperationPath(part) || part.includes('/')) throw new Error('Ruta local inválida.'); dir = await dir.getDirectoryHandle(part, { create }) }
+  for (const part of parts) {
+    if (!safeCooperationPath(part) || part.includes('/')) throw new Error('Ruta local inválida.')
+    try { dir = await dir.getDirectoryHandle(part, { create }) }
+    catch (error) { throw localFileError(error, parts.join('/'), create ? 'crear la carpeta' : 'abrir la carpeta') }
+  }
   return dir
 }
 export async function readFile(root: FileSystemDirectoryHandle, path: string): Promise<File | null> {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
   try { const parts = path.split('/'); return await (await (await directory(root, parts.slice(0, -1))).getFileHandle(parts.at(-1)!)).getFile() }
-  catch (error) { if ((error as Error).name === 'NotFoundError') return null; throw error }
+  catch (error) { if ((error as Error).name === 'NotFoundError') return null; throw localFileError(error, path, 'leer') }
 }
 export async function readJson<T>(root: FileSystemDirectoryHandle, path: string, fallback: T): Promise<T> {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
-  return readWorkspaceJson(root, path, fallback)
+  try { return await readWorkspaceJson(root, path, fallback) }
+  catch (error) { throw localFileError(error, path, 'leer') }
 }
 export async function writeFile(root: FileSystemDirectoryHandle, path: string, blob: Blob) {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
   return withWorkspaceFileLock(`write:${path}`, async () => {
-    const parts = path.split('/'), dir = await directory(root, parts.slice(0, -1), true)
-    const file = await dir.getFileHandle(parts.at(-1)!, { create: true }), writer = await file.createWritable()
-    try { await writer.write(blob); await writer.close() } catch (error) { await writer.abort().catch(() => {}); throw error }
-    if (await digest(await file.getFile()) !== await digest(blob)) throw new Error(`No se pudo verificar ${path}.`)
+    try {
+      const parts = path.split('/'), dir = await directory(root, parts.slice(0, -1), true)
+      const file = await dir.getFileHandle(parts.at(-1)!, { create: true }), writer = await file.createWritable()
+      try { await writer.write(blob); await writer.close() } catch (error) { await writer.abort().catch(() => {}); throw error }
+      if (await digest(await file.getFile()) !== await digest(blob)) throw new Error(`No se pudo verificar ${path}.`)
+    } catch (error) { throw localFileError(error, path, 'guardar') }
   })
 }
 export const writeJson = (root: FileSystemDirectoryHandle, path: string, value: unknown) => {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
-  return writeWorkspaceJson(root, path, value)
+  return writeWorkspaceJson(root, path, value).catch(error => { throw localFileError(error, path, 'guardar') })
 }
 export async function removeFile(root: FileSystemDirectoryHandle, path: string) {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')

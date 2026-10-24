@@ -1956,7 +1956,6 @@ export function SubjectWheel({
     const destination = cooperationGroupTab(groupId)
     setDeleteConfirmationTarget(null); setDeleteSummaries([])
     setActiveWorkspaceTabId(destination)
-    toast({title:move ? 'Moviendo esfera' : 'Compartiendo esfera',description:'Preparando en segundo plano. Podés seguir usando Estudio.'})
     try {
       const shared:SphereBinding[]=[]
       for (const subject of subjects) {
@@ -1972,15 +1971,13 @@ export function SubjectWheel({
         })
         setCustomSubjects(previous => Object.fromEntries(Object.entries(previous).map(([id, subject]) => [id, ids.has(id) ? { ...subject, tabId: destination } : subject])))
         hasUserChangedWorkspaceStateRef.current = true
-        toast({title:'Esfera movida',description:'Los archivos se sincronizan en segundo plano.'})
       }
       if(!move){
         setWorkspaceTabs(previous=>({...previous,[destination]:{...(previous[destination]||{id:destination,name:group.members.map(member=>member.display_name).join(', '),color:'#16a34a',createdAt:new Date().toISOString()}),subjectIds:[...new Set([...(previous[destination]?.subjectIds||[]),...shared.map(binding=>binding.subjectId)])]}}))
         setCustomSubjects(previous=>{const next={...previous};for(const binding of shared)next[binding.subjectId]={...(next[binding.subjectId]||{id:binding.subjectId,tabId:destination,createdAt:new Date().toISOString(),targetWeekday:0}),name:binding.name,color:binding.color,storageKey:binding.storageKey};return next})
         hasUserChangedWorkspaceStateRef.current=true
-        toast({title:'Esfera compartida',description:'El grupo accede a la misma esfera y sus archivos.'})
       }
-    } catch (error) { toast({title:move ? 'No se pudo mover la esfera' : 'No se pudo copiar la esfera',description:error instanceof Error ? error.message : String(error),variant:'destructive'}) }
+    } catch (error) { toast({title:move ? 'No se pudo mover la esfera' : 'No se pudo compartir la esfera',description:error instanceof Error ? error.message : String(error),variant:'destructive'}) }
     finally { cooperationTransfersRef.current.delete(transferKey);setQueuedCooperationSubjects(previous=>previous.filter(task=>task.key!==transferKey)) }
   }
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -7641,7 +7638,7 @@ export function SubjectWheel({
           {homeSubjectCards.length > 0 || pendingCooperationCards.length > 0 ? (
             <div className="mx-auto flex w-full max-w-5xl items-center justify-center">
             <div className="flex w-full max-w-[58rem] flex-wrap justify-center gap-6 lg:gap-8">
-              {pendingCooperationCards.map(task=><SubjectHomeCard key={`${task.key}:${task.subject.id}`} displayName={task.subject.name} daysRemainingLabel="" color={task.subject.color} aria-label={task.subject.name} aria-description="Copia en segundo plano" onClick={()=>toast({title:'Copiando esfera',description:'La preparación continúa en segundo plano.'})}/>)}
+              {pendingCooperationCards.map(task=><SubjectHomeCard key={`${task.key}:${task.subject.id}`} displayName={task.subject.name} daysRemainingLabel="" color={task.subject.color} aria-label={task.subject.name} aria-description="Compartiendo en segundo plano" disabled/>)}
               {homeSubjectCards.map((card) => {
                 const canDeleteSubject = isCustomSubject(card.subject)
                 const mirror=Object.values(cooperative.mirrors).find(m=>m.binding.subjectId===card.subject.id)
@@ -7652,7 +7649,7 @@ export function SubjectWheel({
                     type="button"
                     onClick={() => {
                       if (consumeLongPressClick()) return
-                      if(mirror?.copySource){toast({title:'Copiando esfera',description:'La preparación continúa en segundo plano.'});return}
+                      if(mirror?.copySource)return
                       handleSubjectClick(card.subject)
                     }}
                     onPointerDown={() => {
@@ -7954,8 +7951,7 @@ export function SubjectWheel({
 
           {deleteConfirmationTarget && Object.values(cooperative.mirrors).filter(m=>m.binding.owner&&(m.error||m.copySource)&&getDeleteTargetSubjectIds(deleteConfirmationTarget).includes(m.binding.subjectId)).map(m=><Button key={m.binding.id} type="button" variant="outline" onClick={()=>{
             setDeleteConfirmationTarget(null);setDeleteSummaries([])
-            toast({title:'Deshaciendo cooperación',description:'Se conserva la esfera original y sus archivos.'})
-            void undoCooperationSphere(m.binding.id).then(()=>toast({title:'Cooperación deshecha',description:'Ya podés volver a copiar la esfera al grupo.'})).catch(reason=>toast({title:'No se pudo deshacer',description:reason instanceof Error?reason.message:String(reason),variant:'destructive'}))
+            void undoCooperationSphere(m.binding.id).catch(reason=>toast({title:'No se pudo deshacer',description:reason instanceof Error?reason.message:String(reason),variant:'destructive'}))
           }}>Deshacer cooperación</Button>)}
           <DialogFooter>
             <DialogClose asChild>
