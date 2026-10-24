@@ -47,3 +47,39 @@ test('falls back to the previous valid generation if the latest backup is also d
   assert.deepEqual(await readWorkspaceJson(fs.root, path, null), {tags:['first']})
   assert.deepEqual(await fs.json(path), {tags:['first']})
 })
+
+test('long Windows cache paths use compact recovery names and keep both valid generations', async () => {
+  const fs = memoryWorkspace()
+  const path = `manifests/subject-voice/pdf/datalab-balanced-json-v1/${'a'.repeat(64)}/clef-fragments-v1/${'b'.repeat(64)}.json`
+  const root = 'D:/Users/Rafael/Desktop/pizarra/'
+  function windowsDirectory(directory: FileSystemDirectoryHandle, prefix = ''): FileSystemDirectoryHandle {
+    const check = (name: string) => {
+      const target = prefix + name
+      if ((root + target).length >= 260) throw new DOMException('Windows path too long', 'NotFoundError')
+      return target
+    }
+    return {
+      ...directory,
+      async getDirectoryHandle(name, options) { return windowsDirectory(await directory.getDirectoryHandle(name, options), check(name) + '/') },
+      async getFileHandle(name, options) { check(name); return directory.getFileHandle(name, options) },
+    }
+  }
+  const handle = windowsDirectory(fs.root)
+  await fs.put(path, { version: 1 })
+  assert.deepEqual(await readWorkspaceJson(handle, path, null), { version: 1 })
+  await writeWorkspaceJson(handle, path, { version: 2 })
+  await fs.put(path, '{broken')
+  assert.deepEqual(await readWorkspaceJson(handle, path, null), { version: 2 })
+  const backup = [...fs.files.keys()].find(key => key.startsWith('.json-recovery/current/by-path/'))!
+  await fs.put(path, '{broken again')
+  await fs.put(backup, '{broken backup')
+  assert.deepEqual(await readWorkspaceJson(handle, path, null), { version: 1 })
+  assert.ok([...fs.files.keys()].every(key => (root + key).length < 260))
+})
+
+test('recovers PDF caches from their existing .json.backup files', async () => {
+  const fs = memoryWorkspace(), path = 'manifests/subject-voice/pdf/cache.json'
+  await fs.put(path, '{broken')
+  await fs.put(path + '.backup', { kept: true })
+  assert.deepEqual(await readWorkspaceJson(fs.root, path, null), { kept: true })
+})

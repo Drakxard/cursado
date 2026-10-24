@@ -19,16 +19,25 @@ async function put(root: FileSystemDirectoryHandle, path: string, raw: string) {
   if (await (await handle.getFile()).text() !== raw) throw new Error(`No se pudo verificar ${path}.`)
 }
 function parse(raw: string) { return JSON.parse(raw.replace(/^\uFEFF/, '')) }
-const backupPath = (path: string) => `.json-recovery/current/${path}`
+async function recoveryPath(path: string, generation: 'current' | 'previous' | 'damaged') {
+  // Mirroring a long cache path under the recovery folder exceeds Windows' path
+  // limit even when the original file is perfectly readable.
+  const key = path.length <= 120 ? path : `by-path/${await hashText(path)}.json`
+  return `.json-recovery/${generation}/${key}`
+}
+async function hashText(raw: string) {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw)))].map(n => n.toString(16).padStart(2, '0')).join('')
+}
 async function archive(root: FileSystemDirectoryHandle, path: string, raw: string) {
-  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw)))].map(n => n.toString(16).padStart(2, '0')).join('')
-  await put(root, `.json-recovery/damaged/${path}/${hash}.txt`, raw)
+  const hash = await hashText(raw)
+  const target = path.length <= 120 ? `.json-recovery/damaged/${path}/${hash}.txt` : `.json-recovery/damaged/${await hashText(path)}/${hash}.txt`
+  await put(root, target, raw)
 }
 async function remember(root: FileSystemDirectoryHandle, path: string, raw: string) {
-  const backup = backupPath(path), previous = await text(root, backup)
+  const backup = await recoveryPath(path, 'current'), previous = await text(root, backup)
   if (previous === raw) return
   if (previous?.trim()) {
-    try { parse(previous); await put(root, `.json-recovery/previous/${path}`, previous) }
+    try { parse(previous); await put(root, await recoveryPath(path, 'previous'), previous) }
     catch (error) { if (!(error instanceof SyntaxError)) throw error }
   }
   await put(root, backup, raw)
@@ -47,7 +56,7 @@ export async function readWorkspaceJson<T>(root: FileSystemDirectoryHandle, path
     }
     // Missing files can be intentional deletions. Do not resurrect them.
     if (raw === null) return fallback
-    for (const candidate of [backupPath(path), path.replace(/\.json$/, '.backup.json'), `.json-recovery/previous/${path}`]) {
+    for (const candidate of new Set([await recoveryPath(path, 'current'), `.json-recovery/current/${path}`, path.replace(/\.json$/, '.backup.json'), path + '.backup', await recoveryPath(path, 'previous'), `.json-recovery/previous/${path}`])) {
       if (candidate === path) continue
       const copy = await text(root, candidate)
       if (!copy?.trim()) continue

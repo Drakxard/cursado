@@ -33,9 +33,9 @@ export async function readFile(root: FileSystemDirectoryHandle, path: string): P
   try { const parts = path.split('/'); return await (await (await directory(root, parts.slice(0, -1))).getFileHandle(parts.at(-1)!)).getFile() }
   catch (error) { if ((error as Error).name === 'NotFoundError') return null; throw localFileError(error, path, 'leer') }
 }
-export async function readJson<T>(root: FileSystemDirectoryHandle, path: string, fallback: T): Promise<T> {
+export async function readJson<T>(root: FileSystemDirectoryHandle, path: string, fallback: T, readOnly = false): Promise<T> {
   if (!safeCooperationPath(path)) throw new Error('Ruta local inválida.')
-  try { return await readWorkspaceJson(root, path, fallback) }
+  try { return await readWorkspaceJson(root, path, fallback, readOnly) }
   catch (error) { throw localFileError(error, path, 'leer') }
 }
 export async function writeFile(root: FileSystemDirectoryHandle, path: string, blob: Blob, onlyIfMissing = false) {
@@ -113,7 +113,8 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
     if (!blob) return
     const key = mapBindingText(sharedPath, b, false)
     if (path.endsWith('.json')) {
-      const raw = await readJson<Json | undefined>(root, path, undefined)
+      const cache = path.startsWith('manifests/subject-voice/pdf/') || path.startsWith('manifests/pdf-explanations/')
+      const raw = await readJson<Json | undefined>(root, path, undefined, cache)
       if (raw === undefined) {
         if(path.startsWith('manifests/subject-voice/pdf/') || path.startsWith('manifests/pdf-explanations/'))return
         throw new Error(`El archivo local «${path}» está vacío. Completalo o restaurá su respaldo antes de compartir.`)
@@ -139,7 +140,7 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
   }
   // Older imports can retain references to files outside the subject folder.
   // Publish only those explicit attachments, under deterministic subject paths.
-  const isolateReferences = async (value: Json, expectedHash?: string): Promise<Json> => {
+  const isolateReferences = async (value: Json, expectedHash?: string, shortcut = false): Promise<Json> => {
     if (typeof value === 'string' && value.startsWith('workspace://')) {
       let path = value.slice(12)
       if (!safeCooperationPath(path)) throw new Error('Una referencia de la esfera tiene una ruta inválida.')
@@ -153,6 +154,9 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
         }
       }
       if (/^(?:teoria|practica|audio)\//.test(path) && !await readFile(root, path)) {
+        // A board shortcut is navigation metadata, not ownership of a PDF. Old
+        // shortcuts may outlive a deleted or moved material without blocking it.
+        if (shortcut) return value
         const segments = path.split('/'), mapped = mapBindingText(path, b, true)
         const known = Object.values(options.resources || {}).filter(resource => !resource.deleted && resource.blob && resource.key.split('/')[0] === segments[0] && resource.key.split('/').at(-1) === segments.at(-1) && (resource.key === mapBindingText(path, b, false) || resource.key.split('/').slice(2).join('/') === segments.slice(2).join('/') || !!expectedHash) && (!expectedHash || resource.blob.hash === expectedHash))
         const hashes = new Set(known.map(resource => resource.blob!.hash))
@@ -184,21 +188,22 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
       await add(path, sharedPath)
       return `workspace://${sharedPath}`
     }
-    if (Array.isArray(value)) return Promise.all(value.map(child => isolateReferences(child)))
+    if (Array.isArray(value)) return Promise.all(value.map(child => isolateReferences(child, undefined, shortcut)))
     if (value && typeof value === 'object') {
       const entries: [string, Json][] = []
       const hash = [value.sha256, value.hash].find(candidate => typeof candidate === 'string' && /^[a-f0-9]{64}$/.test(candidate)) as string | undefined
-      for (const [key, child] of Object.entries(value)) entries.push([key, await isolateReferences(child, typeof child === 'string' && child.startsWith('workspace://') ? hash : undefined)])
+      for (const [key, child] of Object.entries(value)) entries.push([key, await isolateReferences(child, typeof child === 'string' && child.startsWith('workspace://') ? hash : undefined, shortcut || value.visualType === 'pdf-shortcut' && key === 'pdfReference')])
       return Object.fromEntries(entries)
     }
     return value
   }
-  const references = async (value: Json): Promise<void> => {
+  const references = async (value: Json, shortcut = false): Promise<void> => {
     if (typeof value === 'string') {
       if (/^[a-f0-9]{64}$/.test(value)) {
         for (const base of ['manifests/subject-voice/pdf/datalab-balanced-json-v1', 'manifests/subject-voice/pdf/corrections-v1']) for (const path of await walk(root, `${base}/${value}`)) await add(path)
       }
       if (value.startsWith('workspace://')) {
+        if (shortcut && !await readFile(root, value.slice(12))) return
         await add(value.slice(12))
         const h = await digest(new Blob([value]))
         for (const path of await walk(root, `manifests/pdf-explanations/${h}`)) await add(path)
@@ -208,8 +213,8 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
         for (const path of await walk(root, 'sintesis/images')) if (path.includes(id)) await add(path)
       }
       if (/^(?:subject-voice|manifests\/subject-voice)\//.test(value)) await add(value)
-    } else if (Array.isArray(value)) { for (const v of value) await references(v) }
-    else if (value && typeof value === 'object') { for (const v of Object.values(value)) await references(v) }
+    } else if (Array.isArray(value)) { for (const v of value) await references(v, shortcut) }
+    else if (value && typeof value === 'object') { for (const [key, v] of Object.entries(value)) await references(v, shortcut || value.visualType === 'pdf-shortcut' && key === 'pdfReference') }
   }
   for (const id of ids) {
     for (const base of ['teoria', 'practica', 'audio', 'sintesis', 'manifests/materials', 'manifests/entries', 'manifests/synthesis', 'manifests/sintesis', 'manifests/subject-voice', 'manifests/subject-voice/topics', 'manifests/subject-voice/search-history', 'subject-voice/topics', 'subject-voice/images', 'subject-voice/pdf-sources']) {

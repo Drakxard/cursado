@@ -106,3 +106,32 @@ test('reference repairs cannot overwrite a manifest edited during recovery', asy
   await assert.rejects(scanSphere(fs.root,binding,{resources:{[key]:resource},restore:async()=>{await fs.put(key,pdf);await fs.put(path,edited)}}),error=>error instanceof Error && error.name==='NotReadableError')
   assert.deepEqual(await fs.json(path),edited)
 })
+
+test('obsolete PDF shortcuts do not block a sphere, but missing material attachments still do', async () => {
+  const fs = memoryWorkspace()
+  const binding = { id:'sphere', groupId:'group', subjectId:'prog3', storageKey:'Prog 3', sourceId:'prog3', sourceKey:'Prog 3', name:'Prog 3', color:'#ff6600', owner:true }
+  const old = 'workspace://practica/Prog 3/week-23/deleted.pdf'
+  const foreign = 'workspace://practica/Old subject/deleted.pdf'
+  const board = { cooperationSubjectId:'prog3', content:{ shapes:[old, foreign].map(workspaceFileId => ({ visualType:'pdf-shortcut', pdfReference:{workspaceFileId} })) } }
+  await fs.put('progreso/pizarras/board.json', board)
+  await fs.put('practica/Prog 3/current.pdf', new Blob(['current PDF']))
+  let restores = 0
+  const files = await scanSphere(fs.root, binding, {restore:async () => { restores++; throw new Error('Offline') }})
+  assert.equal(restores, 0)
+  assert.equal(files.some(file => file.key === 'practica/Prog 3/current.pdf'), true)
+  assert.deepEqual((files.find(file => file.key === 'progreso/pizarras/board.json')!.value as any).content, board.content)
+  assert.deepEqual(await fs.json('progreso/pizarras/board.json'), board)
+  await fs.put('manifests/materials/Prog 3/week-23.json', { materials:[{drive_file_id:old}] })
+  await assert.rejects(scanSphere(fs.root, binding), /No se encuentra el archivo/)
+})
+
+test('scanning derived PDF JSON reads it without creating another recovery tree', async () => {
+  const fs = memoryWorkspace(), hash = 'a'.repeat(64)
+  const binding = { id:'sphere', groupId:'group', subjectId:'ecu', storageKey:'Ecu', sourceId:'ecu', sourceKey:'Ecu', name:'Ecu', color:'#2563eb', owner:true }
+  const path = `manifests/subject-voice/pdf/datalab-balanced-json-v1/${hash}/clef-fragments-v1/${'b'.repeat(64)}.json`
+  await fs.put('manifests/materials/Ecu/week-1.json', { materials:[{hash}] })
+  await fs.put(path, { results:[1,2] })
+  const files = await scanSphere(fs.root, binding)
+  assert.deepEqual(files.find(file => file.key === path)!.value, {results:[1,2]})
+  assert.equal([...fs.files.keys()].some(key => key.startsWith('.json-recovery/') && key.includes('subject-voice')), false)
+})
