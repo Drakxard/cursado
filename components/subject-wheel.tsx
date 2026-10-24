@@ -1362,7 +1362,7 @@ export function SubjectWheel({
   const visibleSubjectIds = useMemo(() => visibleSubjects.map((subject) => subject.id), [visibleSubjects])
   const cooperative = useCooperation()
   const [queuedCooperationSubjects,setQueuedCooperationSubjects]=useState<{key:string;groupId:string;subject:Subject}[]>([])
-  const pendingCooperationCards=queuedCooperationSubjects.filter(task=>cooperationGroupTab(task.groupId)===activeWorkspaceTabId&&!Object.values(cooperative.mirrors).some(m=>m.binding.groupId===task.groupId&&(m.binding.subjectId===task.subject.id||m.copiedFrom===task.subject.id)))
+  const pendingCooperationCards=queuedCooperationSubjects.filter(task=>cooperationGroupTab(task.groupId)===activeWorkspaceTabId&&!Object.values(cooperative.mirrors).some(m=>cooperative.groups.some(group=>group.id===task.groupId&&group.spheres.some(sphere=>sphere.id===m.binding.id))&&(m.binding.subjectId===task.subject.id||m.copiedFrom===task.subject.id)))
   useEffect(() => {
     const bindings = Object.values(cooperative.mirrors).filter(m => (m.binding.owner || !m.downloading || m.metadataReady) && !cooperative.deletions.some(d => d.sphereId === m.binding.id && d.key === 'sphere.json' && d.decision === 'delete')).map(m => m.binding)
     if (!bindings.length && !cooperative.groups.length) return
@@ -1374,7 +1374,7 @@ export function SubjectWheel({
     setWorkspaceTabs(previous => {
       const next = { ...previous }
       for (const group of cooperative.groups) {
-        const id = cooperationGroupTab(group.id), subjects = bindings.filter(b => b.groupId === group.id).map(b => b.subjectId)
+        const id = cooperationGroupTab(group.id), subjects = bindings.filter(b => group.spheres.some(sphere => sphere.id === b.id)).map(b => b.subjectId)
         const existing = next[id]
         next[id] = { id, name: group.members.map(m => m.display_name).join(', '), color: '#16a34a', createdAt: existing?.createdAt || new Date().toISOString(), subjectIds: [...new Set([...(existing?.subjectIds || []), ...subjects])] }
       }
@@ -1393,7 +1393,7 @@ export function SubjectWheel({
   useEffect(() => {
     const undone=(event:Event)=>{
       const {binding:b,removedCopy}=(event as CustomEvent<{binding:SphereBinding;removedCopy:boolean}>).detail
-      setWorkspaceTabs(previous=>Object.fromEntries(Object.entries(previous).map(([id,tab])=>[id,id===cooperationGroupTab(b.groupId)?{...tab,subjectIds:tab.subjectIds.filter(subjectId=>subjectId!==b.subjectId)}:tab])))
+      setWorkspaceTabs(previous=>Object.fromEntries(Object.entries(previous).map(([id,tab])=>[id,removedCopy||id.startsWith('cooperative-')?{...tab,subjectIds:tab.subjectIds.filter(subjectId=>subjectId!==b.subjectId)}:tab])))
       setCustomSubjects(previous=>{const next={...previous};if(removedCopy)delete next[b.subjectId];else if(next[b.subjectId]?.tabId===cooperationGroupTab(b.groupId))next[b.subjectId]={...next[b.subjectId],tabId:'main'};return next})
       hasUserChangedWorkspaceStateRef.current=true
       setIsMainWorkspaceTabVisible(true)
@@ -1956,7 +1956,7 @@ export function SubjectWheel({
     const destination = cooperationGroupTab(groupId)
     setDeleteConfirmationTarget(null); setDeleteSummaries([])
     setActiveWorkspaceTabId(destination)
-    toast({title:move ? 'Moviendo esfera' : 'Copiando esfera',description:'Preparando en segundo plano. Podés seguir usando Estudio.'})
+    toast({title:move ? 'Moviendo esfera' : 'Compartiendo esfera',description:'Preparando en segundo plano. Podés seguir usando Estudio.'})
     try {
       const shared:SphereBinding[]=[]
       for (const subject of subjects) {
@@ -1978,7 +1978,7 @@ export function SubjectWheel({
         setWorkspaceTabs(previous=>({...previous,[destination]:{...(previous[destination]||{id:destination,name:group.members.map(member=>member.display_name).join(', '),color:'#16a34a',createdAt:new Date().toISOString()}),subjectIds:[...new Set([...(previous[destination]?.subjectIds||[]),...shared.map(binding=>binding.subjectId)])]}}))
         setCustomSubjects(previous=>{const next={...previous};for(const binding of shared)next[binding.subjectId]={...(next[binding.subjectId]||{id:binding.subjectId,tabId:destination,createdAt:new Date().toISOString(),targetWeekday:0}),name:binding.name,color:binding.color,storageKey:binding.storageKey};return next})
         hasUserChangedWorkspaceStateRef.current=true
-        toast({title:'Esfera copiada',description:'Ya aparece en el grupo elegido. Los archivos se sincronizan en segundo plano.'})
+        toast({title:'Esfera compartida',description:'El grupo accede a la misma esfera y sus archivos.'})
       }
     } catch (error) { toast({title:move ? 'No se pudo mover la esfera' : 'No se pudo copiar la esfera',description:error instanceof Error ? error.message : String(error),variant:'destructive'}) }
     finally { cooperationTransfersRef.current.delete(transferKey);setQueuedCooperationSubjects(previous=>previous.filter(task=>task.key!==transferKey)) }

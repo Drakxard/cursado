@@ -4,7 +4,7 @@ import { build } from 'esbuild'
 import { authRuntime } from './cloudflare-runtime.mjs'
 import { memoryWorkspace } from './helpers/cooperation-filesystem.mjs'
 
-test('copy accepts an invited empty group, keeps the original, isolates a second group and reuses an existing copy',async t=>{
+test('sharing across groups reuses one sphere, local files and remote content',async t=>{
   const bundle=await build({entryPoints:['lib/client/cooperation.ts'],bundle:true,write:false,platform:'browser',format:'esm',plugins:[{name:'copy-workspace',setup(builder){
     builder.onResolve({filter:/local-workspace-client\.ts$/},()=>({path:'root',namespace:'fixture'}))
     builder.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const getReadyWorkspaceHandle=()=>globalThis.__copyRoot;export const loadWorkspaceHandle=async()=>globalThis.__copyRoot;export const queryWorkspacePermission=async()=>"granted";export const getReadyInscreenConfigToken=()=>"";export const loadServicesFile=async()=>null'}))
@@ -41,49 +41,109 @@ test('copy accepts an invited empty group, keeps the original, isolates a second
   const source={id:'ecu',name:'Ecuaciones',color:'#2563eb',storageKey:'Ecu'}
   const firstBinding=await client.shareCooperationSphere(first,source)
   assert.equal(firstBinding.subjectId,'ecu')
-  const put=fs.files.set.bind(fs.files)
-  let failCopy=true
-  fs.files.set=(path,value)=>{if(failCopy&&path.startsWith('manifests/materials/Cooperativo-')){failCopy=false;throw new Error('No se pudo guardar la copia local.')}return put(path,value)}
-  await assert.rejects(client.shareCooperationSphere(second,source,{copy:true}),/guardar la copia local/)
-  assert.equal((await(await api(actors[0],'groups')).json()).groups.find(group=>group.id===second).spheres.length,1)
-  const copied=await client.shareCooperationSphere(second,source,{copy:true})
-  assert.notEqual(copied.subjectId,'ecu');assert.notEqual(copied.storageKey,'Ecu')
-  assert.equal((await(await api(actors[0],'groups')).json()).groups.find(group=>group.id===second).accepted,true)
+  const beforeFiles=[...fs.files.keys()].sort()
+  const beforeSnapshot=await (await api(actors[0],`spheres/${firstBinding.id}/snapshot`)).json()
+  const linked=await client.shareCooperationSphere(second,source,{copy:true})
+  assert.equal(linked.id,firstBinding.id)
+  assert.equal(linked.subjectId,'ecu')
+  assert.equal(linked.storageKey,'Ecu')
+  assert.equal(Object.keys(client.cooperationState().mirrors).length,1)
+  assert.deepEqual([...fs.files.keys()].sort(),beforeFiles)
   assert.deepEqual(await fs.json('manifests/materials/Ecu/week-1.json'),original)
-  const manifest=await fs.json(`manifests/materials/${copied.storageKey}/week-1.json`)
-  assert.notEqual(manifest.materials[0].id,100)
-  assert.equal(manifest.materials[0].drive_file_id,`workspace://teoria/${copied.storageKey}/uno.pdf`)
-  assert.equal(await fs.files.get(`teoria/${copied.storageKey}/uno.pdf`).text(),'PDF original')
   const workspace=await fs.json('manifests/workspace-state.json')
-  assert.equal(workspace.customSubjects.ecu.tabId,'main')
-  assert.deepEqual(workspace.workspaceTabs[`cooperative-${second}`].subjectIds,[copied.subjectId])
-  const boards=[...fs.files.keys()].filter(path=>path.startsWith('progreso/pizarras/')&&path!=='progreso/pizarras/original.json')
-  assert.equal(boards.length,1);assert.equal((await fs.json(boards[0])).sharedBoard,undefined)
-  assert.equal((await client.shareCooperationSphere(second,source,{copy:true})).id,copied.id)
-  assert.equal((await(await api(actors[0],'groups')).json()).groups.find(group=>group.id===second).spheres.length,1)
-  assert.equal((await api(actors[2],`spheres/${copied.id}/undo`,{})).status,403)
-  client.cooperationState().mirrors[copied.id].error='Unexpected end of JSON input'
-  await client.undoCooperationSphere(copied.id)
-  assert.equal(client.cooperationState().mirrors[copied.id],undefined)
-  assert.equal((await api(actors[0],`spheres/${copied.id}/snapshot`)).status,403)
-  assert.equal((await api(actors[0],`spheres/${copied.id}/undo`,{})).status,200)
-  assert.equal(backend.env.CONTENT_ROOMS.getByName(copied.id).cancelled(),true)
-  assert.equal((await backend.env.CONTENT_ROOMS.getByName(copied.id).commit(copied.id,client.cooperationState().userId,{id:'late',changes:[]})).status,403)
-  assert.equal((await fs.json('manifests/workspace-state.json')).customSubjects[copied.subjectId],undefined)
-  assert.equal(await fs.files.get(`teoria/${copied.storageKey}/uno.pdf`).text(),'PDF original')
-  assert.deepEqual(await fs.json('manifests/materials/Ecu/week-1.json'),original)
-  const fresh=await client.shareCooperationSphere(second,source,{copy:true})
-  assert.notEqual(fresh.id,copied.id)
-  assert.equal((await(await api(actors[0],'groups')).json()).groups.find(group=>group.id===second).spheres.length,1)
-  client.cooperationState().mirrors[firstBinding.id].error='Falló la publicación'
-  await client.undoCooperationSphere(firstBinding.id)
-  assert.equal((await fs.json('manifests/workspace-state.json')).customSubjects.ecu.tabId,'main')
-  assert.equal((await fs.json('manifests/subject-catalog.json')).subjects.ecu.cooperationId,undefined)
-  assert.equal(client.cooperationState().mirrors[fresh.id].binding.id,fresh.id)
-  assert.deepEqual(await fs.json('manifests/materials/Ecu/week-1.json'),original)
-  await assert.rejects(client.undoCooperationSphere(fresh.id),/intento propio con errores/)
-  assert.equal((await api(actors[2],`spheres/${fresh.id}/operations`,{id:'participant-edit',changes:[{key:'scope/tags.json',type:'json',value:{tags:[],assignments:{},regions:{}}}]})).status,200)
-  client.cooperationState().mirrors[fresh.id].error='Sin conexión'
-  await assert.rejects(client.undoCooperationSphere(fresh.id),/cambios de otra persona/)
-  assert.equal((await api(actors[0],`spheres/${fresh.id}/snapshot`)).status,200)
+  assert.deepEqual(workspace.workspaceTabs[`cooperative-${first}`].subjectIds,['ecu'])
+  assert.deepEqual(workspace.workspaceTabs[`cooperative-${second}`].subjectIds,['ecu'])
+  assert.equal((await client.shareCooperationSphere(second,source,{copy:true})).id,firstBinding.id)
+  const groups=(await(await api(actors[0],'groups')).json()).groups
+  assert.equal(groups.find(g=>g.id===second).spheres[0].id,firstBinding.id)
+  assert.equal(groups.find(g=>g.id===first).spheres[0].id,firstBinding.id)
+  assert.deepEqual(await(await api(actors[0],`spheres/${linked.id}/snapshot`)).json(),beforeSnapshot)
+  assert.equal((await api(actors[2],`spheres/${linked.id}/snapshot`)).status,200)
+  assert.equal((await api(actors[3],`spheres/${linked.id}/snapshot`)).status,403)
+  assert.equal((await api(actors[3],'spheres',{groupId:second,sphereId:linked.id,name:source.name,color:source.color})).status,403)
+  assert.equal((await api(actors[2],`spheres/${linked.id}/operations`,{id:'participant-edit',changes:[{key:'scope/tags.json',type:'json',value:{tags:[],assignments:{},regions:{}}}]})).status,200)
+  const snapshot=await(await api(actors[1],`spheres/${firstBinding.id}/snapshot`)).json()
+  // The first group's invited member must accept before accessing shared content.
+  assert.match(snapshot.detail,/antes de descargar contenido/)
+  await api(actors[1],`groups/${first}/accept`,{})
+  assert.ok((await(await api(actors[1],`spheres/${firstBinding.id}/snapshot`)).json()).resources['scope/tags.json'])
+  assert.equal([...fs.files.keys()].some(key=>key.includes('/uploads/')),false,'acknowledged uploads must not retain duplicate files')
+  // Rebuild the sync state while retaining the user's catalogue and files.
+  const saved=await fs.json(`.cooperation/${client.cooperationState().userId}/state.json`)
+  saved.mirrors={}
+  await fs.put(`.cooperation/${saved.userId}/state.json`,saved)
+  await client.refreshCooperation()
+  let downloads=0
+  const fetchBeforeRestore=globalThis.fetch
+  globalThis.fetch=(async(url,options={})=>{
+    if(String(url).includes('/files/') && !options.method) downloads++
+    return fetchBeforeRestore(url,options)
+  }) as typeof fetch
+  assert.equal((await client.shareCooperationSphere(second,source,{copy:true})).id,firstBinding.id)
+  assert.equal(downloads,0,'existing verified bytes must not be downloaded again')
+  const restored=client.cooperationState().mirrors[firstBinding.id].binding
+  assert.equal(restored.subjectId,'ecu')
+  assert.equal(restored.storageKey,'Ecu')
+  assert.deepEqual(Object.keys((await fs.json('manifests/subject-catalog.json')).subjects),['ecu'])
+  assert.equal([...fs.files.keys()].some(key=>key.includes('Cooperativo-')),false)
+
+  // A local subject predating cooperation can also be attached when its exact
+  // scoped content matches, retaining material IDs and board paths.
+  const catalog=await fs.json('manifests/subject-catalog.json')
+  delete catalog.subjects.ecu.cooperationId
+  await fs.put('manifests/subject-catalog.json',catalog)
+  const legacy=await fs.json(`.cooperation/${saved.userId}/state.json`)
+  legacy.mirrors={}
+  await fs.put(`.cooperation/${saved.userId}/state.json`,legacy)
+  await client.refreshCooperation()
+  downloads=0
+  await client.acceptCooperationSphere(groups.find(g=>g.id===first).spheres[0])
+  assert.equal(client.cooperationState().mirrors[firstBinding.id].binding.subjectId,'ecu')
+  assert.equal(downloads,0)
+  assert.equal((await fs.json('manifests/materials/Ecu/week-1.json')).materials[0].id,100)
+
+  const prog={id:'prog',name:'Prog 3',storageKey:'Prog3',color:'#ff6600'}
+  await fs.put('manifests/materials/Prog3/week-1.json',{version:1,subjectId:'Prog3',weekNumber:1,materials:[]})
+  const canonical=await client.shareCooperationSphere(first,prog)
+  const legacyId=(await(await api(actors[0],'spheres',{groupId:second,name:prog.name,color:prog.color})).json()).id
+  const legacySubject=`coop-${legacyId}`,legacyKey=`Cooperativo-${legacyId}`
+  const legacyManifest={version:1,subjectId:legacyKey,weekNumber:1,materials:[]}
+  await fs.put(`manifests/materials/${legacyKey}/week-1.json`,legacyManifest)
+  await api(actors[0],`spheres/${legacyId}/operations`,{id:'legacy-copy',changes:[
+    {key:'sphere.json',type:'json',value:{subjectId:legacySubject,storageKey:legacyKey,name:prog.name,color:prog.color}},
+    {key:`manifests/materials/${legacyKey}/week-1.json`,type:'json',value:legacyManifest}
+  ]})
+  const legacySnapshot=await(await api(actors[0],`spheres/${legacyId}/snapshot`)).json()
+  assert.equal((await api(actors[0],`spheres/${legacyId}/undo`,{expectedSeq:legacySnapshot.seq-1})).status,409,'a stale repair must never discard a newer commit')
+  const legacyState=await fs.json(`.cooperation/${saved.userId}/state.json`)
+  legacyState.mirrors[legacyId]={copiedFrom:'prog',binding:{id:legacyId,groupId:second,subjectId:legacySubject,storageKey:legacyKey,sourceId:legacySubject,sourceKey:legacyKey,name:prog.name,color:prog.color,owner:true},baseline:legacySnapshot}
+  await fs.put(`.cooperation/${saved.userId}/state.json`,legacyState)
+  const legacyCatalog=await fs.json('manifests/subject-catalog.json')
+  legacyCatalog.subjects[legacySubject]={id:legacySubject,name:prog.name,storageKey:legacyKey,cooperationId:legacyId}
+  await fs.put('manifests/subject-catalog.json',legacyCatalog)
+  await client.refreshCooperation()
+  const divergent={...legacyManifest,materials:[{id:200,file_name:'Cambio propio'}]}
+  await fs.put(`manifests/materials/${legacyKey}/week-1.json`,divergent)
+  await api(actors[0],`spheres/${legacyId}/operations`,{id:'divergent-copy',changes:[{key:`manifests/materials/${legacyKey}/week-1.json`,type:'json',value:divergent,base:legacyManifest}]})
+  await client.synchronizeCooperation()
+  assert.ok(client.cooperationState().mirrors[legacyId],'a legacy copy with unique edits must be preserved')
+  assert.equal((await fs.json('manifests/materials/Prog3/week-1.json')).materials.length,0)
+  await fs.put(`manifests/materials/${legacyKey}/week-1.json`,legacyManifest)
+  await api(actors[0],`spheres/${legacyId}/operations`,{id:'restore-copy',changes:[{key:`manifests/materials/${legacyKey}/week-1.json`,type:'json',value:legacyManifest,base:divergent}]})
+  const setFile=fs.files.set.bind(fs.files)
+  let interruptRepair=true
+  fs.files.set=(path,value)=>{if(interruptRepair&&path==='manifests/subject-catalog.json'){interruptRepair=false;throw new Error('Interrupted repair')}return setFile(path,value)}
+  await client.synchronizeCooperation()
+  assert.ok(client.cooperationState().mirrors[legacyId].repair,'the repair checkpoint survives a local failure after remote cancellation')
+  await client.refreshCooperation()
+  await client.synchronizeCooperation()
+  assert.equal(client.cooperationState().mirrors[legacyId],undefined,'verified redundant legacy mirrors must be retired')
+  assert.equal(client.cooperationState().mirrors[canonical.id].binding.subjectId,'prog')
+  assert.equal(fs.files.has(`manifests/materials/${legacyKey}/week-1.json`),false)
+  assert.equal((await fs.json('manifests/subject-catalog.json')).subjects[legacySubject],undefined)
+  const repairedGroups=(await(await api(actors[0],'groups')).json()).groups
+  assert.equal(repairedGroups.find(g=>g.id===second).spheres.some(sphere=>sphere.id===canonical.id),true)
+  assert.equal(repairedGroups.find(g=>g.id===second).spheres.some(sphere=>sphere.id===legacyId),false)
+  assert.equal((await api(actors[0],`spheres/${legacyId}/snapshot`)).status,403)
+
 })

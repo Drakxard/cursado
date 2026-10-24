@@ -8,6 +8,8 @@ export function initializeCooperation(sql) {
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_groups (id TEXT PRIMARY KEY, members TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL, created_at TEXT NOT NULL)')
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_members (group_id TEXT NOT NULL, user_id TEXT NOT NULL, accepted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(group_id,user_id))')
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_spheres (id TEXT PRIMARY KEY, group_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL, created_by TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0)')
+  sql.exec('CREATE TABLE IF NOT EXISTS cooperation_sphere_groups (sphere_id TEXT NOT NULL, group_id TEXT NOT NULL, PRIMARY KEY(sphere_id,group_id))')
+  sql.exec('INSERT OR IGNORE INTO cooperation_sphere_groups SELECT id,group_id FROM cooperation_spheres')
 }
 export async function cooperationRequest(directory,request) {
   const {user}=await directory.authenticated(request), sql=directory.sql, env=directory.env
@@ -33,7 +35,7 @@ export async function cooperationRequest(directory,request) {
       const groups=await Promise.all(sql.exec(`SELECT g.*,m.accepted FROM cooperation_groups g JOIN cooperation_members m ON m.group_id=g.id WHERE m.user_id=?`,user.id).toArray().map(async group=>({
         id:group.id,accepted:!!group.accepted,
         members:sql.exec('SELECT u.id,u.display_name FROM users u JOIN cooperation_members m ON m.user_id=u.id WHERE m.group_id=?',group.id).toArray(),
-        spheres:(await Promise.all(sql.exec('SELECT * FROM cooperation_spheres WHERE group_id=?',group.id).toArray().map(async sphere=>{
+        spheres:(await Promise.all(sql.exec('SELECT s.*,sg.group_id FROM cooperation_spheres s JOIN cooperation_sphere_groups sg ON sg.sphere_id=s.id WHERE sg.group_id=?',group.id).toArray().map(async sphere=>{
           // Zero bytes can mean either a new publication or a deleted sphere.
           if(!sphere.bytes && (await env.CONTENT_ROOMS.getByName(sphere.id).summary()).deleted)return null
           return {...sphere,ready:sphere.bytes>0}
@@ -67,28 +69,40 @@ export async function cooperationRequest(directory,request) {
     const body=await request.json(), membership=directory.first('SELECT accepted FROM cooperation_members WHERE group_id=? AND user_id=?',body.groupId,user.id)
     if(!membership?.accepted)return json({detail:'Aceptá el grupo antes de compartir.'},403)
     if(typeof body.name!=='string' || !body.name.trim() || body.name.length>150 || !/^#[a-fA-F0-9]{6}$/.test(body.color || ''))return json({detail:'Esfera inválida.'},422)
+    if(body.sphereId) {
+      const source=directory.first('SELECT s.id FROM cooperation_spheres s JOIN cooperation_sphere_groups sg ON sg.sphere_id=s.id JOIN cooperation_members m ON m.group_id=sg.group_id WHERE s.id=? AND m.user_id=? AND m.accepted=1',body.sphereId,user.id)
+      if(!source)return json({detail:'No ten\u00e9s acceso a esta esfera.'},403)
+      sql.exec('INSERT OR IGNORE INTO cooperation_sphere_groups VALUES (?,?)',source.id,body.groupId)
+      await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',body.groupId).toArray().map(member=>member.user_id))
+      return json({id:source.id})
+    }
     const id=crypto.randomUUID()
     sql.exec('INSERT INTO cooperation_spheres(id,group_id,name,color,created_by) VALUES (?,?,?,?,?)',id,body.groupId,body.name,body.color,user.id)
+    sql.exec('INSERT INTO cooperation_sphere_groups VALUES (?,?)',id,body.groupId)
     await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',body.groupId).toArray().map(member=>member.user_id))
     return json({id},201)
   }
   if(parts[0]!=='spheres' || !/^[a-f0-9-]{36}$/.test(parts[1] || ''))return json({detail:'Ruta no encontrada.'},404)
   const sphere=directory.first('SELECT * FROM cooperation_spheres WHERE id=?',parts[1])
+  const sphereUsers=()=>sql.exec('SELECT DISTINCT m.user_id FROM cooperation_members m JOIN cooperation_sphere_groups sg ON sg.group_id=m.group_id WHERE sg.sphere_id=?',sphere.id).toArray().map(member=>member.user_id)
   if(parts.length===3 && parts[2]==='undo' && request.method==='POST') {
-    await request.arrayBuffer()
+    const body=await request.json().catch(()=>({}))
+    if(body.expectedSeq!==undefined && (!Number.isSafeInteger(body.expectedSeq) || body.expectedSeq<0))return json({detail:'Versión inválida.'},422)
     if(!sphere)return json({ok:true})
     if(sphere.created_by!==user.id)return json({detail:'Solo quien compartió la esfera puede deshacer la cooperación.'},403)
-    const result=await env.CONTENT_ROOMS.getByName(sphere.id).cancelPublication(user.id)
+    const result=await env.CONTENT_ROOMS.getByName(sphere.id).cancelPublication(user.id,body.expectedSeq)
     if(result.error)return json({detail:result.error},result.status)
+    const recipients=sphereUsers()
+    sql.exec('DELETE FROM cooperation_sphere_groups WHERE sphere_id=?',sphere.id)
     sql.exec('DELETE FROM cooperation_spheres WHERE id=?',sphere.id)
-    await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',sphere.group_id).toArray().map(member=>member.user_id))
+    await notifyUsers(env,recipients)
     return json({ok:true})
   }
-  const member=sphere && directory.first('SELECT accepted FROM cooperation_members WHERE group_id=? AND user_id=?',sphere.group_id,user.id)
+  const member=sphere && directory.first('SELECT m.accepted,m.group_id FROM cooperation_members m JOIN cooperation_sphere_groups sg ON sg.group_id=m.group_id WHERE sg.sphere_id=? AND m.user_id=? ORDER BY m.accepted DESC LIMIT 1',sphere.id,user.id)
   if(!member)return json({detail:'No tenés acceso a esta esfera.'},403)
   const room=env.CONTENT_ROOMS.getByName(sphere.id)
   if(parts[2]==='accept' && request.method==='POST') {
-    sql.exec('UPDATE cooperation_members SET accepted=1 WHERE group_id=? AND user_id=?',sphere.group_id,user.id)
+    sql.exec('UPDATE cooperation_members SET accepted=1 WHERE group_id=? AND user_id=?',member.group_id,user.id)
     await notifyUsers(env,[user.id])
     return json({ok:true})
   }
@@ -104,7 +118,7 @@ export async function cooperationRequest(directory,request) {
     if(!result.error) {
       const {bytes,name,color,ready}=await room.summary()
       sql.exec('UPDATE cooperation_spheres SET bytes=?,name=?,color=? WHERE id=?',ready?bytes:0,typeof name==='string'&&name.length<=150?name:sphere.name,/^#[a-fA-F0-9]{6}$/.test(color || '')?color:sphere.color,sphere.id)
-      if(Boolean(sphere.bytes)!==ready || typeof name==='string' && name!==sphere.name || typeof color==='string' && color!==sphere.color)await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',sphere.group_id).toArray().map(member=>member.user_id))
+      if(Boolean(sphere.bytes)!==ready || typeof name==='string' && name!==sphere.name || typeof color==='string' && color!==sphere.color)await notifyUsers(env,sphereUsers())
     }
     return json(result,result.status || 200)
   }

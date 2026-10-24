@@ -15,7 +15,8 @@ export class SharedContentRoom extends DurableObject {
   }
   async checkStorage() {return this.sql.exec('SELECT 1 AS ready').one().ready === 1}
   cancelled() {return !!this.sql.exec("SELECT id FROM state WHERE id='cancelled'").toArray().length}
-  cancelPublication(ownerId) {
+  cancelPublication(ownerId, expectedSeq) {
+    if(expectedSeq!==undefined && this.read().seq!==expectedSeq)return {error:'La esfera cambió durante la reparación. Reintentá.',status:409}
     if(this.sql.exec('SELECT value FROM operations').toArray().some(row=>JSON.parse(row.value).userId!==ownerId))return {error:'La esfera ya recibió cambios de otra persona. No se puede deshacer este intento.',status:409}
     this.sql.exec("INSERT OR REPLACE INTO state VALUES ('cancelled','true')")
     this.sql.exec('DELETE FROM tickets');this.sql.exec('DELETE FROM upload_tickets')

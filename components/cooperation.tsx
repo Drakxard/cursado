@@ -151,7 +151,7 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
           }}>Descargar versión {index + 1}</button>)}</details>}
         </div>
       })}</div>
-      {state.deletions.filter(d => d.decision === 'wait' && state.mirrors[d.sphereId]?.binding.groupId === group.id).map(pending => <button key={pending.id} className="block text-sm text-muted-foreground underline" onClick={() => window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending, open: () => onOpen(state.mirrors[pending.sphereId].binding.subjectId, group.id) } }))}>{pending.label} · eliminación pendiente</button>)}
+      {state.deletions.filter(d => d.decision === 'wait' && group.spheres.some(sphere => sphere.id === d.sphereId)).map(pending => <button key={pending.id} className="block text-sm text-muted-foreground underline" onClick={() => window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending, open: () => onOpen(state.mirrors[pending.sphereId].binding.subjectId, group.id) } }))}>{pending.label} · eliminación pendiente</button>)}
     </section>)}
     {invite && <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><CooperationInvitation sphere={invite} onClose={() => setInvite(null)} onAccepted={() => setInvite(null)} /></div>}
   </section>

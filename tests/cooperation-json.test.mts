@@ -58,3 +58,16 @@ test('cooperation waits for a local manifest save instead of reading its tempora
   release(); await write
   assert.deepEqual(await reading, {tags:[{id:'kept'}]})
 })
+
+
+test('boards with the same sphere name follow their explicit identity instead of leaking between legacy copies', async () => {
+  const fs=memoryWorkspace()
+  const binding={id:'sphere',groupId:'group',subjectId:'prog3',storageKey:'Prog3',sourceId:'prog3',sourceKey:'Prog3',name:'Prog 3',color:'#ff6600',owner:true}
+  await fs.put('progreso/pizarras/original.json',{name:'Prog 3 - Teoria',cooperationSubjectId:'prog3',content:{strokes:[]}})
+  await fs.put('progreso/pizarras/copy.json',{name:'Prog 3 - Teoria',cooperationSubjectId:'coop-old',content:{strokes:[]}})
+  await fs.put('progreso/pizarras/legacy.json',{name:'Prog 3 - Practica',content:{strokes:[]}})
+  const paths=(await scanSphere(fs.root,binding)).map(file=>file.key)
+  assert.ok(paths.includes('progreso/pizarras/original.json'))
+  assert.ok(paths.includes('progreso/pizarras/legacy.json'))
+  assert.equal(paths.includes('progreso/pizarras/copy.json'),false)
+})

@@ -3,7 +3,7 @@ import { safeCooperationPath, type Json } from '../cooperation-model.ts'
 import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
 import { readWorkspaceJson, writeWorkspaceJson } from '../workspace-json.ts'
 
-export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
+export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; reuseLocalIds?: boolean; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
 export type MirrorFile = { key: string; value?: Json; blob?: Blob }
 export const digest = async (blob: Blob) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map(x => x.toString(16).padStart(2, '0')).join('')
 export async function directory(root: FileSystemDirectoryHandle, parts: string[], create = false) {
@@ -159,7 +159,8 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
   for (const path of await walk(root, 'progreso/pizarras')) {
     const board = await readJson<Record<string, Json>>(root, path, {})
     const text = JSON.stringify(board)
-    if (ids.has(String(board.cooperationSubjectId)) || [...ids].some(id => text.includes(`"subjectId":"${id}"`)) || String(board.name || '').startsWith(`${b.name} - `)) await add(path)
+    const explicitSubject = board.cooperationSubjectId || board.subjectId || board.subject_id
+    if (explicitSubject ? ids.has(String(explicitSubject)) : [...ids].some(id => text.includes(`"subjectId":"${id}"`)) || String(board.name || '').startsWith(`${b.name} - `)) await add(path)
   }
   const containers = await readJson<Record<string, Json[]>>(root, 'manifests/material-containers.json', {})
   output.push({ key: 'scope/containers.json', value: mapBindingJson([...ids].flatMap(id => containers[id] || []), b, false) })
