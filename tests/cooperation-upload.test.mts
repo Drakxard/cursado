@@ -7,6 +7,15 @@ import { CopyObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s
 import { createHash } from 'node:crypto'
 import { withInscreenRuntimeConfig } from '../lib/inscreen-user-config.ts'
 
+test('empty or truncated upload responses report a recoverable error with HTTP status', async t => {
+  const original = globalThis.fetch
+  t.after(() => { globalThis.fetch = original })
+  for (const body of ['', '{"uploadUrl":']) {
+    globalThis.fetch = async () => new Response(body, { status: 502 })
+    await assert.rejects(uploadCooperationFile('sphere', 'hash', new Blob(['pdf']), 'application/pdf'), /HTTP 502: respuesta JSON vacía o inválida/)
+  }
+})
+
 test('upload session forwards the Pizarra cookie and refuses rejected membership and foreign origins', async t => {
   const originalFetch = globalThis.fetch, originalBackend = process.env.PIZARRA_BACKEND_URL
   t.after(() => { globalThis.fetch = originalFetch; if (originalBackend === undefined) delete process.env.PIZARRA_BACKEND_URL; else process.env.PIZARRA_BACKEND_URL = originalBackend })

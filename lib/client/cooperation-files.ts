@@ -80,16 +80,16 @@ function stripPersonal(value: Json): Json {
 }
 export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBinding): Promise<MirrorFile[]> {
   const output: MirrorFile[] = [], paths = new Set<string>(), ids = new Set([b.subjectId, b.storageKey])
-  const add = async (path: string) => {
+  const add = async (path: string, sharedPath = path) => {
     if (paths.has(path)) return
     if (!safeCooperationPath(path)) throw new Error('Una referencia de la esfera tiene una ruta inválida.')
-    const scoped = path.split('/').some(part => ids.has(part) || ids.has(decodeURIComponent(part)))
+    const scoped = sharedPath.split('/').some(part => ids.has(part) || ids.has(decodeURIComponent(part)))
     const derived = path.startsWith('manifests/pdf-explanations/') || path.startsWith('manifests/subject-voice/pdf/') || path.startsWith('sintesis/images/') || path.startsWith('progreso/pizarras/')
     if (!scoped && !derived) throw new Error(`La esfera referencia «${path}», fuera de su carpeta. Reubicá ese archivo en la materia antes de cooperar.`)
     paths.add(path)
     const blob = await readFile(root, path)
     if (!blob) return
-    const key = mapBindingText(path, b, false)
+    const key = mapBindingText(sharedPath, b, false)
     if (path.endsWith('.json')) {
       const raw = await readJson<Json | undefined>(root, path, undefined)
       if (raw === undefined) {
@@ -104,10 +104,31 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
           raw.assets[id] = `cooperation-asset:${hash}`
         }
       }
-      const shared=stripPersonal(raw)
+      const shared=await isolateReferences(stripPersonal(raw))
       output.push({ key, value: mapBindingJson(shared, b, false) })
       await references(shared)
     } else output.push({ key, blob })
+  }
+  // Older imports can retain references to files outside the subject folder.
+  // Publish only those explicit attachments, under deterministic subject paths.
+  const isolateReferences = async (value: Json): Promise<Json> => {
+    if (typeof value === 'string' && value.startsWith('workspace://')) {
+      const path = value.slice(12)
+      if (!safeCooperationPath(path)) throw new Error('Una referencia de la esfera tiene una ruta inválida.')
+      if (path.split('/').some(part => ids.has(part) || ids.has(decodeURIComponent(part)))) return value
+      if (!/^(?:teoria|practica|audio)\//.test(path) || path.endsWith('.json')) return value
+      const sharedPath = `${path.split('/')[0]}/${b.storageKey}/cooperation-imports/${await digest(new Blob([path]))}/${path.split('/').at(-1)}`
+      if (!await readFile(root, path)) throw new Error(`No se encuentra el archivo referenciado «${path}». Restauralo y reintentá la sincronización.`)
+      await add(path, sharedPath)
+      return `workspace://${sharedPath}`
+    }
+    if (Array.isArray(value)) return Promise.all(value.map(isolateReferences))
+    if (value && typeof value === 'object') {
+      const entries: [string, Json][] = []
+      for (const [key, child] of Object.entries(value)) entries.push([key, await isolateReferences(child)])
+      return Object.fromEntries(entries)
+    }
+    return value
   }
   const references = async (value: Json): Promise<void> => {
     if (typeof value === 'string') {

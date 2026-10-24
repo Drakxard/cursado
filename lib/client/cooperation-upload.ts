@@ -4,7 +4,8 @@ export async function uploadCooperationFile(sphereId: string, hash: string, blob
     method: 'POST', headers: { 'Content-Type': 'application/json', ...(options.configToken ? { 'x-inscreen-config-token': options.configToken } : {}) },
     body: JSON.stringify({ sphereId, hash, size: blob.size, mime, workspaceId: options.workspaceId, supportsReuse: true }),
   })
-  const result = await session.json()
+  const result = await session.json().catch(() => null)
+  if (!result || typeof result !== 'object') throw new Error(`No se pudo autorizar la subida cooperativa (HTTP ${session.status}: respuesta JSON vacía o inválida). Reintentá la sincronización.`)
   if (!session.ok) throw new Error(result.error || result.detail || 'No se pudo autorizar la subida cooperativa.')
   if (result.exists) return
   if (typeof result.uploadUrl !== 'string' || !result.uploadUrl) throw new Error('No se recibió una URL de subida. Cerrá las otras pestañas de Cursado y recargá esta pestaña.')
