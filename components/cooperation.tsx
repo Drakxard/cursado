@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { ListChecks, RefreshCw, X } from 'lucide-react'
-import { acceptCooperationGroup, acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
+import { undoCooperationSphere, acceptCooperationGroup, acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
 import { isNativeReadOnly } from '@/lib/native-workspace'
 import { cooperationSubjectSyncDetails, cooperationSubjectSyncLabel } from '@/lib/client/cooperation'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -90,6 +90,13 @@ export function CooperationInvitation({ sphere, onClose, onAccepted }: { sphere:
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
   </section>
 }
+function UndoCooperationButton({ sphereId }: { sphereId: string }) {
+  const [busy,setBusy]=useState(false),[error,setError]=useState('')
+  return <><button disabled={busy} className="ml-2 underline disabled:opacity-50" onClick={async()=>{
+    setBusy(true);setError('')
+    try{await undoCooperationSphere(sphereId)}catch(reason){setError(reason instanceof Error?reason.message:String(reason))}finally{setBusy(false)}
+  }}>{busy?'Deshaciendo…':'Deshacer'}</button>{error&&<span role="alert" className="block text-red-600">{error}</span>}</>
+}
 function CooperationGroupInvitation({ groupId }: { groupId: string }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   return <div className="max-w-xs space-y-2 text-right">
@@ -129,7 +136,7 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
           {!ready && sphere.ready !== false && <p className="mt-1 text-xs">Pendiente · {(sphere.bytes / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 2 })} MB</p>}
           {deleted?.decision === 'keep' && <p className="text-xs">Personal</p>}
           {mirror?.transfer && <p role="status" className="mt-1 text-xs">{mirror.transfer.phase === 'uploading' ? 'Subiendo' : 'Descargando'} archivos en segundo plano: {mirror.transfer.completed}/{mirror.transfer.total}</p>}
-          {mirror?.error && <div role="alert" className="text-xs text-red-600">{mirror.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button></div>}
+          {mirror?.error && <div role="alert" className="text-xs text-red-600">{mirror.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button>{mirror.binding.owner&&<UndoCooperationButton sphereId={sphere.id}/>}</div>}
           {mirror && mirror.baseline.conflicts.length > 0 && <details className="mt-2 text-left text-xs"><summary>Versiones recuperadas ({mirror.baseline.conflicts.length})</summary>{mirror.baseline.conflicts.map((entry, index) => <button key={index} className="mt-2 block underline" onClick={async () => {
             const item = entry as { key?: string; blob?: { hash: string } }
             let blob: Blob
@@ -178,7 +185,7 @@ export function CooperationRuntime() {
       {state.error && <p role="alert">{state.error}</p>}
       {transfers.map(m => <div key={m.binding.id}>
         <strong>{m.binding.name}</strong>
-        {m.error ? <p role="alert">{m.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button></p>
+        {m.error ? <div role="alert">{m.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button>{m.binding.owner&&<UndoCooperationButton sphereId={m.binding.id}/>}</div>
           : <p role="status">{m.metadataReady && 'Metadatos disponibles. '}{m.transfer?.phase === 'uploading' ? 'Subiendo' : 'Descargando'} en segundo plano: {m.transfer?.completed}/{m.transfer?.total} archivos.</p>}
       </div>)}
     </aside>

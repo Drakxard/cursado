@@ -14,6 +14,14 @@ export class SharedContentRoom extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS upload_tickets (hash TEXT PRIMARY KEY, value TEXT NOT NULL, expires INTEGER NOT NULL)')
   }
   async checkStorage() {return this.sql.exec('SELECT 1 AS ready').one().ready === 1}
+  cancelled() {return !!this.sql.exec("SELECT id FROM state WHERE id='cancelled'").toArray().length}
+  cancelPublication(ownerId) {
+    if(this.sql.exec('SELECT value FROM operations').toArray().some(row=>JSON.parse(row.value).userId!==ownerId))return {error:'La esfera ya recibió cambios de otra persona. No se puede deshacer este intento.',status:409}
+    this.sql.exec("INSERT OR REPLACE INTO state VALUES ('cancelled','true')")
+    this.sql.exec('DELETE FROM tickets');this.sql.exec('DELETE FROM upload_tickets')
+    for(const socket of this.ctx.getWebSockets())try{socket.close(1008,'Cooperación deshecha')}catch{}
+    return {ok:true}
+  }
   read() {
     const chunks=this.sql.exec("SELECT value FROM state WHERE id LIKE 'snapshot-%' ORDER BY id").toArray()
     if(chunks.length)return JSON.parse(chunks.map(row=>row.value).join(''))
@@ -64,6 +72,7 @@ export class SharedContentRoom extends DurableObject {
     return json(result,result.status || 200)
   }
   async fetch(request) {
+    if(this.cancelled())return json({detail:'Esta cooperación fue deshecha.'},403)
     const url=new URL(request.url), token=url.searchParams.get('ticket') || ''
     const ticketHash=await hash(new TextEncoder().encode(token))
     const ticket=this.sql.exec('SELECT * FROM tickets WHERE hash=? AND expires>?',ticketHash,Date.now()).toArray()[0]
@@ -88,6 +97,7 @@ export class SharedContentRoom extends DurableObject {
     this.broadcast({type:'directory_changed',seq:state.seq})
   }
   webSocketMessage(socket, raw) {
+    if(this.cancelled())return
     if(typeof raw!=='string' || raw.length>8192)return
     try {
       const value=JSON.parse(raw)
@@ -143,6 +153,7 @@ export class SharedContentRoom extends DurableObject {
     return file ? new Response(file.body,{headers:{'Cache-Control':'private, no-store','Content-Type':file.httpMetadata?.contentType || 'application/octet-stream'}}) : null
   }
   async commit(sphereId, userId, operation) {
+    if(this.cancelled())return {error:'Esta cooperación fue deshecha.',status:403}
     if(!operation || !/^[a-zA-Z0-9-]{1,100}$/.test(operation.id) || !Array.isArray(operation.changes) || operation.changes.length>500)return {error:'Operación inválida.',status:422}
     const prior=this.sql.exec('SELECT seq FROM operations WHERE id=?',`${userId}:${operation.id}`).toArray()[0]
     if(prior)return {seq:prior.seq}
@@ -165,6 +176,7 @@ export class SharedContentRoom extends DurableObject {
       }
     }
     // No awaits between reading the latest state and committing it.
+    if(this.cancelled())return {error:'Esta cooperación fue deshecha.',status:403}
     const duplicate=this.sql.exec('SELECT seq FROM operations WHERE id=?',`${userId}:${operation.id}`).toArray()[0]
     if(duplicate)return {seq:duplicate.seq}
     const state=this.read(), seq=state.seq+1

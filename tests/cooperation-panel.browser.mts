@@ -14,6 +14,8 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     export const cooperationSubjectSyncLabel=()=> '100%';
     export const cooperationSubjectSyncDetails=async()=>({name:'Álgebra',bytes:2500000});
     export const refreshCooperation=async()=>state;
+    export const undoCooperationSphere=async id=>{if(window.failUndo)throw new Error('No se pudo deshacer. Reintentá.');delete state.mirrors[id];for(const group of state.groups)group.spheres=group.spheres.filter(sphere=>sphere.id!==id);state.dismissedSpheres=[id];window.undoneSphere=id;changed()};
+    window.failPublication=()=>{state.mirrors[sphere.id].binding.owner=true;state.mirrors[sphere.id].error='Unexpected end of JSON input';changed()};
     export const acceptCooperationGroup=async id=>{if(window.failGroupAccept)throw new Error('Sin conexión. Reintentá.');state.groups.find(group=>group.id===id).accepted=true;window.acceptedGroup=id;changed()};
     export const synchronizeCooperation=async()=>{};
     export const createCooperationGroup=async names=>{window.createdNames=names;return 'group-1'};
@@ -95,6 +97,16 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     await page.getByRole('dialog', { name: 'Nuevo contenido cooperativo' }).getByRole('button', { name: 'Elegir', exact: true }).click()
     assert.equal(await page.evaluate(() => (window as any).downloadOptions.choose), true)
     assert.equal(await page.evaluate(() => (window as any).downloadOptions.background), undefined)
+    await page.evaluate(() => (window as any).failPublication())
+    const failed=page.getByRole('complementary',{name:'Sincronización cooperativa'})
+    await failed.getByRole('button',{name:'Deshacer',exact:true}).waitFor()
+    await page.evaluate(() => (window as any).failUndo=true)
+    await failed.getByRole('button',{name:'Deshacer',exact:true}).click()
+    await failed.getByText('No se pudo deshacer. Reintentá.',{exact:true}).waitFor()
+    await page.evaluate(() => (window as any).failUndo=false)
+    await failed.getByRole('button',{name:'Deshacer',exact:true}).click()
+    await failed.waitFor({state:'detached'})
+    assert.equal(await page.evaluate(() => (window as any).undoneSphere),'sphere-1')
   } finally { await browser.close() }
 })
 

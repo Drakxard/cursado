@@ -7,7 +7,7 @@ import { InlinePdfName } from "./inline-pdf-name"
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
 import { CooperationPanel, CooperationSyncStatus, useCooperation } from '@/components/cooperation'
-import { COOPERATIVE_TAB_ID, cooperationGroupTab, refreshCooperation, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
+import { undoCooperationSphere, COOPERATIVE_TAB_ID, cooperationGroupTab, refreshCooperation, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
 import type { SphereBinding } from '@/lib/client/cooperation-files'
 import type { BoardPdfReference } from "@/lib/board-library-contract"
 
@@ -1388,6 +1388,17 @@ export function SubjectWheel({
     window.addEventListener('cursado-cooperation-remove-subject', remove)
     return () => window.removeEventListener('cursado-cooperation-remove-subject', remove)
   }, [])
+  useEffect(() => {
+    const undone=(event:Event)=>{
+      const {binding:b,removedCopy}=(event as CustomEvent<{binding:SphereBinding;removedCopy:boolean}>).detail
+      setWorkspaceTabs(previous=>Object.fromEntries(Object.entries(previous).map(([id,tab])=>[id,id===cooperationGroupTab(b.groupId)?{...tab,subjectIds:tab.subjectIds.filter(subjectId=>subjectId!==b.subjectId)}:tab])))
+      setCustomSubjects(previous=>{const next={...previous};if(removedCopy)delete next[b.subjectId];else if(next[b.subjectId]?.tabId===cooperationGroupTab(b.groupId))next[b.subjectId]={...next[b.subjectId],tabId:'main'};return next})
+      hasUserChangedWorkspaceStateRef.current=true
+      setIsMainWorkspaceTabVisible(true)
+    }
+    window.addEventListener('cursado-cooperation-undone',undone)
+    return()=>window.removeEventListener('cursado-cooperation-undone',undone)
+  },[])
 
   useEffect(() => {
     if (isNativeReadOnly() || !LOCAL_STORAGE_MODE || !localWorkspaceReady) return
@@ -7934,6 +7945,11 @@ export function SubjectWheel({
             </DialogDescription>
           </DialogHeader>
 
+          {deleteConfirmationTarget && Object.values(cooperative.mirrors).filter(m=>m.binding.owner&&(m.error||m.copySource)&&getDeleteTargetSubjectIds(deleteConfirmationTarget).includes(m.binding.subjectId)).map(m=><Button key={m.binding.id} type="button" variant="outline" onClick={()=>{
+            setDeleteConfirmationTarget(null);setDeleteSummaries([])
+            toast({title:'Deshaciendo cooperación',description:'Se conserva la esfera original y sus archivos.'})
+            void undoCooperationSphere(m.binding.id).then(()=>toast({title:'Cooperación deshecha',description:'Ya podés volver a copiar la esfera al grupo.'})).catch(reason=>toast({title:'No se pudo deshacer',description:reason instanceof Error?reason.message:String(reason),variant:'destructive'}))
+          }}>Deshacer cooperación</Button>)}
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={isPermanentlyDeleting}>Cancelar</Button>

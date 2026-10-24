@@ -28,6 +28,7 @@ let stopBackground: (() => void) | null = null
 const presences = new Map<string, { users: { id: string; name: string; color: string; emoji: string; client_ids: string[] }[]; you: string }>()
 export const cooperationState = () => state
 const confirmedMirrors = new Set<string>()
+const undoingSpheres = new Set<string>()
 let syncRevision = 0
 function invalidateSyncStatus() { syncRevision++; confirmedMirrors.clear(); cooperationChanged() }
 export function cooperationSubjectSyncLabel(subjectId: string) {
@@ -102,6 +103,36 @@ export async function createCooperationGroup(names: string) {
 export async function acceptCooperationGroup(groupId: string) {
   await cooperationApi(`groups/${groupId}/accept`, {})
   await refreshCooperation()
+}
+export async function undoCooperationSphere(sphereId: string) {
+  const mirror=state.mirrors[sphereId]
+  if(!mirror?.binding.owner || (!mirror.error && !mirror.copySource))throw new Error('Solo se puede deshacer un intento propio con errores.')
+  if(undoingSpheres.has(sphereId))return
+  undoingSpheres.add(sphereId)
+  try {
+    await cooperationApi(`spheres/${sphereId}/undo`,{})
+    await withStateLock(async()=>{
+      const current=state.mirrors[sphereId]
+      if(!current)return
+      const b=current.binding,removedCopy=!!current.copiedFrom,handle=await root()
+      const catalog=await readJson<{version:number;subjects:Record<string,Record<string,unknown>>}>(handle,'manifests/subject-catalog.json',{version:2,subjects:{}})
+      if(removedCopy)delete catalog.subjects[b.subjectId]
+      else if(catalog.subjects[b.subjectId]?.cooperationId===b.id)delete catalog.subjects[b.subjectId].cooperationId
+      await writeJson(handle,'manifests/subject-catalog.json',catalog)
+      const workspace=await readJson<Record<string,any>>(handle,'manifests/workspace-state.json',{})
+      const tab=workspace.workspaceTabs?.[cooperationGroupTab(b.groupId)]
+      if(tab)tab.subjectIds=(tab.subjectIds||[]).filter((id:string)=>id!==b.subjectId)
+      if(removedCopy && workspace.customSubjects)delete workspace.customSubjects[b.subjectId]
+      else if(workspace.customSubjects?.[b.subjectId]?.tabId===cooperationGroupTab(b.groupId)){workspace.customSubjects[b.subjectId].tabId='main';workspace.isMainWorkspaceTabVisible=true}
+      await writeJson(handle,'manifests/workspace-state.json',workspace)
+      delete state.mirrors[sphereId]
+      state.deletions=state.deletions.filter(item=>item.sphereId!==sphereId)
+      for(const group of state.groups)group.spheres=group.spheres.filter(sphere=>sphere.id!==sphereId)
+      sockets.get(sphereId)?.close();sockets.delete(sphereId);confirmedMirrors.delete(sphereId)
+      await save()
+      window.dispatchEvent(new CustomEvent('cursado-cooperation-undone',{detail:{binding:b,removedCopy}}))
+    })
+  } finally {undoingSpheres.delete(sphereId)}
 }
 async function installSubject(b: SphereBinding) {
   const handle = await root(), timestamp = new Date().toISOString()
@@ -582,8 +613,8 @@ export function synchronizeCooperation(): Promise<void> {
       if (!state.userId || navigator.onLine === false) return
       const execute = async () => {
         for (const mirror of Object.values(state.mirrors)) {
-          if(mirror.copySource)continue
-          try { while (await synchronizeMirror(mirror)) { /* Drain queued resource batches in this run. */ } }
+          if(mirror.copySource || undoingSpheres.has(mirror.binding.id))continue
+          try { while (await synchronizeMirror(mirror)) { if(undoingSpheres.has(mirror.binding.id))break } }
           catch (error) { confirmedMirrors.delete(mirror.binding.id); mirror.error = error instanceof Error ? error.message : String(error); await save(); retryBackground?.() }
         }
       }

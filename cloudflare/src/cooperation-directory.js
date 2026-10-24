@@ -74,6 +74,16 @@ export async function cooperationRequest(directory,request) {
   }
   if(parts[0]!=='spheres' || !/^[a-f0-9-]{36}$/.test(parts[1] || ''))return json({detail:'Ruta no encontrada.'},404)
   const sphere=directory.first('SELECT * FROM cooperation_spheres WHERE id=?',parts[1])
+  if(parts.length===3 && parts[2]==='undo' && request.method==='POST') {
+    await request.arrayBuffer()
+    if(!sphere)return json({ok:true})
+    if(sphere.created_by!==user.id)return json({detail:'Solo quien compartió la esfera puede deshacer la cooperación.'},403)
+    const result=await env.CONTENT_ROOMS.getByName(sphere.id).cancelPublication(user.id)
+    if(result.error)return json({detail:result.error},result.status)
+    sql.exec('DELETE FROM cooperation_spheres WHERE id=?',sphere.id)
+    await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',sphere.group_id).toArray().map(member=>member.user_id))
+    return json({ok:true})
+  }
   const member=sphere && directory.first('SELECT accepted FROM cooperation_members WHERE group_id=? AND user_id=?',sphere.group_id,user.id)
   if(!member)return json({detail:'No tenés acceso a esta esfera.'},403)
   const room=env.CONTENT_ROOMS.getByName(sphere.id)
