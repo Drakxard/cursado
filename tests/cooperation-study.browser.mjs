@@ -140,7 +140,7 @@ test('actual Study copies an existing sphere into a group and accepts its local 
     let copied
     await expect.poll(async()=>{try{
       copied=await a.evaluate(async({groupId,copiedId})=>{const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('cooperation-study');const manifests=await root.getDirectoryHandle('manifests');const workspace=JSON.parse(await(await(await manifests.getFileHandle('workspace-state.json')).getFile()).text());const file=await(await(await root.getDirectoryHandle('teoria')).getDirectoryHandle('Cooperativo-'+copiedId)).getFileHandle('uno.pdf');return{active:workspace.activeWorkspaceTabId,original:workspace.customSubjects['algebra-local'].tabId,ids:workspace.workspaceTabs['cooperative-'+groupId].subjectIds,bytes:await(await file.getFile()).text()}},{groupId:secondGroupId,copiedId})
-      return copied.ids?.includes('coop-'+copiedId)
+      return copied.active==='main' && copied.ids?.includes('coop-'+copiedId)
     }catch{return false}},{timeout:30000}).toBe(true)
     assert.equal(copied.active,'main')
     assert.equal(copied.original,'main')
