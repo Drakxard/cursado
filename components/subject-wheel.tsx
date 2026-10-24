@@ -7,7 +7,7 @@ import { InlinePdfName } from "./inline-pdf-name"
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
 import { CooperationPanel, CooperationSyncStatus, useCooperation } from '@/components/cooperation'
-import { cooperationSubjectSyncLabel, undoCooperationSphere, COOPERATIVE_TAB_ID, cooperationGroupTab, refreshCooperation, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
+import { undoCooperationSphere, COOPERATIVE_TAB_ID, cooperationGroupTab, refreshCooperation, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
 import type { SphereBinding } from '@/lib/client/cooperation-files'
 import type { BoardPdfReference } from "@/lib/board-library-contract"
 
@@ -7641,11 +7641,10 @@ export function SubjectWheel({
           {homeSubjectCards.length > 0 || pendingCooperationCards.length > 0 ? (
             <div className="mx-auto flex w-full max-w-5xl items-center justify-center">
             <div className="flex w-full max-w-[58rem] flex-wrap justify-center gap-6 lg:gap-8">
-              {pendingCooperationCards.map(task=><SubjectHomeCard key={`${task.key}:${task.subject.id}`} displayName={task.subject.name} daysRemainingLabel="" color={task.subject.color} syncLabel="Preparando 0%" aria-label={task.subject.name} aria-description="Copia en segundo plano" onClick={()=>toast({title:'Copiando esfera',description:'La preparación continúa en segundo plano.'})}/>)}
+              {pendingCooperationCards.map(task=><SubjectHomeCard key={`${task.key}:${task.subject.id}`} displayName={task.subject.name} daysRemainingLabel="" color={task.subject.color} aria-label={task.subject.name} aria-description="Copia en segundo plano" onClick={()=>toast({title:'Copiando esfera',description:'La preparación continúa en segundo plano.'})}/>)}
               {homeSubjectCards.map((card) => {
                 const canDeleteSubject = isCustomSubject(card.subject)
                 const mirror=Object.values(cooperative.mirrors).find(m=>m.binding.subjectId===card.subject.id)
-                const syncLabel=mirror?(mirror.error?'Error':`${mirror.copySource?'Copiando':mirror.transfer?.phase==='uploading'?'Subiendo':mirror.downloading?'Descargando':'Sincronización'} ${cooperationSubjectSyncLabel(card.subject.id)||'0%'}`):null
 
                 return (
                   <SubjectHomeCard
@@ -7666,8 +7665,6 @@ export function SubjectWheel({
                     displayName={card.displayName}
                     daysRemainingLabel={card.daysRemainingLabel}
                     color={getSubjectVisualColor(card.subject)}
-                    syncLabel={syncLabel}
-                    aria-description={syncLabel||undefined}
                   />
                 )
               })}
