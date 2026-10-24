@@ -30,6 +30,9 @@ const presences = new Map<string, { users: { id: string; name: string; color: st
 export const cooperationState = () => state
 const confirmedMirrors = new Set<string>()
 const undoingSpheres = new Set<string>()
+type UndoStage = 'stopping' | 'remote' | 'local'
+const undoStages = new Map<string, UndoStage>()
+export const cooperationUndoStatus = (sphereId: string) => undoStages.get(sphereId)
 let syncRevision = 0
 function invalidateSyncStatus() { syncRevision++; confirmedMirrors.clear(); cooperationChanged() }
 export function cooperationSubjectSyncLabel(subjectId: string) {
@@ -140,16 +143,31 @@ export async function removeLocalCooperationSubjects(subjectIds: string[]) {
 }
 export async function undoCooperationSphere(sphereId: string) {
   const mirror=state.mirrors[sphereId]
-  if(!mirror?.binding.owner || (!mirror.error && !mirror.copySource))throw new Error('Solo se puede deshacer un intento propio con errores.')
+  if(!mirror?.binding.owner)throw new Error('Solo se puede deshacer un intento propio.')
   if(undoingSpheres.has(sphereId))return
   undoingSpheres.add(sphereId)
+  const stage = (value: UndoStage) => { undoStages.set(sphereId, value); cooperationChanged() }
+  delete state.error
+  stage('stopping')
   try {
     if(syncing)await syncing
     await withStateLock(async()=>{
-      await cooperationApi(`spheres/${sphereId}/undo`,{})
+      stage('remote')
+      let detached = false
+      try {
+        const response = await fetch(`/pizarra/api/cooperation/spheres/${sphereId}/undo`, {
+          method:'POST',headers:{'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(8_000),
+        })
+        detached = !response.ok
+        await response.body?.cancel()
+      } catch { detached = true }
+      // Cancelling this PC's association must not depend on deleting the remote
+      // publication. Keep the local subject when offline or after a 409, and
+      // leave any other participants' shared content intact.
       const current=state.mirrors[sphereId]
       if(!current){cooperationChanged();return}
-      const b=current.binding,removedCopy=!!current.copiedFrom,handle=await root()
+      stage('local')
+      const b=current.binding,removedCopy=!detached&&!!current.copiedFrom,handle=await root()
       const catalog=await readJson<{version:number;subjects:Record<string,Record<string,unknown>>}>(handle,'manifests/subject-catalog.json',{version:2,subjects:{}})
       if(removedCopy)delete catalog.subjects[b.subjectId]
       else if(catalog.subjects[b.subjectId]?.cooperationId===b.id)delete catalog.subjects[b.subjectId].cooperationId
@@ -162,13 +180,17 @@ export async function undoCooperationSphere(sphereId: string) {
       else if(workspace.customSubjects?.[b.subjectId]?.tabId===cooperationGroupTab(b.groupId)){workspace.customSubjects[b.subjectId].tabId='main';workspace.isMainWorkspaceTabVisible=true}
       await writeJson(handle,'manifests/workspace-state.json',workspace)
       delete state.mirrors[sphereId]
+      state.removedSpheres=[...new Set([...(state.removedSpheres||[]),sphereId])]
+      state.dismissedSpheres=[...new Set([...(state.dismissedSpheres||[]),sphereId])]
+      delete state.error
       state.deletions=state.deletions.filter(item=>item.sphereId!==sphereId)
       for(const group of state.groups)group.spheres=group.spheres.filter(sphere=>sphere.id!==sphereId)
       sockets.get(sphereId)?.close();sockets.delete(sphereId);confirmedMirrors.delete(sphereId)
       await save()
       window.dispatchEvent(new CustomEvent('cursado-cooperation-undone',{detail:{binding:b,removedCopy}}))
     })
-  } finally {undoingSpheres.delete(sphereId)}
+  } catch (error) { state.error=error instanceof Error?error.message:String(error);throw error }
+  finally {undoingSpheres.delete(sphereId);undoStages.delete(sphereId);cooperationChanged()}
 }
 async function installSubject(b: SphereBinding, groupId = b.groupId) {
   const handle = await root(), timestamp = new Date().toISOString()

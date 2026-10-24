@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { cooperationUndoStatus } from '@/lib/client/cooperation'
 import { ListChecks, RefreshCw, X } from 'lucide-react'
 import { undoCooperationSphere, acceptCooperationGroup, acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
 import { isNativeReadOnly } from '@/lib/native-workspace'
@@ -123,6 +124,12 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
       </div>
       {!group.spheres.length && <p className="text-sm text-muted-foreground">Este grupo está vacío.</p>}
       <div className="flex flex-wrap gap-4">{group.spheres.map(sphere => {
+        const undoStage = cooperationUndoStatus(sphere.id)
+        if (undoStage) return <div key={sphere.id} role="status" aria-live="polite" className="w-48 space-y-2 rounded-xl border p-3 text-left text-sm">
+          <p className="flex items-center gap-2"><RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />Quitando {sphere.name}…</p>
+          <progress aria-label={`Deshacer ${sphere.name}`} max={3} value={undoStage === 'stopping' ? 0 : undoStage === 'remote' ? 1 : 2} className="h-2 w-full" />
+          <p className="text-xs text-muted-foreground">{undoStage === 'stopping' ? 'Deteniendo la sincronización en curso…' : undoStage === 'remote' ? 'Cerrando el intento compartido…' : 'Conservando tus archivos y quitando la vinculación…'}</p>
+        </div>
         const mirror = state.mirrors[sphere.id], ready = mirror && !mirror.copySource && (!mirror.downloading || mirror.metadataReady)
         const deleted = state.deletions.find(d => d.sphereId === sphere.id && d.key === 'sphere.json')
         if (deleted?.decision === 'delete') return null

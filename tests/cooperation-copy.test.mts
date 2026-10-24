@@ -195,6 +195,7 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   const active=client.synchronizeCooperation()
   await ready
   const undo=client.undoCooperationSphere(race.id)
+  assert.equal(client.cooperationUndoStatus(race.id),'stopping','undo reports progress before waiting on an active transfer')
   await new Promise(resolve=>setTimeout(resolve,10))
   assert.equal(undoRequests,0,'remote undo must wait for the in-flight commit')
   release()
@@ -203,6 +204,7 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   assert.equal(undoRequests,1)
   assert.equal(lateCommits,0)
   assert.equal(client.cooperationState().mirrors[race.id],undefined)
+  assert.equal(client.cooperationUndoStatus(race.id),undefined)
   assert.equal((await fs.json('manifests/subject-catalog.json')).subjects.race.cooperationId,undefined)
   assert.equal((await fs.json('manifests/materials/Race/week-1.json')).materials[0].file_name,'latest local edit')
 
@@ -214,6 +216,36 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   assert.equal(client.cooperationState().mirrors[revoked.id],undefined,'a confirmed remote cancellation must not leave a mirror retrying 403 forever')
   assert.equal((await fs.json('manifests/subject-catalog.json')).subjects.revoked.cooperationId,undefined)
   assert.equal((await fs.json('manifests/materials/Revoked/week-1.json')).materials[0].file_name,'Keep local')
+
+  const detachSource={id:'detach',name:'Detach',storageKey:'Detach',color:'#2563eb'}
+  await fs.put('manifests/materials/Detach/week-1.json',{materials:[{id:25,file_name:'Keep my original'}]})
+  const detach=await client.shareCooperationSphere(first,detachSource)
+  await api(actors[1],`groups/${first}/accept`,{})
+  const changed=await api(actors[1],`spheres/${detach.id}/operations`,{id:'acknowledged-by-another-client',changes:[{key:'scope/shortcuts.json',type:'json',value:{buttons:[]}}]})
+  assert.equal(changed.status,200)
+  assert.equal((await api(actors[0],`spheres/${detach.id}/undo`,{})).status,409)
+  await client.undoCooperationSphere(detach.id)
+  await client.refreshCooperation()
+  await client.synchronizeCooperation()
+  assert.equal(client.cooperationState().mirrors[detach.id],undefined)
+  assert.ok(client.cooperationState().removedSpheres.includes(detach.id))
+  assert.equal(client.cooperationState().groups.some(group=>group.spheres.some(sphere=>sphere.id===detach.id)),false)
+  assert.equal((await fs.json('manifests/subject-catalog.json')).subjects.detach.cooperationId,undefined)
+  assert.equal((await fs.json('manifests/materials/Detach/week-1.json')).materials[0].file_name,'Keep my original')
+  assert.equal((await api(actors[1],`spheres/${detach.id}/snapshot`)).status,200,'detaching does not delete another client’s shared copy')
+
+  const offlineSource={id:'offline-undo',name:'Offline undo',storageKey:'OfflineUndo',color:'#2563eb'}
+  await fs.put('manifests/materials/OfflineUndo/week-1.json',{materials:[{id:26,file_name:'Keep offline original'}]})
+  const offline=await client.shareCooperationSphere(first,offlineSource)
+  const fetchBeforeOfflineUndo=globalThis.fetch
+  globalThis.fetch=(async(url,options={})=>{
+    if(String(url).includes(`spheres/${offline.id}/undo`))throw new TypeError('Failed to fetch')
+    return fetchBeforeOfflineUndo(url,options)
+  }) as typeof fetch
+  await client.undoCooperationSphere(offline.id)
+  globalThis.fetch=fetchBeforeOfflineUndo
+  assert.equal(client.cooperationState().mirrors[offline.id],undefined)
+  assert.equal((await fs.json('manifests/materials/OfflineUndo/week-1.json')).materials[0].file_name,'Keep offline original')
 
   const checkedSource={id:'access-check',name:'Access check',storageKey:'AccessCheck',color:'#2563eb'}
   await fs.put('manifests/materials/AccessCheck/week-1.json',{materials:[]})

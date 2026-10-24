@@ -11,10 +11,12 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     window.publishSphere=()=>{sphere.ready=true;changed()};
     window.resetInvitation=()=>{state.mirrors={};state.deletions=[];state.dismissedSpheres=[];changed()};
     export const cooperationState=()=>state;
+    export const cooperationUndoStatus=()=>window.undoStage;
+    window.setUndoStage=stage=>{window.undoStage=stage;changed()};
     export const cooperationSubjectSyncLabel=()=> '100%';
     export const cooperationSubjectSyncDetails=async()=>({name:'Álgebra',bytes:2500000});
     export const refreshCooperation=async()=>state;
-    export const undoCooperationSphere=async id=>{if(window.failUndo)throw new Error('No se pudo deshacer. Reintentá.');delete state.mirrors[id];for(const group of state.groups)group.spheres=group.spheres.filter(sphere=>sphere.id!==id);state.dismissedSpheres=[id];window.undoneSphere=id;changed()};
+    export const undoCooperationSphere=async id=>{if(window.failUndo)throw new Error('No se pudo deshacer. Reintentá.');if(window.holdUndo){window.setUndoStage('stopping');await new Promise(resolve=>window.releaseUndo=resolve)}delete state.mirrors[id];for(const group of state.groups)group.spheres=group.spheres.filter(sphere=>sphere.id!==id);state.dismissedSpheres=[id];window.undoneSphere=id;window.undoStage=undefined;changed()};
     window.failPublication=()=>{state.mirrors[sphere.id].binding.owner=true;state.mirrors[sphere.id].error='Unexpected end of JSON input';changed()};
     export const acceptCooperationGroup=async id=>{if(window.failGroupAccept)throw new Error('Sin conexión. Reintentá.');state.groups.find(group=>group.id===id).accepted=true;window.acceptedGroup=id;changed()};
     export const synchronizeCooperation=async()=>{};
@@ -109,8 +111,19 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     await page.evaluate(() => (window as any).failUndo=true)
     await failed.getByRole('button',{name:'Deshacer',exact:true}).click()
     await failed.getByText('No se pudo deshacer. Reintentá.',{exact:true}).waitFor()
-    await page.evaluate(() => (window as any).failUndo=false)
+    await page.evaluate(() => { (window as any).failUndo=false;(window as any).holdUndo=true })
     await failed.getByRole('button',{name:'Deshacer',exact:true}).click()
+    await failed.getByText('Quitando Álgebra…',{exact:true}).waitFor()
+    assert.equal(await failed.getByRole('button',{name:'Álgebra',exact:true}).count(),0)
+    const undoProgress=failed.getByRole('progressbar',{name:'Deshacer Álgebra'})
+    assert.equal(await undoProgress.getAttribute('value'),'0')
+    await page.evaluate(()=>(window as any).setUndoStage('remote'))
+    await failed.getByText('Cerrando el intento compartido…',{exact:true}).waitFor()
+    assert.equal(await undoProgress.getAttribute('value'),'1')
+    await page.evaluate(()=>(window as any).setUndoStage('local'))
+    await failed.getByText('Conservando tus archivos y quitando la vinculación…',{exact:true}).waitFor()
+    assert.equal(await undoProgress.getAttribute('value'),'2')
+    await page.evaluate(()=>(window as any).releaseUndo())
     await failed.getByRole('button',{name:'Deshacer',exact:true}).waitFor({state:'detached'})
     assert.equal(await page.evaluate(() => (window as any).undoneSphere),'sphere-1')
   } finally { await browser.close() }
