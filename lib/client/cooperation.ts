@@ -513,8 +513,8 @@ async function synchronizeMirror(mirror: Mirror) {
       let localValue = local?.value
       if (key.startsWith('scope/') && (!mirror.downloading || mirror.metadataReady)) localValue = (await scanSphere(handle, b)).find(file => file.key === key)?.value
       if (!key.startsWith('scope/') && key !== 'sphere.json' && (!mirror.downloading || mirror.metadataReady)) {
-        const latest = await readFile(handle, mapBindingText(key, b, true))
-        localValue = latest ? mapBindingJson(JSON.parse(await latest.text()), b, false) : undefined
+        const latest = await readJson<Json | undefined>(handle, mapBindingText(key, b, true), undefined)
+        localValue = latest === undefined ? undefined : mapBindingJson(latest, b, false)
       }
       const protect = key.startsWith('manifests/materials/') || key.startsWith('manifests/entries/') || key === 'scope/containers.json' || /^manifests\/subject-voice\/[^/]+\/workspace\.json$/.test(key) || key.startsWith('manifests/subject-voice/topics/')
       if (protect) protectDeletions(b.id, key, prior?.value, resource.value, localValue)
