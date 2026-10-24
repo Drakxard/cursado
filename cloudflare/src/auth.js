@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { initializeCooperation, cooperationRequest } from './cooperation-directory.js'
+import { boardLinksRequest } from './board-links.js'
 
 const COOKIE = 'pizarra_sid'
 const SESSION_SECONDS = 90 * 86400
@@ -104,6 +105,7 @@ export class IdentityDirectory extends DurableObject {
     try {
       if (!this.secret || this.secret.length < 32) fail(503,'El acceso de Pizarra todavía no está configurado.')
       const path = new URL(request.url).pathname, method = request.method
+      if (path.startsWith('/api/board-links/')) return await boardLinksRequest(this,request)
       if (path.startsWith('/api/cooperation/')) return await cooperationRequest(this,request)
       if (path === '/api/auth/me' && method === 'GET') return apiJson(profile((await this.authenticated(request)).user))
       if (path === '/api/library' && method === 'GET') {

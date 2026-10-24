@@ -5,9 +5,11 @@ import type { BoardContentWithExtras } from './biblioteca'
 import { deviceDB, emptyContent, readDeviceBoard, writeDeviceBoard } from './storage/device'
 import { nativeBoardMode } from './nativeWorkspace'
 import { mergeCooperation, type Json } from '../../lib/cooperation-model'
+import { withWorkspaceFileLock } from '../../lib/workspace-file-lock'
+import { portableBoardLinkBinding, restoreBoardLinkBinding } from './linkSharing'
 
 type TopicWorkspace = { cooperationWeekNumber?: number; cooperationSubjectId?: string; pdfReferences?: BoardPdfReference[]; boardId: string; name: string; rootHandle: FileSystemDirectoryHandle }
-type TopicSnapshot = { version: 1; boardId: string; name: string; content: BoardContentWithExtras; assets: Record<string, string> }
+type TopicSnapshot = { version: 1; boardId: string; name: string; content: BoardContentWithExtras; assets: Record<string, string>; sharedBoard?: unknown }
 let navigationRoot:FileSystemDirectoryHandle|null=null
 let workspace: TopicWorkspace | null = null
 let presented: BoardContentWithExtras | null = null
@@ -37,6 +39,7 @@ export async function initializeTopicWorkspace(input: TopicWorkspace, preserveSe
     if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error
   }
   const id = `local:important-${input.boardId}`
+  await restoreBoardLinkBinding(id,snapshot?.sharedBoard)
   const cached = await readDeviceBoard(id)
   const content = snapshot?.content ?? cached?.content ?? emptyContent()
   const shapes = (content.shapes ??= []) as ShapeItem[]
@@ -72,6 +75,10 @@ export async function initializeTopicWorkspace(input: TopicWorkspace, preserveSe
 }
 
 export async function saveTopicWorkspace() {
+  if(!workspace)return
+  return withWorkspaceFileLock(`progreso/pizarras/${workspace.boardId}.json`,saveTopicWorkspaceUnlocked)
+}
+async function saveTopicWorkspaceUnlocked() {
   if (!workspace) return
   if (getActiveBoardId() !== `local:important-${workspace.boardId}`) throw new Error('La pizarra activa no corresponde al tema.')
   const board = await readDeviceBoard(getActiveBoardId())
@@ -97,7 +104,7 @@ export async function saveTopicWorkspace() {
   }
   const file = await directory.getFileHandle(`${workspace.boardId}.json`, { create: true })
   const writer = await file.createWritable()
-  await writer.write(JSON.stringify({ version: 1, boardId: workspace.boardId, name: workspace.name, content, assets, cooperationWeekNumber: workspace.cooperationWeekNumber, cooperationSubjectId: workspace.cooperationSubjectId }))
+  await writer.write(JSON.stringify({ version: 1, boardId: workspace.boardId, name: workspace.name, content, assets, sharedBoard:await portableBoardLinkBinding(getActiveBoardId()), cooperationWeekNumber: workspace.cooperationWeekNumber, cooperationSubjectId: workspace.cooperationSubjectId }))
   await writer.close()
   saved = structuredClone(content)
   // Recognize saved local edits without consuming remote changes before display.

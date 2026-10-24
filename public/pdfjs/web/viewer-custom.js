@@ -156,6 +156,7 @@
       fragmentRegion: String(params.get("fragmentRegion") || ""),
       viewerMode: String(params.get("viewerMode") || "standalone").trim() === "inline" ? "inline" : "standalone",
       boardReader: params.get("boardReader") === "1",
+      sharedBoardReader: params.get("sharedBoardReader") === "1",
       returnToken: String(params.get("returnToken") || "").trim(),
       presentationTagIds: Array.from(new Set(
         String(params.get("presentationTagIds") || "")
@@ -4754,6 +4755,29 @@
     await app.initializedPromise;
     state.app = app;
     state.query = parseQuery();
+    // Shared board files have their own capability endpoint. They do not use
+    // material editing, local folder resolution or annotation upload services.
+    if (state.query.sharedBoardReader) {
+      const style = document.createElement("style");
+      style.textContent = "#editorModeButtons,.editorParamsToolbar{display:none!important}";
+      document.head.append(style);
+      window.PDFViewerApplicationOptions?.set("annotationEditorMode", -1);
+      app.eventBus.on("pagerendered", () => postToParent({ type: "viewerPageRendered" }));
+      app.eventBus.on("updateviewarea", ({ location: view } = {}) => {
+        if (view?.pdfOpenParams) postToParent({ type: "viewerReadingPosition", hash: view.pdfOpenParams });
+      });
+      app.eventBus.on("documenterror", ({message, reason} = {}) => postToParent({type:"viewerDocumentError",error:reason || message || "No se pudo abrir el PDF compartido."}));
+      document.addEventListener("keydown", event => {
+        if ((event.key === "<" || event.key === "Escape") && !event.ctrlKey && !event.altKey && !event.metaKey && !event.isComposing && !isEditableTarget(event.target) && !document.fullscreenElement) {
+          event.preventDefault(); postToParent({type:"shared-pdf:closed"});
+        }
+      }, true);
+      window.addEventListener("message", event => {
+        if (event.origin !== location.origin || event.source !== parent) return;
+        if (event.data?.type === "restoreViewerReadingPosition" && typeof event.data.hash === "string" && /^#?page=\d+&zoom=/.test(event.data.hash) && event.data.hash.length <= 512) app.pdfLinkService.setHash(event.data.hash.replace(/^#/, ""));
+      });
+      return;
+    }
     window.initPdfExplanations?.({ app, query: state.query, ensureWorkspaceRootHandle, inscreenApiFetch, showToast });
     state.presentationPhase = isPresentationMode() ? "source" : "idle";
     ensureUi();

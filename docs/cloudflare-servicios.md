@@ -77,6 +77,11 @@ irán a R2; anotaciones y explicaciones se vincularán al ID y versión del PDF.
 
 ## Verificación
 
+La opción nueva de compartir pizarras por enlace usa `/api/board-links/`,
+el binding `BOARD_LINKS` y la migración `v3`. Reutiliza R2 y el proxy de acceso,
+sin implementar las rutas antiguas del servidor Python. Ver
+[Compartir pizarras por link](pizarra-compartir-link.md).
+
 GitHub Actions ejecuta las pruebas de las rutas de infraestructura y la
 compilación de Wrangler con `--dry-run`. No necesita credenciales Cloudflare
 para esas comprobaciones y no despliega recursos automáticamente.

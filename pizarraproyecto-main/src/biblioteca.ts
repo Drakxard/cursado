@@ -5,6 +5,7 @@ import { deviceDB, isPrivate, newLocalId, emptyContent, readDeviceBoard, writeDe
 import type { DeviceBoard } from './storage/device'
 import { mergeBoard, strokeIds } from './storage/merge'
 import { createScenePatch } from './storage/livePatch'
+import { isLinkGuest, guestLibrary, syncLinkedBoard, linkBinding, linkedAsset, linkAssetCacheKey } from './linkSharing'
 export type { Point, Stroke, TextItem, MediaItem, BoardData }
 export type BoardContentWithExtras = BoardData & { shapes?: unknown[]; tables?: unknown[]; graphs?: unknown[]; videos?: unknown[] }
 
@@ -31,8 +32,8 @@ export async function liveSocketUrl(boardId:string) {
 export function storageNotice() { return notice }
 function announce(value: string) { notice = value; window.dispatchEvent(new Event('pizarra-storage')) }
 const cacheKey = (id: string) => isPrivate(id) ? id : `${account}:${id}`
-const assetKey = (id: string, local = privateBoard()) => `${local ? 'device' : account}:${id}`
-export async function hasPendingShared() { return !privateBoard() && Boolean((await readDeviceBoard(cacheKey(activeId)))?.draft) }
+const assetKey = (id: string, local = privateBoard()) => isLinkGuest()?linkAssetCacheKey(activeId,id):`${local ? 'device' : account}:${id}`
+export async function hasPendingShared() { return privateBoard()?Boolean((await linkBinding(activeId))?.pending):Boolean((await readDeviceBoard(cacheKey(activeId)))?.draft) }
 export async function requestPersistentStorage() { return navigator.storage?.persist?.().catch(() => false) }
 
 class Unavailable extends Error {}
@@ -76,6 +77,7 @@ export function getCommittedBoardContent() {
 }
 export async function getLibrary() {
   if (nativeBoardMode()) return nativeBoardLibrary()
+  if (isLinkGuest()) return guestLibrary()
   await migrateLegacy()
   const local = await localLibrary()
   let remote: { folders: Folder[]; boards: BoardInfo[] } = { folders: [], boards: [] }
@@ -234,8 +236,10 @@ export async function loadBoard(): Promise<BoardContentWithExtras | undefined> {
   if (privateBoard()) {
     if (!saved) throw new Error('No se encontró la pizarra privada.')
     activeVersion = saved.version
+    const linked = await syncLinkedBoard(activeId,saved.content)
+    if(linked.content!==saved.content)await writeDeviceBoard({...saved,content:linked.content})
     announce('Privada: guardada solo en este dispositivo.')
-    return strokeIds(saved.content)
+    return strokeIds(linked.content)
   }
   if (saved?.draft) {
     rememberCommitted(activeId,saved.draftBase?.version??saved.version,saved.draftBase?.content??saved.content)
@@ -280,6 +284,8 @@ export async function saveBoard(content: BoardContentWithExtras) {
     await tx.store.put({ ...current, content, version, updated_at: new Date().toISOString() })
     await tx.done
     activeVersion=version
+    const linked=await syncLinkedBoard(id,content)
+    if(linked.content!==content)await writeDeviceBoard({...current!,content:linked.content,version,updated_at:new Date().toISOString()})
     const history=await listBoardHistory(id)
     const automatic=history.history.filter(h=>h.kind==='auto')
     if (!automatic[0] || Date.now()-Date.parse(automatic[0].created_at)>=5*60*1000) {
@@ -287,7 +293,7 @@ export async function saveBoard(content: BoardContentWithExtras) {
       for (const old of automatic.slice(39)) await db.delete('history',old.id)
     }
     announce('Privada: guardada solo en este dispositivo.')
-    return { pending: false }
+    return { pending: linked.pending, merged: linked.content===content?undefined:linked.content }
   }
   // Persist first, so a disconnect or rejected save cannot discard the user's work.
   const draftBase=confirmed?{version:confirmed.version,content:confirmed.content}:previous.draftBase??{version:previous.version,content:previous.content}
@@ -373,6 +379,12 @@ export async function saveAsset(id: string, blob: Blob) {
 }
 export async function loadAsset(id: string): Promise<Blob | undefined> {
   if (nativeBoardMode()) return loadNativeAsset(id)
+  if(await linkBinding(activeId)) {
+    const db=await deviceDB, key=linkAssetCacheKey(activeId,id),local=await db.get('assets',key) as Blob|undefined
+    if(local)return local
+    const blob=await linkedAsset(activeId,id)
+    if(blob){await db.put('assets',blob,key);return blob}
+  }
   const key=assetKey(id)
   const pending=assetDownloads.get(key)
   if(pending)return pending
@@ -418,6 +430,13 @@ export type BoardHistoryList = {
   auto_interval_minutes: number; auto_keep: number
 }
 export function getActiveBoardVersion() { return activeVersion }
+export async function acceptLinkedScene(id:string,content:BoardContentWithExtras) {
+  if(id!==activeId)return
+  const board=await readDeviceBoard(cacheKey(id))
+  if(!board)throw new Error('No se encontró la copia local de la pizarra.')
+  await writeDeviceBoard({...board,content,version:board.version+1})
+  activeVersion=board.version+1
+}
 export async function listBoardHistory(boardId: string): Promise<BoardHistoryList> {
   if (isPrivate(boardId)) {
     const board = await readDeviceBoard(boardId)

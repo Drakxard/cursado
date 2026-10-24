@@ -133,10 +133,12 @@ jobs:
             sleep 1
           done
           curl --silent --fail http://127.0.0.1:8794/health > /dev/null
-          COOP_LOCAL_URL=http://127.0.0.1:8794 node --test tests/cooperation-worker.integration.mjs
+          COOP_LOCAL_URL=http://127.0.0.1:8794 node --test tests/cooperation-worker.integration.mjs tests/board-links-worker.integration.mjs
       - name: Invitaciones, selector semanal y overlay de chat
         run: node --test --experimental-strip-types tests/cooperation-panel.browser.mts tests/board-api-chat.browser.mjs
       - run: npm run build
+      - name: Compartir pizarras por enlace, cadena y PDF
+        run: node --test --experimental-strip-types tests/board-links.browser.mjs
       - name: Pizarra y selección de semanas en la aplicación completa
         shell: bash
         run: |

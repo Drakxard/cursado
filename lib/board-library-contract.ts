@@ -4,6 +4,7 @@ export type BoardPdfReference = {
   subjectId: string
   fileName: string
   workspaceFileId: string | null
+  sharedFileId?: string
 }
 export function boardPdfReference(value: unknown): BoardPdfReference | null {
   if (!value || typeof value !== 'object') return null
@@ -14,7 +15,8 @@ export function boardPdfReference(value: unknown): BoardPdfReference | null {
     !(v.workspaceFileId === null || (typeof v.workspaceFileId === 'string' &&
       v.workspaceFileId.startsWith('workspace://') && v.workspaceFileId.length <= 2000 &&
       !/[\\\x00-\x1f]/.test(v.workspaceFileId) && !v.workspaceFileId.slice(12).split('/').some(p=>!p || p==='.' || p==='..')))) return null
-  return { materialId:v.materialId, subjectId:v.subjectId, fileName:v.fileName, workspaceFileId:v.workspaceFileId }
+  if(v.sharedFileId!==undefined && !/^[a-zA-Z0-9_-]{1,200}$/.test(v.sharedFileId))return null
+  return { materialId:v.materialId, subjectId:v.subjectId, fileName:v.fileName, workspaceFileId:v.workspaceFileId, ...(v.sharedFileId?{sharedFileId:v.sharedFileId}:{}) }
 }
 export function parseBoardPdfDrag(value: string): BoardPdfReference | null {
   try { return boardPdfReference(JSON.parse(value)) } catch { return null }

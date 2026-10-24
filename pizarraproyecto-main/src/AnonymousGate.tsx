@@ -3,13 +3,11 @@ import { useEffect, useState } from 'react'
 import App from './App'
 import InstallTablet from './components/InstallTablet'
 import OfflineStatus from './components/OfflineStatus'
-import { getActiveBoardId, getLibrary, privateBoard, setStorageSession, requestPersistentStorage } from './biblioteca'
+import { setStorageSession, requestPersistentStorage } from './biblioteca'
 import './anonymous_users.css'
 
 type Profile = {id:string; display_name:string; color:string; is_admin:number; emoji:string}
 const EMOJIS = ['😀','😎','🤓','🦊','🐱','🐼','🐸','🐙','🦋','🐝','🚀','🌈','🌻','🍀','⭐','🔥','🎨','🎯','🦄','🐧','🐢','🐺','🧠','👾']
-type BoardRecord = {id:string;name:string;role?:'owner'|'editor'|'viewer'}
-type Member = {id:string;display_name:string;color:string;role:'viewer'|'editor'}
 type ManagedUser = {id:string;display_name:string;emoji:string;is_admin:number;boards_count:number;folders_count:number;events_count:number}
 
 async function api<T>(path:string, init?:RequestInit):Promise<T> {
@@ -45,16 +43,9 @@ export default function AnonymousGate(){
   const [error,setError]=useState('')
   const [busy,setBusy]=useState(false)
   const [menuOpen,setMenuOpen]=useState(false)
-  const [sharing,setSharing]=useState(false)
-  const [shareCode,setShareCode]=useState('')
   const [joinDialog,setJoinDialog]=useState(false)
   const [joinCode,setJoinCode]=useState('')
   const [joinError,setJoinError]=useState('')
-  const [shareRole,setShareRole]=useState<'viewer'|'editor'>('editor')
-  const [shareUrl,setShareUrl]=useState('')
-  const [shareBoard,setShareBoard]=useState<BoardRecord|null>(null)
-  const [shareMembers,setShareMembers]=useState<Member[]>([])
-  const [shareError,setShareError]=useState('')
   const [inviteMessage,setInviteMessage]=useState('')
   const [managingUsers,setManagingUsers]=useState(false)
   const [managedUsers,setManagedUsers]=useState<ManagedUser[]>([])
@@ -176,22 +167,8 @@ export default function AnonymousGate(){
     window.location.reload()
   }
   async function openSharing(){
-    setShareError('');setShareUrl('');setShareCode('');setShareBoard(null);setMenuOpen(false)
-    try{
-      if(privateBoard()){
-        await boardCommand({publish:true})
-        return
-      }
-      const library=await getLibrary()
-      const selected=library.boards.find(b=>b.id===getActiveBoardId()) as BoardRecord|undefined
-      setShareBoard(selected??null)
-      setSharing(true)
-      if(selected?.role==='owner'){
-        const data=await post<{code:string}>(`/api/share/boards/${encodeURIComponent(selected.id)}/code`,{})
-        setShareCode(data.code)
-      }
-      setShareMembers(selected?.role==='owner' ? (await api<{members:Member[]}>(`/api/share/boards/${encodeURIComponent(selected.id)}`)).members : [])
-    }catch(e){setShareError(String(e));setSharing(true)}
+    setMenuOpen(false)
+    window.dispatchEvent(new Event('pizarra:share-link'))
   }
   function boardCommand(command:{boardId?:string;publish?:boolean}):Promise<void>{
     return new Promise((resolve,reject)=>window.dispatchEvent(new CustomEvent('pizarra-shared-command',{detail:{...command,resolve,reject}})))
@@ -212,24 +189,6 @@ export default function AnonymousGate(){
       setJoinDialog(false)
     }catch(cause){setJoinError(cause instanceof Error?cause.message:String(cause))}finally{setBusy(false)}
   }
-  async function kickMember(userId:string){
-    if(!shareBoard)return
-    setBusy(true);setShareError('')
-    try{
-      await api<{ok:boolean}>(`/api/share/boards/${encodeURIComponent(shareBoard.id)}/members/${encodeURIComponent(userId)}`,{method:'DELETE'})
-      setShareMembers(list=>list.filter(item=>item.id!==userId))
-    }catch(e){setShareError(String(e))}finally{setBusy(false)}
-  }
-  async function createInvite(){
-    if(!shareBoard)return
-    setBusy(true);setShareError('')
-    try{
-      const data=await post<{token:string}>(`/api/share/boards/${encodeURIComponent(shareBoard.id)}`,
-        {role:shareRole,days:7})
-      setShareUrl(`${location.origin}/pizarra/?invite=${encodeURIComponent(data.token)}`)
-    }catch(e){setShareError(String(e))}finally{setBusy(false)}
-  }
-
   async function openUserAdministration(){
     setAdminError('');setMenuOpen(false);setTargetUser(null)
     setManagingUsers(true)
@@ -303,7 +262,7 @@ export default function AnonymousGate(){
         {localMode&&<button onClick={()=>{sessionStorage.removeItem('pizarra-modo-local');localStorage.removeItem('pizarra-modo-local-preferido');window.location.reload()}}>Conectar con el servidor / ingresar</button>}
         {!localMode&&<button onClick={()=>setChangeEmoji(v=>!v)}>Cambiar emoji</button>}
         {changeEmoji&&<div className="anon-emoji-grid anon-emoji-menu" role="group" aria-label="Emoji de perfil">{EMOJIS.map(item=><button type="button" key={item} disabled={busy} title={item} onClick={()=>void updateEmoji(item)}>{item}</button>)}</div>}
-        {!localMode&&<button onClick={()=>void openSharing()}>Compartir pizarra actual</button>}
+        <button onClick={()=>void openSharing()}>Compartir pizarra actual</button>
         {!localMode&&<button onClick={()=>{setJoinCode('');setJoinError('');setJoinDialog(true);setMenuOpen(false)}}>Ingresar a la pizarra</button>}
         {!localMode&&Boolean(profile.is_admin)&&<button onClick={()=>void openUserAdministration()}>Administrar usuarios</button>}
         {!localMode&&<>
@@ -345,28 +304,6 @@ export default function AnonymousGate(){
       {joinError&&<p className="anon-error" role="alert">{joinError}</p>}
       <button className="anon-primary" disabled={busy||joinCode.length!==4}>Ingresar</button><button type="button" className="anon-secondary" disabled={busy} onClick={()=>setJoinDialog(false)}>Cancelar</button>
     </form></div>}
-    {sharing&&<div className="anon-modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)setSharing(false)}}>
-      <section className="anon-modal" aria-label="Compartir pizarra">
-        <h2>Compartir pizarra</h2>
-        <p>{shareBoard?.name??'Pizarra no encontrada'}</p>
-        {shareBoard?.role==='owner'?<>
-          {shareCode&&<><output className="anon-share-code" aria-label="Código para compartir">{shareCode}</output><p>Otro usuario puede ingresar este código desde su perfil. Permite editar y vence en 24 horas; la pizarra sigue guardada.</p><button className="anon-secondary" onClick={()=>void navigator.clipboard.writeText(shareCode)}>Copiar código</button></>}
-          <label htmlFor="anon-role">Permiso del enlace</label>
-          <select id="anon-role" value={shareRole} onChange={e=>setShareRole(e.target.value as 'viewer'|'editor')}>
-            <option value="editor">Puede editar</option>
-            <option value="viewer">Solo puede ver</option>
-          </select>
-          <p>La invitación caduca en 7 días. Cada invitado debe elegir su propio nombre.</p>
-          <button className="anon-primary" disabled={busy} onClick={()=>void createInvite()}>Generar enlace</button>
-          {shareMembers.length>0&&<div className="anon-members"><strong>Participantes</strong>{shareMembers.map(member=><div key={member.id} className="anon-member"><span>{member.display_name} ({member.role==='viewer'?'lectura':'edición'})</span><button disabled={busy} onClick={()=>void kickMember(member.id)}>Quitar</button></div>)}</div>}
-          {shareUrl&&<>
-            <textarea value={shareUrl} readOnly rows={3}/>
-            <button className="anon-secondary" onClick={()=>void navigator.clipboard.writeText(shareUrl)}>Copiar enlace</button>
-          </>}
-        </>:<p>Solo el propietario puede crear invitaciones.</p>}
-        {shareError&&<p className="anon-error">{shareError}</p>}
-        <button className="anon-secondary" onClick={()=>setSharing(false)}>Cerrar</button>
-      </section>
-    </div>}
+
   </>
 }

@@ -2,6 +2,9 @@ import {navigateBoardLink,hasBoardReturn,consumeBoardView,isBoardNavigating} fro
 import {refreshCountdowns} from './canvas/countdowns'
 import { PIZARRA_API_ROOT } from './backend'
 import { beforeHome } from './homeNavigation'
+import { linkBinding, linkedSocketUrl, peekLinkedBoard, acknowledgeLinkedBoard, cacheLinkedMedia, isLinkGuest } from './linkSharing'
+import { acceptLinkedScene } from './biblioteca'
+import ShareBoardDialog from './components/ShareBoardDialog'
 import { BOARD_PDF_MIME, BOARD_IMPORTANT_MIME, BOARD_LINK_MIME, parseImportantDrag, parseBoardLinkDrag, parseBoardPdfDrag } from '../../lib/board-library-contract'
 import { useBoardLibrary } from './BoardLibraryPanels'
 import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace, receiveTopicWorkspace, sendTopicLive } from './topicWorkspace'
@@ -877,6 +880,11 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const topicPeersRef = useRef(false)
   const syncConflictRef = useRef(false)
   const [liveBoardId, setLiveBoardId] = useState<string | null>(null)
+  const [shareLinkOpen,setShareLinkOpen]=useState(false)
+  const [linkActive,setLinkActive]=useState(false)
+  const [linkError,setLinkError]=useState('')
+  useEffect(()=>{const open=()=>setShareLinkOpen(true);window.addEventListener('pizarra:share-link',open);return()=>window.removeEventListener('pizarra:share-link',open)},[])
+  useEffect(()=>{const error=(event:Event)=>setLinkError(String((event as CustomEvent).detail));window.addEventListener('pizarra:link-error',error);return()=>window.removeEventListener('pizarra:link-error',error)},[])
   const [liveUsers, setLiveUsers] = useState<LiveUser[]>([])
   const [liveSelf, setLiveSelf] = useState<string | null>(null)
   const liveSelfRef=useRef<string|null>(null)
@@ -1294,6 +1302,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     setBoardSearchQuery('')
     setContextMenu(null)
     if (id === getActiveBoardId()) { setLibraryOpen(false); return }
+    if(isLinkGuest()){try{await navigateBoardLink(id,currentBoardView());setLibraryOpen(false)}catch(error){setLibraryError(error instanceof Error?error.message:String(error))}return}
     try{await boardAudio.finish()}catch(error){setLibraryError(String(error));return}
     if (saveStatus === 'error') { setLibraryError('Hay cambios sin guardar. No cambies de pizarra hasta resolver el error.'); return }
     if (editingRef.current) commitText()
@@ -2023,6 +2032,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         setGraphs([...graphsRef.current]); setVideos([...videosRef.current]); refreshTables(n => n + 1)
         redraw(); hydrateMedia(mediaRef.current)
         for (const [key, remote] of remoteStrokesRef.current) if (remote.done) remoteStrokesRef.current.delete(key)
+        if(JSON.stringify(merged)!==JSON.stringify(local)&&await linkBinding(getActiveBoardId()))scheduleSave()
       } catch (error) { console.warn('No se pudo actualizar la pizarra cooperativa:', error) }
     }
     const receive = (event: MessageEvent) => {
@@ -2218,6 +2228,10 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     async function restore() {
       try {
         const data = await loadBoard()
+        if(data&&isTopicWorkspace()) {
+          if(await linkBinding(getActiveBoardId()))await cacheLinkedMedia(getActiveBoardId(),data)
+          await saveTopicWorkspace()
+        }
         if (cancelled) return
         if (data) {
           strokesRef.current = data.strokes ?? []
@@ -2287,6 +2301,60 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   }, [])
 
   /* SYNC_PIZARRA_V1 */
+  useEffect(()=>{
+    if(!liveBoardId)return
+    const id=liveBoardId
+    let stopped=false,busy=false,connecting=false,socket:WebSocket|null=null,reconnect:ReturnType<typeof setTimeout>|undefined
+    const idle=()=>loadedRef.current&&!dirtyRef.current&&!savingRef.current&&pointerRef.current===null&&!editingRef.current&&!activeStroke.current
+    async function refresh(){
+      if(stopped||busy||!idle())return
+      busy=true
+      const revision=editRevisionRef.current
+      try {
+        const binding=await linkBinding(id)
+        if(!binding)return
+        setLinkActive(true)
+        const remote=await peekLinkedBoard(id)
+        if(remote)setLinkError('')
+        if(pendingReplicaRef.current&&remote){dirtyRef.current=true;await persistBoard();return}
+        if(!remote||stopped||revision!==editRevisionRef.current||!idle()||remote.version<=binding.version)return
+        const content={...remote.content,camera:cameraRef.current}
+        const before={...snapshot(),camera:cameraRef.current}
+        // Claim the scene before yielding to IndexedDB, so a concurrent save keeps a consistent baseline.
+        savingRef.current=true
+        try {
+          await acknowledgeLinkedBoard(id,remote)
+          if(isTopicWorkspace())await cacheLinkedMedia(id,content)
+          await acceptLinkedScene(id,content)
+          if(stopped)return
+          const merged=mergeBoard(before,{...snapshot(),camera:cameraRef.current},content)
+          strokesRef.current=merged.strokes;textsRef.current=merged.texts;mediaRef.current=merged.media
+          shapesRef.current=(merged.shapes||[]) as ShapeItem[];tablesRef.current=(merged.tables||[]) as SheetItem[]
+          graphsRef.current=(merged.graphs||[]) as BoardGraphItem[];videosRef.current=(merged.videos||[]) as YouTubeItem[]
+          setGraphs([...graphsRef.current]);setVideos([...videosRef.current]);refreshTables(n=>n+1)
+          await saveTopicWorkspace()
+          redraw();hydrateMedia(mediaRef.current);setLinkError('')
+        }finally{savingRef.current=false;if(dirtyRef.current)scheduleSave()}
+      }catch(error){setLinkError(error instanceof Error?error.message:String(error))}finally{busy=false}
+    }
+    async function connect(){
+      if(connecting||stopped||reconnect!==undefined||socket)return
+      connecting=true
+      try {
+        if(!await linkBinding(id)||stopped)return
+        const binding=(await linkBinding(id))!,url=await linkedSocketUrl(id)
+        if(stopped)return
+        socket=new WebSocket(url);liveSocketRef.current=socket
+        socket.onopen=()=>{setLiveConnected(true);void refresh()}
+        socket.onmessage=event=>{try{const message=JSON.parse(event.data);if(message.board_id!==binding.id)return;if(message.type==='board_version')void refresh();else window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:parent,data:{type:'topic-board:live',payload:message}}))}catch{}}
+        socket.onclose=event=>{if(liveSocketRef.current===socket)liveSocketRef.current=null;socket=null;setLiveConnected(false);if(event.code===4003)setLinkError('El acceso a esta pizarra fue desactivado. Tus cambios locales se conservaron.');if(!stopped)reconnect=setTimeout(()=>{reconnect=undefined;void connect()},2500)}
+      }catch{if(!stopped)reconnect=setTimeout(()=>{reconnect=undefined;void connect()},5000)}finally{connecting=false}
+    }
+    const timer=setInterval(()=>{void refresh();if(!socket&&!stopped)void connect()},1500)
+    void refresh();void connect()
+    return()=>{stopped=true;clearInterval(timer);clearTimeout(reconnect);if(socket){socket.onclose=null;socket.close()}if(liveSocketRef.current===socket)liveSocketRef.current=null}
+  },[liveBoardId])
+
   // El servidor notifica las versiones nuevas. HTTP conserva la fuente de verdad.
   // La camara es local durante la sesion: un pellizco en tablet NO mueve la PC.
   useEffect(() => {
@@ -5081,7 +5149,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       onAuxClick={e=>{if(e.button===1&&(e.target as HTMLElement).closest('canvas,.board-scene'))e.preventDefault()}}
       onDragEnter={onFileDragEnter} onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave} onDrop={onFileDrop}>
-      {liveBoardId && liveUsers.some(user=>user.id!==liveSelf) && (!privateBoard(liveBoardId) || (isTopicWorkspace() && liveUsers.length > 0)) && <aside className="live-presence" aria-label="Usuarios activos en esta pizarra">
+      {liveBoardId && liveUsers.some(user=>user.id!==liveSelf) && (linkActive || !privateBoard(liveBoardId) || (isTopicWorkspace() && liveUsers.length > 0)) && <aside className="live-presence" aria-label="Usuarios activos en esta pizarra">
         <span className={`live-presence-state ${liveConnected?'':'disconnected'}`} title={liveConnected?'Conectado':'Reconectando'} />
         {liveUsers.map(user=><button type="button" key={user.id}
           className={`live-presence-avatar ${user.id===liveSelf?'live-presence-self':''} ${following===user.id?'following':''}`}
@@ -5555,6 +5623,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         <div className="toolbar-popover-anchor">
           <button className={openMenu === 'add' ? 'active' : ''} title="Agregar imagen o PDF" aria-label="Agregar imagen o PDF" aria-expanded={openMenu === 'add'} onClick={() => setOpenMenu(openMenu === 'add' ? null : 'add')}>＋</button>
           {openMenu === 'add' && <div className="toolbar-popover add-popover">
+            {!isLinkGuest()&&!nativeBoardMode()&&<button onClick={()=>{setOpenMenu(null);setShareLinkOpen(true)}}>Compartir via link</button>}
             <button onClick={() => { setOpenMenu(null); imageInputRef.current?.click() }}>▧ Imagen / SVG</button>
             <button onClick={() => { setOpenMenu(null); pdfInputRef.current?.click() }}>▤ PDF</button>
             <button onClick={() => setOpenMenu('library')}>▥ Biblioteca</button>
@@ -5574,6 +5643,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           <button data-workspace-write={nativeBoardMode() || undefined} onClick={redo} title="Rehacer (Ctrl + Y / Ctrl + Shift + Z)" aria-label="Rehacer">↷</button>
         </div>
       </div>
+      {shareLinkOpen&&<ShareBoardDialog onClose={()=>{setShareLinkOpen(false);setLinkActive(true)}}/>}
+      {linkError&&<div role="alert" className="anon-toast">{linkError}<button onClick={()=>setLinkError('')}>Cerrar</button></div>}
       {tableEditorId && (()=>{
         const table=tablesRef.current.find(t=>t.id===tableEditorId)
         if(!table)return null

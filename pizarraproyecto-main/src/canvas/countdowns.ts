@@ -4,6 +4,7 @@ import {getTopicWorkspaceRoot} from '../topicWorkspace'
 export const countdownTasks = new Map<string,ImportantTask>()
 export let countdownReady=false
 export async function workspaceRoot():Promise<FileSystemDirectoryHandle|null>{
+  if(new URLSearchParams(location.search).has('link'))return null
   if(isNativeReadOnly())return nativeWorkspaceRoot()
   const topic=getTopicWorkspaceRoot();if(topic)return topic
   return new Promise((resolve,reject)=>{

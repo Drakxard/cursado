@@ -6,11 +6,13 @@ import './pwa'
 import { installHomeShortcut } from './homeNavigation'
 import HomeError from './components/HomeError'
 import EmbeddedTopicBoard from './EmbeddedTopicBoard'
+import SharedBoardGate from './SharedBoardGate'
+import { isLinkGuest } from './linkSharing'
 
 installHomeShortcut()
 
 // The publisher owns the Next.js services configuration; it never prompts here.
-if (window.parent === window) {
+if (window.parent === window && !isLinkGuest()) {
   const publisher = document.createElement('iframe')
   publisher.src = '/biblioteca/publicador'
   publisher.hidden = true
@@ -22,7 +24,7 @@ if (window.parent === window) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {window.parent !== window && new URLSearchParams(location.search).has('topicBoard') ? <EmbeddedTopicBoard /> : <AnonymousGate />}
+    {isLinkGuest() ? <SharedBoardGate /> : window.parent !== window && new URLSearchParams(location.search).has('topicBoard') ? <EmbeddedTopicBoard /> : <AnonymousGate />}
     <HomeError />
   </StrictMode>,
 )

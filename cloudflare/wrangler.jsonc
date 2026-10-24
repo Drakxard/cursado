@@ -8,12 +8,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "CONTENT_ROOMS", "class_name": "SharedContentRoom" },
-      { "name": "IDENTITY_DIRECTORY", "class_name": "IdentityDirectory" }
+      { "name": "IDENTITY_DIRECTORY", "class_name": "IdentityDirectory" },
+      { "name": "BOARD_LINKS", "class_name": "BoardLinks" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["SharedContentRoom"] },
-    { "tag": "v2", "new_sqlite_classes": ["IdentityDirectory"] }
+    { "tag": "v2", "new_sqlite_classes": ["IdentityDirectory"] },
+    { "tag": "v3", "new_sqlite_classes": ["BoardLinks"] }
   ],
   "r2_buckets": [{ "binding": "CONTENT_FILES", "bucket_name": "estudiodiario" }],
   "vars": {

@@ -29,6 +29,7 @@ export type ShapeItem = Bounds & {
   pdfPinned?: boolean;
   importantTaskId?:string;
   boardReference?:{boardId:string;name:string};
+  sharedUnavailable?:boolean;
   reviewView?: {center:{x:number;y:number};zoom:number};
   note?:NoteData;connector?:Connector;symbol?:AcademicSymbol;label?:string;labelFontSize?:number;matrix?:string[][]
 }

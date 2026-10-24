@@ -1,6 +1,7 @@
 import { apiJson } from './auth.js'
 export { IdentityDirectory } from './auth.js'
 export { SharedContentRoom } from './cooperation.js'
+export { BoardLinks } from './board-links.js'
 
 function json(body, status = 200, headers = {}) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
@@ -9,6 +10,24 @@ function json(body, status = 200, headers = {}) {
 export default {
   async fetch(request, env, execution) {
     const url = new URL(request.url)
+    if(url.pathname.startsWith('/api/board-links/')) {
+      const upload=url.pathname==='/api/board-links/upload', socket=url.pathname==='/api/board-links/socket'
+      const cors={'Access-Control-Allow-Origin':env.CURSADO_ORIGIN,'Access-Control-Allow-Methods':'PUT, OPTIONS','Access-Control-Allow-Headers':'Content-Type','Vary':'Origin'}
+      if((request.method!=='GET'||socket) && request.headers.get('Origin')!==env.CURSADO_ORIGIN)return json({detail:'Origen no permitido.'},403)
+      if(upload && request.method==='OPTIONS')return new Response(null,{status:204,headers:cors})
+      try {
+        if(upload||socket){const response=await env.BOARD_LINKS.getByName('board-links-v1').fetch(request);return upload?new Response(response.body,{status:response.status,headers:{...Object.fromEntries(response.headers),...cors}}):response}
+        if(!['GET','POST','PUT','DELETE'].includes(request.method))return json({detail:'Método no permitido.'},405)
+        if(['POST','PUT'].includes(request.method)) {
+          if(!(request.headers.get('content-type')||'').startsWith('application/json'))return json({detail:'Usá JSON.'},415)
+          const reader=request.body?.getReader(), chunks=[];let length=0
+          if(reader)while(true){const part=await reader.read();if(part.done)break;length+=part.value.byteLength;if(length>4*1024*1024){await reader.cancel();return json({detail:'La pizarra supera 4 MB.'},413)}chunks.push(part.value)}
+          const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length}
+          request=new Request(request,{body:bytes})
+        }
+        return await env.IDENTITY_DIRECTORY.getByName('pizarra-identities-v1').fetch(request)
+      }catch{return json({detail:'No se pudo conectar con el servicio de enlaces.'},503)}
+    }
     if (url.pathname.startsWith('/api/cooperation/')) {
       if (url.pathname.startsWith('/api/cooperation/upload/')) {
         if(request.headers.get('origin')!==env.CURSADO_ORIGIN)return json({error:'Origen no permitido.'},403)

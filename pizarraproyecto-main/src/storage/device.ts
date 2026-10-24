@@ -33,7 +33,7 @@ export async function localLibrary() {
   const db = await deviceDB
   const all: DeviceBoard[] = await db.getAll('boards')
   return {
-    boards: all.filter(b => isPrivate(b.id)).map(({ key: _key, content: _content, draft: _draft, ...info }) => info),
+    boards: all.filter(b => isPrivate(b.id) && !b.id.startsWith('local:link-')).map(({ key: _key, content: _content, draft: _draft, ...info }) => info),
     folders: await db.getAll('folders') as Folder[],
   }
 }

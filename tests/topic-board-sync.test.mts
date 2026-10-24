@@ -24,7 +24,7 @@ test('saved additions stay deleted on refresh and discarded reads do not advance
       export const emptyContent=()=>({strokes:[],texts:[],media:[],shapes:[],tables:[],graphs:[],videos:[],camera:{x:0,y:0,zoom:1}});
       export const readDeviceBoard=async()=>fixture.board;
       export const writeDeviceBoard=async board=>{fixture.board=board};
-      export const deviceDB=Promise.resolve({put:async()=>{}});
+      export const deviceDB=Promise.resolve({put:async()=>{},get:async()=>undefined});
     ` }))
   } }] })
   const client = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
