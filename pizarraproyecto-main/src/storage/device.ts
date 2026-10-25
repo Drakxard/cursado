@@ -31,9 +31,19 @@ export async function writeDeviceBoard(board: DeviceBoard) {
 }
 export async function localLibrary() {
   const db = await deviceDB
-  const all: DeviceBoard[] = await db.getAll('boards')
+  const boards: BoardInfo[] = []
+  const tx = db.transaction('boards')
+  // Project one record at a time. Never retain scenes or synchronization bases
+  // just to display the library, including future fields added to DeviceBoard.
+  for (let cursor = await tx.store.openCursor(); cursor; cursor = await cursor.continue()) {
+    const board = cursor.value
+    if (!isPrivate(board.id) || board.id.startsWith('local:link-')) continue
+    const { id, name, folder_id, version, updated_at, storage, role } = board
+    boards.push({ id, name, folder_id, version, updated_at, storage, role })
+  }
+  await tx.done
   return {
-    boards: all.filter(b => isPrivate(b.id) && !b.id.startsWith('local:link-')).map(({ key: _key, content: _content, draft: _draft, ...info }) => info),
+    boards,
     folders: await db.getAll('folders') as Folder[],
   }
 }

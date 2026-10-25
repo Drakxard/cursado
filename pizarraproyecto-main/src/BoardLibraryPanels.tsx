@@ -38,6 +38,14 @@ export function useBoardLibrary(boardId: string, pinnedMaterialId?: number) {
   const session = useMemo(()=>crypto.randomUUID(),[boardId])
   const frames = useRef({reader,retained,boardId,session})
   frames.current = {reader,retained,boardId,session}
+  function sendReaderVisibility(frame: HTMLIFrameElement, materialId: number) {
+    const current = frames.current
+    frame.contentWindow?.postMessage({type:isLinkGuest()?'board-reader:visibility':'board-library:reader-visibility',
+      session:current.session,boardId:current.boardId,visible:current.reader?.materialId===materialId},location.origin)
+  }
+  useEffect(()=>{
+    for(const [id,frame] of readerFrames.current) sendReaderVisibility(frame,id)
+  },[reader,retained,boardId,session])
   useEffect(()=>{setSplitOpen(false);setReader(null);setRetained(null);setCalendarTask(null);readingPositions.current.clear();setReady(new Set())},[boardId])
   useEffect(() => {
     setNativeError('')
@@ -47,9 +55,13 @@ export function useBoardLibrary(boardId: string, pinnedMaterialId?: number) {
     const receive = (event: MessageEvent) => {
       if(isLinkGuest() && event.origin===location.origin) {
         const entry=[...readerFrames.current].find(([,frame])=>event.source===frame.contentWindow)
-        if(entry && event.data?.type==='viewerReadingPosition' && typeof event.data.hash==='string' && event.data.hash.length<=512)readingPositions.current.set(entry[0],event.data.hash)
+        if(entry && event.data?.type==='board-reader:ready')sendReaderVisibility(entry[1],entry[0])
+        if(entry && event.data?.type==='viewerReadingPosition' && typeof event.data.hash==='string' && event.data.hash.length<=512) {
+          readingPositions.current.set(entry[0],event.data.hash)
+          if(readingPositions.current.size>50)readingPositions.current.delete(readingPositions.current.keys().next().value!)
+        }
         if(entry && event.data?.type==='shared-pdf:closed'){setReader(null);document.querySelector<HTMLCanvasElement>('.app canvas')?.focus();return}
-        if(entry && event.data?.type==='viewerDocumentError'){setNativeError(String(event.data.error||'No se pudo abrir el PDF.'));setReader(null);return}
+        if(entry && event.data?.type==='viewerDocumentError'){setNativeError(String(event.data.error||'No se pudo abrir el PDF.'));setReader(null);setRetained(null);setReady(new Set());return}
       }
       if (event.origin !== location.origin || event.data?.session !== session || event.data?.boardId !== boardId) return
       const readerEntry = [...readerFrames.current].find(([, frame]) => event.source === frame.contentWindow)
@@ -60,13 +72,17 @@ export function useBoardLibrary(boardId: string, pinnedMaterialId?: number) {
         const target = readerEntry ? readerEntry[1] : libraryFrame.current
         target?.contentWindow?.postMessage({type:'board-library:init',session,boardId,
           rootHandle:getTopicWorkspaceRoot(),reference:readerEntry ? frames.current.reader ?? frames.current.retained : null,
+          readerVisible:readerEntry ? frames.current.reader?.materialId===readerEntry[0] : undefined,
           readingPosition:readerEntry ? readingPositions.current.get(readerEntry[0]) : undefined},location.origin)
       }
       if(event.data.type === 'board-library:reading-position' && readerEntry && typeof event.data.hash === 'string' && event.data.hash.length <= 512) {
         readingPositions.current.set(readerEntry[0], event.data.hash)
         if(readingPositions.current.size > 50) readingPositions.current.delete(readingPositions.current.keys().next().value!)
       }
-      if(event.data.type === 'board-library:reader-rendered' && readerEntry) setReady(previous => new Set([...previous, readerEntry[0]]))
+      if(event.data.type === 'board-library:reader-rendered' && readerEntry) {
+        setReady(previous => new Set([...previous, readerEntry[0]]))
+        sendReaderVisibility(readerEntry[1],readerEntry[0])
+      }
       if(event.data.type === 'board-library:escape' && isLibrary && !frames.current.reader) {
         setSplitOpen(false)
         document.querySelector<HTMLCanvasElement>('.app canvas')?.focus()
@@ -114,7 +130,7 @@ export function useBoardLibrary(boardId: string, pinnedMaterialId?: number) {
         style={{opacity:visible ? 1 : 0,pointerEvents:visible ? 'auto' : 'none'}}>
         {isLinkGuest()?<SharedPdfFrame boardId={boardId} reference={reference} readingPosition={readingPositions.current.get(reference.materialId)}
           frameRef={frame=>{if(frame)readerFrames.current.set(reference.materialId,frame);else readerFrames.current.delete(reference.materialId)}}
-          onReady={()=>setReady(previous=>new Set([...previous,reference.materialId]))} onError={message=>{nativeReference.current=reference;setNativeError(message);setReader(null)}}/>:<iframe ref={frame => { if(frame) readerFrames.current.set(reference.materialId,frame); else readerFrames.current.delete(reference.materialId) }}
+          onReady={()=>setReady(previous=>new Set([...previous,reference.materialId]))} onError={message=>{nativeReference.current=reference;setNativeError(message);setReader(null);setRetained(null);setReady(new Set())}}/>:<iframe ref={frame => { if(frame) readerFrames.current.set(reference.materialId,frame); else readerFrames.current.delete(reference.materialId) }}
           title="Lector de PDF de la pizarra" src={`/biblioteca/pizarra?mode=reader&session=${session}&boardId=${encodeURIComponent(boardId)}&materialId=${reference.materialId}`} />}
       </div>
     })}

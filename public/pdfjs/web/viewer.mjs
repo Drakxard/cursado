@@ -1,3 +1,5 @@
+import { BoardPageViewBuffer, BOARD_PDF_CACHE_PAGES } from './board-memory.mjs';
+
 /**
  * @licstart The following is the entire license notice for the
  * JavaScript code in this page
@@ -9126,6 +9128,7 @@ class PDFRenderingQueue {
       clearTimeout(this.#idleTimeout);
       this.#idleTimeout = null;
     }
+    if (this.#pdfViewer?.boardReaderPaused && !this.printing) return;
     if (this.#pdfViewer.forceRendering(currentlyVisiblePages)) {
       return;
     }
@@ -9139,7 +9142,7 @@ class PDFRenderingQueue {
       this.#idleTimeout = setTimeout(this.onIdle.bind(this), CLEANUP_TIMEOUT);
     }
   }
-  getHighestPriority(visible, views, scrolledDown, preRenderExtra = false, ignoreDetailViews = false) {
+  getHighestPriority(visible, views, scrolledDown, preRenderExtra = false, ignoreDetailViews = false, visibleOnly = false) {
     const visibleViews = visible.views,
       numVisible = visibleViews.length;
     if (numVisible === 0) {
@@ -9161,6 +9164,9 @@ class PDFRenderingQueue {
         }
       }
     }
+    // Board readers retain recently visited pages, without speculatively
+    // rendering offscreen pages that could immediately exceed the byte budget.
+    if (visibleOnly) return null;
     const firstId = visible.first.id,
       lastId = visible.last.id;
     if (lastId - firstId + 1 > numVisible) {
@@ -9194,6 +9200,7 @@ class PDFRenderingQueue {
     return view.renderingState === RenderingStates.FINISHED;
   }
   renderView(view) {
+    if (this.#pdfViewer?.boardReaderPaused && !this.printing) return false;
     switch (view.renderingState) {
       case RenderingStates.FINISHED:
         return false;
@@ -13912,6 +13919,8 @@ class PDFViewer {
       throw new Error("The `container` must be absolutely positioned.");
     }
     this.#resizeObserver.observe(this.container);
+    this.boardReaderMemory = options.boardReaderMemory === true;
+    this.boardReaderPaused = false;
     this.eventBus = options.eventBus;
     this.linkService = options.linkService || new SimpleLinkService();
     this.downloadManager = options.downloadManager || null;
@@ -14324,6 +14333,7 @@ class PDFViewer {
     eventBus._on("pagerender", onBeforeDraw, {
       signal
     });
+    if (this.boardReaderMemory) eventBus._on("pagerendered", () => this.#buffer.trim(), { signal });
     const onAfterDraw = evt => {
       if (evt.cssTransform || evt.isDetailView) {
         return;
@@ -14568,7 +14578,7 @@ class PDFViewer {
     this._currentScale = UNKNOWN_SCALE;
     this._currentScaleValue = null;
     this._pageLabels = null;
-    this.#buffer = new PDFPageViewBuffer(DEFAULT_CACHE_SIZE);
+    this.#buffer = this.boardReaderMemory ? new BoardPageViewBuffer() : new PDFPageViewBuffer(DEFAULT_CACHE_SIZE);
     this._location = null;
     this._pagesRotation = 0;
     this._optionalContentConfigPromise = null;
@@ -14951,13 +14961,14 @@ class PDFViewer {
     };
   }
   update() {
+    if (this.boardReaderPaused) return;
     const visible = this._getVisiblePages();
     const visiblePages = visible.views,
       numVisiblePages = visiblePages.length;
     if (numVisiblePages === 0) {
       return;
     }
-    const newCacheSize = Math.max(DEFAULT_CACHE_SIZE, 2 * numVisiblePages + 1);
+    const newCacheSize = this.boardReaderMemory ? BOARD_PDF_CACHE_PAGES : Math.max(DEFAULT_CACHE_SIZE, 2 * numVisiblePages + 1);
     this.#buffer.resize(newCacheSize, visible.ids);
     for (const {
       view,
@@ -15092,14 +15103,35 @@ class PDFViewer {
     }
     return this.scroll.down;
   }
+  setBoardReaderVisible(visible) {
+    if (!this.boardReaderMemory || this.boardReaderPaused === !visible) return;
+    const pages = this._getVisiblePages();
+    this.boardReaderPaused = !visible;
+    this.#buffer.resize(visible ? BOARD_PDF_CACHE_PAGES : 0, pages.ids);
+    if (!visible) {
+      // Preserve finished visible pages (and annotation storage). A reset of an
+      // unfinished render cancels its task and lets it restart on resumption.
+      for (const page of this.#buffer) {
+        if (page.renderingState !== RenderingStates.FINISHED) page.reset();
+        else if (page.detailView && page.detailView.renderingState !== RenderingStates.FINISHED) page.detailView.reset();
+      }
+      // Also clear the rendering queue's pending idle cleanup timer.
+      this.renderingQueue.renderHighestPriority();
+    } else {
+      this.update();
+    }
+  }
   forceRendering(currentlyVisiblePages) {
+    if (this.boardReaderPaused) return false;
     const visiblePages = currentlyVisiblePages || this._getVisiblePages();
     const scrollAhead = this.#getScrollAhead(visiblePages);
     const preRenderExtra = this._spreadMode !== SpreadMode.NONE && this._scrollMode !== ScrollMode.HORIZONTAL;
     const ignoreDetailViews = this.#scaleTimeoutId !== null || this.#scrollTimeoutId !== null && visiblePages.views.some(page => page.detailView?.renderingCancelled);
-    const pageView = this.renderingQueue.getHighestPriority(visiblePages, this._pages, scrollAhead, preRenderExtra, ignoreDetailViews);
+    const pageView = this.renderingQueue.getHighestPriority(visiblePages, this._pages, scrollAhead, preRenderExtra, ignoreDetailViews, this.boardReaderMemory);
     if (pageView) {
+      const pdfDocument = this.pdfDocument;
       this.#ensurePdfPageLoaded(pageView).then(() => {
+        if (this.boardReaderMemory && (this.boardReaderPaused || pdfDocument !== this.pdfDocument || !this._getVisiblePages().ids.has(pageView.id))) return;
         this.renderingQueue.renderView(pageView);
       });
       return true;
@@ -17733,6 +17765,7 @@ const PDFViewerApplication = {
     const pdfViewer = this.pdfViewer = new PDFViewer({
       container,
       viewer,
+      boardReaderMemory: new URLSearchParams(window.location.search).get("boardReader") === "1",
       viewerAlert: appConfig.viewerAlert,
       eventBus,
       renderingQueue,

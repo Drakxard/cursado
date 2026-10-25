@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { FiMove, FiX, FiMaximize2, FiEdit2, FiPlus } from 'react-icons/fi'
-import { GraphPlot } from './GraphPlot'
 import type { BoardGraphItem, GraphViewport } from './GraphPlot'
 import './BoardGraphWidget.css'
+
+const GraphPlot = lazy(() => import('./GraphPlot').then(module => ({ default: module.GraphPlot })))
 
 export default function BoardGraphWidget({item,getZoom,activeTool,selected,onSelect,onErase,onBegin,onChange,onEnd,onDelete}: {
   item:BoardGraphItem;getZoom:()=>number;boardZoom:number;
@@ -68,9 +69,9 @@ export default function BoardGraphWidget({item,getZoom,activeTool,selected,onSel
       <button type="button" title="Editar funciones" aria-label="Editar funciones" onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();setEditOpen(v=>!v)}}><FiEdit2/></button>
       <button type="button" title="Eliminar gráfico" aria-label="Eliminar gráfico" onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();onDelete(item.id)}}><FiX/></button>
     </div>
-    <div className="board-live-graph-content"><GraphPlot formulas={item.formulas} initialViewport={item.viewport} onViewportChange={saveView} graphWidth={item.width} graphHeight={item.height}
+    <div className="board-live-graph-content"><Suspense fallback={<p role="status">Cargando gráfico…</p>}><GraphPlot formulas={item.formulas} initialViewport={item.viewport} onViewportChange={saveView} graphWidth={item.width} graphHeight={item.height}
       settings={item.settings} onSettingsChange={settings=>onChange(item.id,{settings})}
-      onInsertPiecewise={insertPiecewise}/></div>
+      onInsertPiecewise={insertPiecewise}/></Suspense></div>
     {editOpen&&<div className="board-live-graph-editor" onPointerDown={e=>e.stopPropagation()}>
       {item.formulas.map((f,i)=><div className="board-live-graph-formula" key={f.id}>
         <button type="button" title={f.enabled?'Ocultar':'Mostrar'} aria-label={f.enabled?'Ocultar función':'Mostrar función'}

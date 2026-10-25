@@ -184,6 +184,7 @@ test('pin follows the PDF, < retains the reader with its zoom, API chat captures
       if(e.source===parent&&e.data.session===session&&e.data.boardId===boardId){
         if(e.data.type==='board-library:init'&&!frame){position=e.data.readingPosition;frame=document.createElement('iframe');frame.title='Visor PDF: fixture';frame.src='/pdfjs/web/viewer.html?file=%2Fboard-test.pdf&viewerMode=inline&boardReader=1';document.body.append(frame)}
         if(e.data.type==='board-library:escape-reader')frame?.contentWindow.postMessage({type:'requestViewerEscape'},location.origin);
+        if(e.data.type==='board-library:reader-visibility')frame?.contentWindow.postMessage({type:'board-reader:visibility',visible:e.data.visible},location.origin);
       }
       if(e.source===frame?.contentWindow){
         if(e.data.type==='viewerPageRendered'){if(position){frame.contentWindow.postMessage({type:'restoreViewerReadingPosition',hash:position},location.origin);position=null}send('board-library:reader-rendered')}
@@ -232,8 +233,10 @@ test('pin follows the PDF, < retains the reader with its zoom, API chat captures
   await page.waitForTimeout(200)
   await pdf.locator('body').press('<')
   await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
+  await expect.poll(()=>pdf.locator('body').evaluate(()=>window.PDFViewerApplication.pdfViewer.boardReaderPaused)).toBe(true)
   await expect(board.locator('.board-pdf-reader[aria-hidden="true"][inert] iframe')).toHaveCount(1)
   await canvas.press('<');await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
+  await expect.poll(()=>pdf.locator('body').evaluate(()=>window.PDFViewerApplication.pdfViewer.boardReaderPaused)).toBe(false)
   await expect.poll(()=>pdf.locator('body').evaluate(()=>window.PDFViewerApplication?.pdfViewer?.currentScale)).toBe(1.5)
   await pdf.locator('body').press('<');await expect(board.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(0)
   await canvas.press('t');await canvas.click({position:{x:150,y:160}})

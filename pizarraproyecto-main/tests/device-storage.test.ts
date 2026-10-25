@@ -40,6 +40,25 @@ function server(boardContent=content()) {
 }
 
 describe('private boards and shared device replicas',()=>{
+  it('lists only metadata with a cursor and never returns scenes, drafts or draft bases',async()=>{
+    const db=await device.deviceDB
+    const base={name:'Board',folder_id:null,version:4,updated_at:'2026-10-24',storage:'private' as const}
+    const large={...content(),texts:[{...content().texts[0],text:'Long draft '.repeat(10000)}]}
+    for(let i=0;i<25;i++)await db.put('boards',{...base,id:`local:${i}`,key:`local:${i}`,content:large,draft:large,draftBase:{version:3,content:large}})
+    await db.put('boards',{...base,id:'local:link-shared',key:'local:link-shared',content:large})
+    await db.put('boards',{...base,id:'remote',key:`${owner}:remote`,content:large})
+    await db.put('meta',{folders:[],boards:[{...base,id:'remote'},{...base,id:'not-downloaded'}]},`library:${owner}`)
+    const getAll=vi.spyOn(IDBObjectStore.prototype,'getAll')
+    try {
+      const result=await device.localLibrary()
+      expect(result.boards).toHaveLength(25)
+      expect(result.boards.every(board=>Object.keys(board).every(key=>['id','name','folder_id','version','updated_at','storage','role'].includes(key)))).toBe(true)
+      library.setStorageSession(owner,false)
+      expect((await library.getLibrary()).boards.filter(board=>!board.id.startsWith('local:')).map(board=>board.id)).toEqual(['remote'])
+      expect(getAll.mock.contexts.some(store=>store.name==='boards')).toBe(false)
+      expect((await device.readDeviceBoard('local:0'))?.draftBase?.content).toEqual(large)
+    }finally{getAll.mockRestore()}
+  })
   it('keeps shared board placement in a local folder without changing other members folders',async()=>{
     server()
     const folder=await library.addFolder('Facultad')

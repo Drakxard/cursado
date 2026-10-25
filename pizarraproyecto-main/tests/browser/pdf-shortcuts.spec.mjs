@@ -30,6 +30,7 @@ test.beforeEach(async({page})=>{
     addEventListener('message',e=>{if(e.source!==parent||e.origin!==location.origin||e.data.session!==session||e.data.boardId!==boardId)return;
       if(e.data.type==='board-library:init'){document.body.dataset.initialized='yes';document.body.dataset.restored=e.data.readingPosition||'';if(reader)parent.postMessage({type:'board-library:reader-rendered',session,boardId},location.origin);}
       if(e.data.type==='board-library:escape-reader')parent.postMessage({type:'board-library:reader-closed',session,boardId},location.origin);
+      if(e.data.type==='board-library:reader-visibility')document.body.dataset.readerVisible=String(e.data.visible);
     });
     addEventListener('keydown',e=>{if(e.key==='Escape')parent.postMessage({type:reader?'board-library:reader-closed':'board-library:escape',session,boardId},location.origin)});
     parent.postMessage({type:'board-library:ready',session,boardId},location.origin);
@@ -232,12 +233,15 @@ test('pinned reader toggles without reloading and is released when unpinned',asy
   await pin.click()
   await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
   const frame=page.frameLocator('.board-pdf-reader iframe')
+  await expect(frame.locator('body')).toHaveAttribute('data-reader-visible','true')
   await frame.locator('body').evaluate(body=>body.dataset.retainedToken='same-document')
   await pin.click()
   await expect(page.locator('.board-pdf-reader[aria-hidden="true"][inert] iframe')).toHaveCount(1)
+  await expect(frame.locator('body')).toHaveAttribute('data-reader-visible','false')
   await page.keyboard.press('<')
   await expect(page.locator('.board-pdf-reader[aria-hidden="false"]')).toHaveCount(1)
   await expect(frame.locator('body')).toHaveAttribute('data-retained-token','same-document')
+  await expect(frame.locator('body')).toHaveAttribute('data-reader-visible','true')
   await closeReader(page)
   await pin.click()
   await expect(frame.locator('body')).toHaveAttribute('data-retained-token','same-document')

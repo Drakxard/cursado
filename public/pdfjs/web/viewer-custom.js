@@ -4755,6 +4755,13 @@
     await app.initializedPromise;
     state.app = app;
     state.query = parseQuery();
+    if (state.query.boardReader) {
+      window.addEventListener("message", event => {
+        if (event.origin !== location.origin || event.source !== parent || typeof event.data?.visible !== "boolean") return;
+        if (event.data.type === "board-reader:visibility") app.pdfViewer.setBoardReaderVisible(event.data.visible);
+      });
+      postToParent({type:"board-reader:ready"});
+    }
     // Shared board files have their own capability endpoint. They do not use
     // material editing, local folder resolution or annotation upload services.
     if (state.query.sharedBoardReader) {

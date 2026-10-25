@@ -23,12 +23,17 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
   const [resolved,setResolved] = useState(false)
   const viewerHost = useRef<HTMLDivElement>(null)
   const pendingReadingPosition = useRef<string | null>(null)
+  const readerVisible = useRef(true)
+  const forwardReaderVisibility = () => viewerHost.current?.querySelector('iframe')?.contentWindow?.postMessage(
+    {type:'board-reader:visibility',visible:readerVisible.current},location.origin)
   const send = (type:string) => parent.postMessage({type,session,boardId},location.origin)
   useEffect(()=>{
     if(!session || !boardId || window.parent === window) {setError('Abrí la biblioteca desde una pizarra.');return}
     const receive = (event:MessageEvent) => {
       if(event.origin===location.origin && event.source===viewerHost.current?.querySelector('iframe')?.contentWindow) {
+        if(event.data?.type==='board-reader:ready' || event.data?.type==='viewerReady') forwardReaderVisibility()
         if(event.data?.type==='viewerPageRendered') {
+          forwardReaderVisibility()
           if(pendingReadingPosition.current) {
             event.source?.postMessage({type:'restoreViewerReadingPosition',hash:pendingReadingPosition.current}, {targetOrigin:location.origin})
             pendingReadingPosition.current=null
@@ -42,9 +47,14 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
       }
       if(event.origin!==location.origin || event.source!==parent || event.data?.session!==session || event.data?.boardId!==boardId) return
       if(event.data.type==='board-library:init') {
+        readerVisible.current=event.data.readerVisible!==false
         pendingReadingPosition.current=typeof event.data.readingPosition==='string' ? event.data.readingPosition : null
         if(event.data.rootHandle?.kind==='directory') {setReadyWorkspaceHandle(event.data.rootHandle);setProvidedRoot(event.data.rootHandle)}
         setReference(boardPdfReference(event.data.reference));setInitialized(true)
+      }
+      if(event.data.type==='board-library:reader-visibility' && typeof event.data.visible==='boolean') {
+        readerVisible.current=event.data.visible
+        forwardReaderVisibility()
       }
       if(event.data.type==='board-library:escape-reader') {
         const frame = viewerHost.current?.querySelector('iframe')

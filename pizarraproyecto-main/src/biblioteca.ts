@@ -100,8 +100,8 @@ export async function getLibrary() {
     } else remote = await db.get('meta', `library:${account}`) ?? remote
     // Keep downloaded copies discoverable when opening without the server.
     if (!remoteEnabled || navigator.onLine===false || disconnected) {
-      const copies: DeviceBoard[] = await db.getAll('boards')
-      remote = { ...remote, boards: remote.boards.filter(b => copies.some(c => c.key === cacheKey(b.id))) }
+      const copies = new Set(await db.getAllKeys('boards'))
+      remote = { ...remote, boards: remote.boards.filter(b => copies.has(cacheKey(b.id))) }
     }
   }
   const placements=account?await (await deviceDB).get('meta',`placements:${account}`) as Record<string,string|null>|undefined:undefined

@@ -1,6 +1,4 @@
-import { all, create } from 'mathjs'
-
-const engine = create(all, {})
+import { getMathEngine } from './mathRuntime'
 
 export type EquationResult = {
   title: string
@@ -37,7 +35,7 @@ function normalizeEquation(source: string): string {
 
 function compiledSide(expression: string): (x: number) => number {
   if (!expression) throw new Error('Falta un miembro de la ecuación.')
-  const ast = engine.parse(expression)
+  const ast = getMathEngine().parse(expression)
   ast.traverse((node: { type: string; name?: string; fn?: { type?: string; name?: string }; op?: string }) => {
     if (!['OperatorNode', 'ConstantNode', 'ParenthesisNode', 'SymbolNode', 'FunctionNode'].includes(node.type)) {
       throw new Error('La ecuación contiene una operación no admitida.')

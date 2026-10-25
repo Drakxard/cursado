@@ -7,6 +7,53 @@ async function openLocal(page) {
   await expect(page.locator('.app')).toBeVisible()
 }
 
+test('500 shortcuts and twenty text/connector edits keep readers unloaded and canvas memory constant', async ({ page }, testInfo) => {
+  test.setTimeout(90000)
+  let pdfRequests=0
+  page.on('request',request=>{if(/\.pdf(?:[?#]|$)|pdf\.worker/.test(request.url()))pdfRequests++})
+  await openLocal(page)
+  await page.evaluate(async()=>{
+    const id=localStorage.getItem('pizarra_activa')
+    const db=await new Promise(resolve=>{const r=indexedDB.open('pizarra-dispositivo',1);r.onsuccess=()=>resolve(r.result)})
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction('boards','readwrite'),store=tx.objectStore('boards'),request=store.get(id)
+      request.onsuccess=()=>{
+        const board=request.result
+        board.content.shapes=Array.from({length:500},(_,i)=>({id:`shortcut-${i}`,kind:'rounded',visualType:i%2?'pdf-shortcut':'board-shortcut',
+          label:`Acceso ${i}`,x:20+i%5*100,y:180+Math.floor(i/5)*70,width:90,height:54,color:'#2563eb',strokeWidth:1.5,
+          ...(i%2?{pdfReference:{materialId:i+1,subjectId:'test',fileName:`document-${i}.pdf`,workspaceFileId:null}}:{boardReference:{boardId:`local:target-${i}`,name:`Pizarra ${i}`}})}))
+        store.put(board)
+      }
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)
+    });db.close()
+  })
+  await page.reload();await expect(page.locator('.app')).toBeVisible()
+  const cdp=await page.context().newCDPSession(page);await cdp.send('Performance.enable')
+  async function sample(){
+    await cdp.send('HeapProfiler.collectGarbage')
+    return {heap:(await cdp.send('Performance.getMetrics')).metrics.find(metric=>metric.name==='JSHeapUsedSize').value,
+      ...await page.evaluate(()=>({canvases:document.querySelectorAll('.app canvas').length,
+        bytes:[...document.querySelectorAll('.app canvas')].reduce((sum,canvas)=>sum+canvas.width*canvas.height*4,0)}))}
+  }
+  const samples=[await sample()]
+  const canvas=page.locator('.app canvas').first()
+  for(let i=0;i<20;i++){
+    await canvas.press('t');await canvas.click({position:{x:650+i%5*100,y:250+Math.floor(i/5)*60}})
+    const editor=page.locator('textarea.text-editor')
+    await editor.fill(`Texto ${i}`);await editor.press('Escape')
+    await page.getByRole('button',{name:'Conectar objetos',exact:true}).click()
+    await page.mouse.move(600,550+i*5);await page.mouse.down();await page.mouse.move(950,550+i*5,{steps:3});await page.mouse.up()
+    if(i===9)samples.push(await sample())
+  }
+  samples.push(await sample())
+  expect(samples.every(sample=>sample.canvases===samples[0].canvases&&sample.bytes===samples[0].bytes)).toBe(true)
+  expect(samples[2].heap-samples[1].heap).toBeLessThan(8*1024*1024)
+  expect(pdfRequests).toBe(0)
+  await expect(page.locator('.board-pdf-reader iframe')).toHaveCount(0)
+  expect(await page.evaluate(()=>performance.getEntriesByType('resource').some(entry=>/\/mathRuntime-/.test(entry.name)))).toBe(false)
+  testInfo.annotations.push({type:'memory',description:JSON.stringify(samples)})
+})
+
 test('previews follow zoom, release deleted images and leave stored originals intact', async ({ page }) => {
   await page.addInitScript(() => {
     window.previewMemory = { bytes: 0, peak: 0, widths: [] }

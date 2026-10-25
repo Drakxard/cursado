@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import { LuLayers } from 'react-icons/lu'
 import MatrixCalculator from './components/MatrixCalculator'
 import FlashcardPanel from './components/FlashcardPanel'
@@ -7,17 +7,16 @@ import { nativeBoardMode } from './nativeWorkspace'
 import type { Flashcard } from './study/flashcards'
 import type { MatrixCells } from './study/matrices'
 import type { CSSProperties, DragEvent as ReactDragEvent } from 'react'
-import { calculateScientific } from './study/scientificCalculator'
 import type { AngleMode } from './study/scientificCalculator'
 import { BsCalculator } from 'react-icons/bs'
 import { FiActivity, FiX, FiPlus, FiMove } from 'react-icons/fi'
-import { GraphPlot } from './GraphPlot'
 import type { GraphFormula, GraphSettings } from './GraphPlot'
 import './RightMathDock.css'
-import { solvePolynomialRoots } from './EquationSolvers'
 import { solveLinearSystem, parseLinearSystemText } from './LinearSystems'
 import type { LinearSystemResult } from './LinearSystems'
 import type { EquationResult } from './EquationSolvers'
+
+const GraphPlot = lazy(() => import('./GraphPlot').then(module => ({ default: module.GraphPlot })))
 
 type Mode='closed'|'calculator'|'graph'|'cards'
 type CalcTab='menu'|'normal'|'roots'|'linear'|'matrices'|'matrix-calc'
@@ -79,19 +78,23 @@ export default function RightMathDock({getSelection,addGraphToBoard,getSelectedM
     setCalcInput(calcInput.slice(0,from)+calcInput.slice(end))
     requestAnimationFrame(()=>{field?.focus();field?.setSelectionRange(from,from)})
   }
-  function evaluate(){
+  async function evaluate(){
     try{
       if(!calcInput.trim())return
+      const { calculateScientific } = await import('./study/scientificCalculator')
       const {output,answer:nextAnswer}=calculateScientific(calcInput,angleMode,answer)
       setResult(output);setCalcError('')
       setHistory(h=>[...h.slice(-7),{expression:calcInput,output}])
       setAnswer(nextAnswer)
     }catch(e){setCalcError(e instanceof Error?e.message:'No se pudo calcular.');setResult('')}
   }
-  function solveCurrent(){
+  async function solveCurrent(){
     setSolveError('')
     try{
-      if(calcTab==='roots')setRootsSolution(solvePolynomialRoots(rootsInput))
+      if(calcTab==='roots') {
+        const { solvePolynomialRoots } = await import('./EquationSolvers')
+        setRootsSolution(solvePolynomialRoots(rootsInput))
+      }
       else if(calcTab==='linear')setLinearSolution(solveLinearSystem({dimension:systemDimension,cells:systemCells}))
     }catch(error){
       setSolveError(error instanceof Error?error.message:'No se pudo resolver la ecuación.')
@@ -253,8 +256,8 @@ export default function RightMathDock({getSelection,addGraphToBoard,getSelectedM
           <div className="math-formula-actions"><button type="button" onClick={addRow} disabled={rows.length>=12}><FiPlus/> Agregar función</button>
             <button type="button" className="math-selection-action" disabled={reading} onClick={()=>void readSelection('graph')}>{reading?'Leyendo…':'Usar selección'}</button></div>
           {graphError&&<p className="math-panel-error" role="alert">{graphError}</p>}
-          <div className="math-graph-preview"><GraphPlot formulas={rows} settings={graphSettings} onSettingsChange={setGraphSettings}
-              onInsertPiecewise={()=>setRows(r=>r.length>=12?r:[...r,newRow(r.length,'{x<0:-x; x>=0:x}')])}/></div>
+          <div className="math-graph-preview"><Suspense fallback={<p role="status">Cargando gráfico…</p>}><GraphPlot formulas={rows} settings={graphSettings} onSettingsChange={setGraphSettings}
+              onInsertPiecewise={()=>setRows(r=>r.length>=12?r:[...r,newRow(r.length,'{x<0:-x; x>=0:x}')])}/></Suspense></div>
           <div className="math-graph-export">
             <button type="button" onClick={insert}>Insertar gráfico</button>
             <button type="button" draggable onDragStart={dragStart} title="Arrastrá este botón y soltalo en la pizarra"><FiMove/> Arrastrar a la pizarra</button>

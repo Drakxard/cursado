@@ -1,4 +1,4 @@
-import { create, all } from 'mathjs'
+import { getMathEngine } from './mathRuntime'
 import type { EvalFunction } from 'mathjs'
 /** Extras persistentes del gráfico: compatibles con pizarras anteriores. */
 export type GraphPoint = { id: string; x: number; y: number }
@@ -22,7 +22,6 @@ export const defaultFeatures: Required<GraphFeatures> = {
 }
 export const defaultParameter = (): GraphParameter => ({ value: 1, min: -10, max: 10, step: 0.1 })
 
-const math = create(all, {})
 const functions = new Set([
   'sin','cos','tan','asin','acos','atan','sinh','cosh','tanh','sqrt','abs','exp','log','ln',
   'floor','ceil','round','min','max','nthRoot','pow','sign','mod','atan2','log10',
@@ -41,7 +40,7 @@ export function normalizeGraphExpression(raw: string): string {
 
 /** Habilita comparaciones y condiciones en expresiones matemáticas, pero no asignaciones ni acceso a propiedades. */
 export function compileGraphExpression(source: string, params: Record<string, GraphParameter> = {}) {
-  const tree = math.parse(source)
+  const tree = getMathEngine().parse(source)
   tree.traverse((node: { type: string; name?: string; fn?: { type?: string; name?: string } }) => {
     if (!accepted.has(node.type)) throw new Error('La expresión contiene una operación no admitida.')
     if (node.type==='SymbolNode' && !constants.has(node.name ?? '') && !functions.has(node.name ?? '') && !(node.name && /^[a-df-w]$/i.test(node.name))) {
@@ -59,7 +58,7 @@ export function parametersInFormulas(formulas: {expr:string}[]): string[] {
   const found = new Set<string>()
   const scan = (text:string) => {
     try {
-      const tree=math.parse(text)
+      const tree=getMathEngine().parse(text)
       tree.traverse((node: {type:string; name?:string}) => {
         if (node.type==='SymbolNode' && node.name && /^[a-df-w]$/i.test(node.name) && !functions.has(node.name)) found.add(node.name)
       })

@@ -22,7 +22,7 @@ test('compact ChatGPT menu stays visible, calendar replaces tables and tables ar
   await openLocal(page)
   await expect(page.getByRole('toolbar').getByRole('button',{name:'Insertar tabla 2×2 editable',exact:true})).toHaveCount(0)
   await page.getByRole('button',{name:'IA: opciones de reconocimiento',exact:true}).click()
-  await expect(page.getByRole('menu',{name:'Reconocimiento con IA'}).getByRole('menuitem')).toHaveCount(2)
+  await expect(page.getByRole('menu',{name:'Reconocimiento con IA'}).getByRole('menuitem')).toHaveCount(3)
   const assistant=page.getByRole('menuitem',{name:/Consultar con ChatGPT/})
   await expect(assistant).toBeInViewport()
   expect(await assistant.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})).toBe(true)
@@ -187,6 +187,8 @@ test('selected cards and decks become editable sticky copies with undo, reload a
 
 test('calculator menu is compact and INV exposes arcsen, arccos and arctan in DEG/RAD',async({page})=>{
   await openLocal(page)
+  const mathLoads=()=>page.evaluate(()=>performance.getEntriesByType('resource').filter(entry=>/\/mathRuntime-/.test(entry.name)).length)
+  expect(await mathLoads()).toBe(0)
   await page.getByRole('button',{name:'Calculadora científica',exact:true}).click()
   await expect(page.locator('.math-screen')).toHaveCount(0)
   await expect(page.locator('.study-menu button')).toHaveCount(5)
@@ -203,6 +205,7 @@ test('calculator menu is compact and INV exposes arcsen, arccos and arctan in DE
     await page.keyboard.type(`${value})`);await page.keyboard.press('Enter')
     await expect(page.locator('.math-screen-meta span').last()).toHaveText(result)
   }
+  expect(await mathLoads()).toBe(1)
   await page.getByRole('button',{name:'DEG',exact:true}).click()
   await input.fill('arc tan(1)');await page.keyboard.press('Enter')
   await expect(page.locator('.math-screen-meta span').last()).toHaveText('0.785398163397')
