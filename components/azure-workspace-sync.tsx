@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { createIdleSync } from "@/lib/client/idle-sync"
 import { getAzureSyncStatus, getAzureWorkspaceCode, restoreMissingAzureFiles, setAzureWorkspaceCode, syncLocalWorkspaceToAzure,
   type AzureSyncStatus, type AzureSyncSummary } from "@/lib/client/azure-workspace-sync"
 
@@ -15,27 +16,43 @@ export function useAzureWorkspaceSync(root: FileSystemDirectoryHandle | null, en
   useEffect(() => {
     if (!enabled || !root) return
     let cancelled = false
-    const run = async () => {
+    const run = async (synchronize = false) => {
       try {
         const current = await getAzureSyncStatus(true)
         if (cancelled) return
         setStatus(current)
-        if (!current.configured) return
+        if (!current.configured) return synchronize ? false : undefined
         setCode(await getAzureWorkspaceCode(root))
-        if (!current.connected) { setError(current.error || "No se pudo conectar Azure."); return }
-        if (!auto) return
+        if (!current.connected) {
+          setError(current.error || "No se pudo conectar Azure.")
+          if (synchronize) throw new Error(current.error || "No se pudo conectar Azure.")
+          return
+        }
+        if (!auto || !synchronize) return
         setBusy(true)
         const result = await syncLocalWorkspaceToAzure(root, value => { if (!cancelled) setSummary(value) })
         if (!cancelled) { setSummary(result); setError("") }
-      } catch (failure) { if (!cancelled) setError(failure instanceof Error ? failure.message : "No se pudo sincronizar Azure.") }
+        if (result.failed) throw new Error(result.errors[0] || "Hay archivos pendientes de sincronización.")
+      } catch (failure) {
+        if (!cancelled) setError(failure instanceof Error ? failure.message : "No se pudo sincronizar Azure.")
+        if (synchronize) throw failure
+      }
       finally { if (!cancelled) setBusy(false) }
     }
+    const scheduler = createIdleSync({
+      storageKey: auto ? 'cursado-azure-pending-sync' : undefined,
+      run: async () => { if (cancelled || !navigator.onLine) return false; return run(true) },
+    })
     void run()
-    const timer = auto ? setInterval(() => { if (document.visibilityState === "visible") void run() }, 45_000) : undefined
-    const online = () => { void run() }
+    if (auto) scheduler.request()
+    const online = () => { if (auto) scheduler.request(); else void run() }
+    const saved = () => { if (auto) scheduler.request() }
+    const channel = new BroadcastChannel('cursado-library-changes')
+    channel.onmessage = saved
+    window.addEventListener("cursado-workspace-saved", saved)
     window.addEventListener("online", online)
     window.addEventListener("cursado-services-changed", online)
-    return () => { cancelled = true; clearInterval(timer); window.removeEventListener("online", online); window.removeEventListener("cursado-services-changed", online) }
+    return () => { cancelled = true; scheduler.stop(); channel.close(); window.removeEventListener("cursado-workspace-saved", saved); window.removeEventListener("online", online); window.removeEventListener("cursado-services-changed", online) }
   }, [root, enabled, auto])
 
   const sync = async () => {

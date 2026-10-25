@@ -1,4 +1,5 @@
 'use client'
+import { createIdleSync } from './idle-sync.ts'
 import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
 import { uploadCooperationFile } from './cooperation-upload.ts'
 import { cooperationRequest } from './cooperation-request.ts'
@@ -110,7 +111,7 @@ export async function refreshCooperation() {
     connectionGeneration++
     confirmedMirrors.clear()
     for (const socket of sockets.values()) socket.close()
-    sockets.clear()
+    sockets.clear(); presences.clear()
     activeRoot = handle
     state = await readJson(handle, `.cooperation/${result.user.id}/state.json`, { version: 1, userId: result.user.id, groups: [], mirrors: {}, deletions: [] } as CooperationState)
     localStorage.setItem('cursado-cooperation-user', result.user.id)
@@ -882,6 +883,7 @@ async function connectMirror(id: string) {
     const { url } = await cooperationApi(directory ? 'notifications/ticket' : `spheres/${id}/ticket`, {})
     if (isUndoPending(id) || (!directory && !state.mirrors[id]) || sockets.has(id) || state.userId !== userId || generation !== connectionGeneration) return
     const socket = new WebSocket(url); sockets.set(id, socket)
+    let initialChange = true
     socket.onopen = () => connectedBackground?.()
     socket.onmessage = event => { try {
       const message = JSON.parse(event.data)
@@ -889,7 +891,13 @@ async function connectMirror(id: string) {
         if (message.type === 'changed' || message.type === 'directory_changed') requestDiscovery?.()
         return
       }
-      if (message.type === 'changed' && (message.seq > (state.mirrors[id]?.baseline.seq ?? -1) || !confirmedMirrors.has(id))) { invalidateSyncStatus(); synchronizeInBackground() }
+      if (message.type === 'changed') {
+        // The server sends its current sequence on every connection. An equal
+        // sequence is not a remote edit and must not trigger a full file scan.
+        const changed = message.seq > (state.mirrors[id]?.baseline.seq ?? -1) || (!initialChange && !confirmedMirrors.has(id))
+        initialChange = false
+        if (changed) { invalidateSyncStatus(); synchronizeInBackground() }
+      }
       if (message.type === 'presence') { presences.set(id, message); window.dispatchEvent(new CustomEvent('cursado-cooperation-presence', { detail: { sphereId: id, ...message } })) }
       if (message.type === 'editor') window.dispatchEvent(new CustomEvent('cursado-cooperation-editor', { detail: { sphereId: id, ...message } }))
     } catch {} }
@@ -1032,7 +1040,19 @@ export function startCooperationBackground() {
   const release = () => { if (released) return; released = true; if (--backgroundUsers === 0) { stopBackground?.(); stopBackground = null } }
   if (stopBackground) return release
   let stopped = false, busy = false, refreshAgain = false, attempts = 0
-  let timer: ReturnType<typeof setTimeout> | undefined, retry: ReturnType<typeof setTimeout> | undefined
+  let retry: ReturnType<typeof setTimeout> | undefined
+  const scheduler = createIdleSync({
+    storageKey: 'cursado-cooperation-pending-sync',
+    run: async () => {
+      if (stopped || !state.userId || navigator.onLine === false) return false
+      await synchronizeCooperation()
+      const failed = Object.values(state.mirrors).find(mirror => mirror.error)
+      if (failed) throw new Error(failed.error)
+    },
+    isLive: () => [...presences.values()].some(presence => presence.users.some(user => user.id !== state.userId)),
+    onError: error => { state.error = error instanceof Error ? error.message : String(error); cooperationChanged() },
+  })
+  const presenceChanged = () => scheduler.refresh()
   const scheduleRetry = () => {
     if (stopped || retry || !state.userId || navigator.onLine === false) return
     retry = setTimeout(() => { retry = undefined; void refresh() }, Math.min(30_000, 1000 * 2 ** Math.min(attempts++, 5)))
@@ -1045,7 +1065,13 @@ export function startCooperationBackground() {
       do {
         refreshAgain = false
         await refreshCooperation()
-        if (!stopped) { void connectMirror('@directory'); synchronizeInBackground() }
+        if (!stopped) {
+          void connectMirror('@directory')
+          // Presence must connect before scanning files, so a peer joining can
+          // immediately switch pending local changes to live synchronization.
+          for (const mirror of Object.values(state.mirrors)) void connectMirror(mirror.binding.id)
+          scheduler.request()
+        }
       } while (refreshAgain && !stopped)
     }
     catch (error) {
@@ -1054,7 +1080,7 @@ export function startCooperationBackground() {
     }
     finally { busy = false }
   }
-  const saved = () => { invalidateSyncStatus(); clearTimeout(timer); timer = setTimeout(() => { if (!stopped) synchronizeInBackground() }, 250) }
+  const saved = () => { invalidateSyncStatus(); scheduler.request() }
   requestDiscovery = () => { void refresh() }
   retryBackground = scheduleRetry
   connectedBackground = () => { attempts = 0 }
@@ -1069,16 +1095,18 @@ export function startCooperationBackground() {
   window.addEventListener('online', refresh); window.addEventListener('focus', refresh); window.addEventListener('cursado-workspace-saved', saved)
   window.addEventListener('offline', invalidateSyncStatus)
   window.addEventListener('cursado-cooperation-changed', sessionChanged)
+  window.addEventListener('cursado-cooperation-presence', presenceChanged)
   if (navigator.onLine === false) void restoreCooperationOffline().catch(() => {})
   else void refresh()
   stopBackground = () => {
-    stopped = true; clearTimeout(timer); clearTimeout(retry); channel.close()
+    stopped = true; scheduler.stop(); clearTimeout(retry); channel.close()
     connectionGeneration++
     requestDiscovery = null; retryBackground = null; connectedBackground = null
-    const activeSockets = [...sockets.values()]; sockets.clear()
+    const activeSockets = [...sockets.values()]; sockets.clear(); presences.clear()
     for (const socket of activeSockets) socket.close()
     window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); window.removeEventListener('cursado-workspace-saved', saved); window.removeEventListener('offline', invalidateSyncStatus)
     window.removeEventListener('cursado-cooperation-changed', sessionChanged)
+    window.removeEventListener('cursado-cooperation-presence', presenceChanged)
   }
   return release
 }

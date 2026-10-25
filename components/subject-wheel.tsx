@@ -2634,11 +2634,18 @@ export function SubjectWheel({
 
 
   useEffect(() => {
+    // This clock only selects the calendar week. Avoid rendering the entire
+    // study workspace every second while the home screen is idle.
+    const updateWeek = () => setNow(current => {
+      const next = new Date()
+      return getCurrentWeekNumber(current) === getCurrentWeekNumber(next) ? current : next
+    })
     const intervalId = window.setInterval(() => {
-      setNow(new Date())
-    }, 1000)
+      updateWeek()
+    }, 60_000)
+    window.addEventListener("focus", updateWeek)
 
-    return () => window.clearInterval(intervalId)
+    return () => { window.clearInterval(intervalId); window.removeEventListener("focus", updateWeek) }
   }, [])
 
   useEffect(() => {

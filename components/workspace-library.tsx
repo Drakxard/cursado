@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import { createIdleSync } from '@/lib/client/idle-sync'
 import QRCode from 'qrcode'
 import { Share2, X, RefreshCw, QrCode, FolderOpen } from 'lucide-react'
 import { R2SetupGuide } from '@/components/r2-setup-guide'
@@ -10,20 +11,21 @@ import { getReadyInscreenConfigToken, loadServicesFile, loadWorkspaceHandle, per
 
 export function WorkspaceLibraryPublisher() {
   useEffect(() => {
-    let disposed = false, timer: ReturnType<typeof setTimeout> | undefined
-    const sync = () => {
-      if (disposed || !navigator.onLine) return
-      void libraryRoot().then(async root => { if ((await readLibraryState(root))?.enabled) await publishLibrary(root) }).catch(() => {})
+    let disposed = false
+    const sync = async () => {
+      if (disposed || !navigator.onLine) return false
+      const root = await libraryRoot()
+      if (!disposed && (await readLibraryState(root))?.enabled) await publishLibrary(root)
     }
-    const saved = () => { clearTimeout(timer); timer = setTimeout(sync, 2000) }
+    const scheduler = createIdleSync({ run: sync, storageKey: 'cursado-library-pending-sync' })
+    const saved = () => scheduler.request()
     const channel = new BroadcastChannel('cursado-library-changes')
     channel.onmessage = saved
     window.addEventListener('cursado-workspace-saved', saved)
-    window.addEventListener('online', sync)
-    window.addEventListener('cursado-services-changed', sync)
-    const interval = setInterval(sync, 45000)
-    sync()
-    return () => { disposed = true; clearTimeout(timer); clearInterval(interval); channel.close(); window.removeEventListener('cursado-workspace-saved', saved); window.removeEventListener('online', sync); window.removeEventListener('cursado-services-changed', sync) }
+    window.addEventListener('online', saved)
+    window.addEventListener('cursado-services-changed', saved)
+    saved()
+    return () => { disposed = true; scheduler.stop(); channel.close(); window.removeEventListener('cursado-workspace-saved', saved); window.removeEventListener('online', saved); window.removeEventListener('cursado-services-changed', saved) }
   }, [])
   return null
 }
