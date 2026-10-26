@@ -1299,7 +1299,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   }
 
   function currentBoardView(){const rect=canvasRef.current?.getBoundingClientRect(),cam=cameraRef.current;return {center:{x:((rect?.width??innerWidth)/2-cam.x)/cam.zoom,y:((rect?.height??innerHeight)/2-cam.y)/cam.zoom},zoom:cam.zoom}}
-  async function followBoardLink(id:string,back=false){try{await navigateBoardLink(id,currentBoardView(),back)}catch(error){setLibraryError(error instanceof Error?error.message:String(error))}}
+  async function followBoardLink(id:string,back=false,reference?:ShapeItem['boardReference']){try{await navigateBoardLink(id,currentBoardView(),back,reference)}catch(error){setLibraryError(error instanceof Error?error.message:String(error))}}
   useEffect(()=>{
     const back=(event:Event)=>{const detail=(event as CustomEvent<{resolve:()=>void;reject:(error:unknown)=>void}>).detail;void navigateBoardLink('',currentBoardView(),true).then(()=>detail?.resolve()).catch(error=>{setLibraryError(String(error));detail?.reject(error)})}
     window.addEventListener('board-link:back',back)
@@ -3416,7 +3416,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       pdfPointer.current=null
       if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId)
       if(pdf.moved)scheduleSave()
-      else if(pdf.transform.group.length===1){const shape=shapesRef.current.find(shape=>shape.id===pdf.id),reference=shape?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:pdf.id};materialLibrary.openReader(reference,!!shape?.pdfPinned)}else if(shape?.importantTaskId)materialLibrary.openCalendar(shape.importantTaskId);else if(shape?.boardReference)void followBoardLink(shape.boardReference.boardId)}
+      else if(pdf.transform.group.length===1){const shape=shapesRef.current.find(shape=>shape.id===pdf.id),reference=shape?.pdfReference;if(reference){lastPinnedPdfRef.current={boardId:getActiveBoardId(),id:pdf.id};materialLibrary.openReader(reference,!!shape?.pdfPinned)}else if(shape?.importantTaskId)materialLibrary.openCalendar(shape.importantTaskId);else if(shape?.boardReference)void followBoardLink(shape.boardReference.boardId,false,shape.boardReference)}
       return
     }
     if(cartesianDragRef.current&&e.pointerId===pointerRef.current){moveCartesianResize(toWorld(e.clientX,e.clientY));finishCartesianResize();return}

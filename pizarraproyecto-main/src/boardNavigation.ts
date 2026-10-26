@@ -1,7 +1,9 @@
 import {flushNavigationSaves} from './homeNavigation'
-import {getActiveBoardId,getLibrary,selectBoard,loadBoard} from './biblioteca'
+import {getActiveBoardId,getLibrary,selectBoard,loadBoard,connectBoardSession} from './biblioteca'
 import {topicNavigationContext,restoreTopicNavigationContext,suspendTopicNavigation,initializeTopicWorkspace,notifyTopicContext} from './topicWorkspace'
 import {workspaceRoot} from './canvas/countdowns'
+import {readDeviceBoard} from './storage/device'
+import type {BoardLinkReference} from '../../lib/board-library-contract'
 import {readImportantTasks} from '../../lib/important-tasks'
 type View={center:{x:number;y:number};zoom:number}
 type Entry={id:string;view:View;topic:ReturnType<typeof topicNavigationContext>}
@@ -10,7 +12,7 @@ let pendingView:View|null=null,busy=false
 export const hasBoardReturn=()=>history.length>0
 export const isBoardNavigating=()=>busy
 export function consumeBoardView(){const view=pendingView;pendingView=null;return view}
-export async function navigateBoardLink(id:string,view:View,back=false){
+export async function navigateBoardLink(id:string,view:View,back=false,reference?:BoardLinkReference){
   if(busy)return
   busy=true
   window.dispatchEvent(new CustomEvent('board-link:busy',{detail:true}))
@@ -36,11 +38,13 @@ export async function navigateBoardLink(id:string,view:View,back=false){
         snapshot=JSON.parse(await(await(await directory.getFileHandle(`${taskId}.json`)).getFile()).text())
         if(snapshot?.boardId!==taskId)throw new Error('El archivo de la pizarra de destino no es válido.')
       }catch(error){if((error as Error).name!=='NotFoundError')throw error}
-      if(!task&&!snapshot)throw new Error('La pizarra de destino fue eliminada o no está descargada en esta carpeta.')
+      const cached = await readDeviceBoard(target)
+      if(!task&&!snapshot&&!cached&&!reference?.topic)throw new Error('La pizarra de destino fue eliminada o no está descargada en esta carpeta.')
       if(entry?.topic.workspace)restoreTopicNavigationContext(entry.topic)
-      else await initializeTopicWorkspace({boardId:taskId,name:snapshot?.name??task!.topics[task!.topicBoardIds!.indexOf(taskId)],rootHandle:root,
-        cooperationSubjectId:snapshot?.cooperationSubjectId??(task?.cooperation?`important-share:${task.cooperation.shareId}`:undefined),cooperationWeekNumber:snapshot?.cooperationWeekNumber},true)
+      else await initializeTopicWorkspace({boardId:taskId,name:snapshot?.name??cached?.name??reference?.name??task!.topics[task!.topicBoardIds!.indexOf(taskId)],rootHandle:root,pdfReferences:reference?.topic?.pdfReferences,
+        cooperationSubjectId:snapshot?.cooperationSubjectId??reference?.topic?.cooperationSubjectId??(task?.cooperation?`important-share:${task.cooperation.shareId}`:undefined),cooperationWeekNumber:snapshot?.cooperationWeekNumber??reference?.topic?.cooperationWeekNumber},true)
     }else{
+      await connectBoardSession(target)
       const library=await getLibrary()
       if(!library.boards.some(board=>board.id===target))throw new Error('La pizarra de destino fue eliminada.')
       suspendTopicNavigation()

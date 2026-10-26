@@ -553,7 +553,7 @@ function getMainWorkspaceTab(): WorkspaceTab {
 function createEmptyWorkspaceTabsState(): WorkspaceTabsState {
   return {
     workspaceTabs: {},
-    activeWorkspaceTabId: MAIN_WORKSPACE_TAB_ID,
+    activeWorkspaceTabId: LOCAL_STORAGE_MODE ? COOPERATIVE_TAB_ID : MAIN_WORKSPACE_TAB_ID,
     customSubjects: {},
     subjectWeekdays: { ...HOME_SUBJECT_WEEKDAY } as Record<string, number>,
     isMainWorkspaceTabVisible: !LOCAL_STORAGE_MODE,
@@ -659,7 +659,7 @@ function normalizeWorkspaceTabsState(input: Partial<WorkspaceTabsState> | null |
       ? activeCandidate
       : isMainWorkspaceTabVisible
         ? MAIN_WORKSPACE_TAB_ID
-        : firstWorkspaceTabId ?? MAIN_WORKSPACE_TAB_ID,
+        : firstWorkspaceTabId ?? COOPERATIVE_TAB_ID,
     customSubjects,
     subjectWeekdays,
     isMainWorkspaceTabVisible,
@@ -1263,7 +1263,7 @@ function buildSynthesisSubjectSummary(subjectId: string, weekNumber: number, sta
   }
 }
 
-function ContainerBoardDragIcon({subjectId, boardKey, name}: {subjectId:string;boardKey:string;name:string}) {
+function ContainerBoardDragIcon({subjectId, boardKey, name, pdfReferences, cooperationWeekNumber}: {subjectId:string;boardKey:string;name:string;pdfReferences:BoardPdfReference[];cooperationWeekNumber?:number}) {
   const [boardId,setBoardId]=useState('')
   const dragged=useRef(0)
   useEffect(()=>{
@@ -1277,7 +1277,7 @@ function ContainerBoardDragIcon({subjectId, boardKey, name}: {subjectId:string;b
   return <span draggable={Boolean(boardId)&&!isNativeReadOnly()} title="Arrastrar acceso a esta pizarra"
     onPointerDown={event=>event.stopPropagation()}
     onClick={event=>{if(Date.now()-dragged.current<500){event.preventDefault();event.stopPropagation()}}}
-    onDragStart={event=>{dragged.current=Date.now();event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-cursado-board-link',JSON.stringify({boardId:`local:important-${boardId}`,name}))}}
+    onDragStart={event=>{dragged.current=Date.now();event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-cursado-board-link',JSON.stringify({boardId:`local:important-${boardId}`,name,topic:{cooperationSubjectId:subjectId,cooperationWeekNumber,pdfReferences}}))}}
     onDragEnd={()=>{dragged.current=Date.now()}}><img draggable={false} src="/pizarra-home.svg" alt="" className="h-7 w-7 object-contain" /></span>
 }
 
@@ -7039,7 +7039,7 @@ export function SubjectWheel({
                       .map(material => ({ materialId: material.id, subjectId: material.subject_id, fileName: material.file_name,
                         workspaceFileId: material.drive_file_id?.startsWith("workspace://") ? material.drive_file_id : null })) }), `progreso/pizarras/${boardId}.json`)
                   })
-                }}><ContainerBoardDragIcon subjectId={currentSubject.id} name={`${currentSubject.name} - ${title}`} boardKey={JSON.stringify([canonicalCooperationSubject(currentSubject.id),canonicalCooperationElement(currentSubject.id,container?.id??mode),container?.isPinned?'pinned':isWeeklyExercisesScope?dialogSelectedWeekNumber:subjectDialogDateKey])} /></button>}
+                }}><ContainerBoardDragIcon pdfReferences={materialsForMode.filter(material => !("is_pending_upload" in material) && /\.pdf$/i.test(material.file_name)).map(material => ({materialId:material.id,subjectId:material.subject_id,fileName:material.file_name,workspaceFileId:material.drive_file_id?.startsWith("workspace://") ? material.drive_file_id : null}))} cooperationWeekNumber={container?.isPinned ? undefined : dialogSelectedWeekNumber} subjectId={currentSubject.id} name={`${currentSubject.name} - ${title}`} boardKey={JSON.stringify([canonicalCooperationSubject(currentSubject.id),canonicalCooperationElement(currentSubject.id,container?.id??mode),container?.isPinned?'pinned':isWeeklyExercisesScope?dialogSelectedWeekNumber:subjectDialogDateKey])} /></button>}
             {container?.kind === "custom" && activeContainerControlsId === container.id && editingContainerId !== container.id ? (
               <div className="flex shrink-0 items-center gap-0.5" aria-label={`Opciones de ${container.name}`}>
                 <Button data-workspace-write={isNativeReadOnly() || undefined} type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-full text-muted-foreground"
@@ -7975,7 +7975,7 @@ export function SubjectWheel({
           <DialogHeader>
             <DialogTitle>{deleteConfirmationTarget?.type === "tab" ? "Eliminar pestaña" : "Opciones de materia"}</DialogTitle>
             <DialogDescription>
-              {deleteConfirmationTarget?.type === 'tab' ? 'Se elimina la pestaña y se conservan sus materias y archivos. Las materias propias pasan a Inicio; si quitás Inicio, pasan a Mis materias.' : isPreparingPermanentDelete
+              {deleteConfirmationTarget?.type === 'tab' ? 'Se elimina la pestaña y se conservan sus materias y archivos. Las materias propias pasan a una pestaña normal llamada Mis materias.' : isPreparingPermanentDelete
                 ? `Revisando ${deleteConfirmationTarget?.label ?? ""}...`
                 : `${deleteConfirmationTarget?.label ?? ""}: ${deleteSummaries.reduce((total, summary) => total + summary.fileCount, 0)} archivos y ${deleteSummaries.reduce((total, summary) => total + summary.materialCount, 0)} materiales locales.`}
             </DialogDescription>

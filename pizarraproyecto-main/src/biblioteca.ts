@@ -75,6 +75,18 @@ function rememberCommitted(id:string,version:number,content:BoardContentWithExtr
 export function getCommittedBoardContent() {
   return committed?.key===cacheKey(activeId)?structuredClone(committed.content):null
 }
+// Embedded topic boards start without AnonymousGate. Resolve their account only
+// when following a server board, using the same authenticated API as the library.
+export async function connectBoardSession(id: string) {
+  if (isPrivate(id) || nativeBoardMode() || isLinkGuest() || remoteEnabled) return
+  try {
+    const profile = await request<{id: string}>('/api/auth/me')
+    setStorageSession(profile.id)
+  } catch (error) {
+    if (error instanceof HttpError && [401,403].includes(error.status)) throw new Error('Ingres? con la cuenta que tiene acceso a esta pizarra compartida.')
+    if (!(error instanceof Unavailable) || !account) throw error
+  }
+}
 export async function getLibrary() {
   if (nativeBoardMode()) return nativeBoardLibrary()
   if (isLinkGuest()) return guestLibrary()

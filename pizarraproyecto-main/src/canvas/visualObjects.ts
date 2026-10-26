@@ -1,6 +1,6 @@
 import type { Point } from '../storage/database'
 import { matrixLabel } from '../study/matrices'
-import type { BoardPdfReference } from '../../../lib/board-library-contract'
+import type { BoardPdfReference, BoardLinkReference } from '../../../lib/board-library-contract'
 
 export type Bounds = { x:number; y:number; width:number; height:number }
 export type ShapeKind = 'line'|'arrow'|'double-arrow'|'rectangle'|'rounded'|'ellipse'|'circle'|'diamond'|'triangle'|'triangle-down'|'cylinder'|'hexagon'
@@ -30,7 +30,7 @@ export type ShapeItem = Bounds & {
   pdfReference?: BoardPdfReference;
   pdfPinned?: boolean;
   importantTaskId?:string;
-  boardReference?:{boardId:string;name:string};
+  boardReference?:BoardLinkReference;
   sharedUnavailable?:boolean;
   reviewView?: {center:{x:number;y:number};zoom:number};
   note?:NoteData;connector?:Connector;symbol?:AcademicSymbol;label?:string;labelFontSize?:number;matrix?:string[][]

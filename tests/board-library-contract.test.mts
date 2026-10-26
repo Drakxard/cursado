@@ -21,3 +21,11 @@ test('linked elements reject incomplete drag payloads and carry stable identifie
   for(const value of ['null','{}','{"taskId":""}','bad','{"taskId":3}'])assert.equal(parseImportantDrag(value),null)
   for(const value of ['null','{}','{"boardId":""}','bad','{"boardId":3,"name":"x"}'])assert.equal(parseBoardLinkDrag(value),null)
 })
+
+test('unopened topic drags retain initialization context and reject malformed context', () => {
+  const link = {boardId:'local:important-study-new',name:'Theory',topic:{cooperationSubjectId:'subject',cooperationWeekNumber:2,pdfReferences:[reference]}}
+  assert.deepEqual(parseBoardLinkDrag(JSON.stringify(link)),link)
+  for (const topic of [null, {cooperationSubjectId:3}, {cooperationWeekNumber:-1}, {pdfReferences:[{materialId:1}]}]) assert.equal(parseBoardLinkDrag(JSON.stringify({...link,topic})),null)
+  assert.equal(parseBoardLinkDrag(JSON.stringify({...link,boardId:'local:important-../escape'})),null)
+  assert.equal(parseBoardLinkDrag(JSON.stringify({...link,boardId:'server-board'})),null)
+})

@@ -14,11 +14,15 @@
   parte de la edición conjunta. La cámara permanece personal.
 - Un acceso arrastrado apunta al ID local de la pizarra. También se reconocen
   los accesos históricos `study-*`, incluidos los de teoría y práctica que no
-  aparecen en Importantes. Se valida el respaldo antes de abrirlo.
+  aparecen en Importantes. Los nuevos arrastres conservan materia, semana y PDFs
+  para abrir también pizarras sin respaldo previo. Si falta el respaldo se usa
+  la copia existente del dispositivo. Los accesos a compartidas del servidor
+  recuperan la sesión autenticada desde el editor incrustado.
 - Inicio aparece únicamente cuando contiene materias. Eliminar una pestaña
-  conserva sus materias y archivos: sus materias propias pasan a Inicio; al
-  eliminar Inicio pasan a una pestaña normal llamada Mis materias. Las referencias
-  en otras pestañas permanecen.
+  conserva sus materias y archivos: sus materias propias pasan a una pestaña
+  normal llamada Mis materias. No se vuelve a generar Inicio. Las referencias
+  en otras pestañas permanecen. Al quitar la última pestaña vacía quedan
+  Cooperativo y el botón para agregar otra.
 
 ## Transferencias y permisos
 
@@ -67,6 +71,8 @@ las ventanas emergentes se ajustan al espacio disponible.
 - `tests/study-workspace-tabs.test.mts`: Inicio vacío/poblado y eliminación de
   pestañas sin perder materias ni referencias.
 - `tests/board-context-tools.browser.mjs`: Chrome con la pizarra de producción;
-  acceso histórico de teoría, texto interior, relleno, negrita, portapapeles externo
+  acceso histórico de teoría, arrastre real de una pizarra sin abrir, recuperación
+  de una copia del dispositivo, acceso autenticado a compartidas desde el editor
+  incrustado, texto interior, relleno, negrita, portapapeles externo
   después de copiar un objeto propio, SVG editable, regreso y cierre con guardado.
 - Pruebas existentes de Importantes, panel cooperativo, permisos y guardado local.
