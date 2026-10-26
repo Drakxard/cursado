@@ -13,7 +13,7 @@ import { BOARD_PDF_MIME, BOARD_IMPORTANT_MIME, BOARD_LINK_MIME, parseImportantDr
 import { useBoardLibrary } from './BoardLibraryPanels'
 import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace, receiveTopicWorkspace, sendTopicLive } from './topicWorkspace'
 import { mergeBoard } from './storage/merge'
-import { sameBoardScene } from './storage/sceneContent'
+import { sameBoardScene, reconcileRemoteScene, rebaseRemoteHistory } from './storage/sceneContent'
 import { applyScenePatch } from './storage/livePatch'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { LuHand, LuStickyNote, LuWorkflow, LuBookOpen, LuCalendarDays } from 'react-icons/lu'
@@ -904,6 +904,10 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const liveSocketRef = useRef<WebSocket | null>(null)
   const remoteStrokesRef = useRef<Map<string, RemoteLiveStroke>>(new Map())
   const remoteCursorsRef = useRef<Map<string, LiveCursor>>(new Map())
+  const remotePaintFrameRef = useRef<number | null>(null)
+  const latestRedrawRef = useRef(redraw)
+  latestRedrawRef.current = redraw
+  useEffect(() => () => { if (remotePaintFrameRef.current !== null) cancelAnimationFrame(remotePaintFrameRef.current) }, [])
   const lastCursorSentRef = useRef(0)
   const liveStrokeProgressRef = useRef<{id:string;sent:number;lastSent:number}|null>(null)
 
@@ -1594,21 +1598,12 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     }
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
-    const foreground = foregroundCanvasRef.current
-    const foregroundCtx = foreground?.getContext('2d')
     if (!canvas || !ctx) return
     const dpr = window.devicePixelRatio || 1
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     const cam = cameraRef.current
-    if (foreground && foregroundCtx) {
-      foregroundCtx.setTransform(1, 0, 0, 1, 0, 0)
-      foregroundCtx.clearRect(0, 0, foreground.width, foreground.height)
-      foregroundCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      foregroundCtx.translate(cam.x, cam.y)
-      foregroundCtx.scale(cam.zoom, cam.zoom)
-    }
 
     // Cuadrícula de puntos estilo FigJam/Figma, anclada al mundo de la pizarra.
     // Se desplaza con la cámara y se adapta al zoom sin tapar los trazos.
@@ -1711,9 +1706,20 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     for(const [band,layer] of contentCanvasesRef.current)if(!surfaces.has(band)){
       layer.width=layer.height=0;layer.remove();contentCanvasesRef.current.delete(band)
     }
+    redrawOverlay()
+  }
+
+  function redrawOverlay() {
+    const uiCtx=foregroundCanvasRef.current?.getContext('2d')
+    if (!uiCtx) return
+    const cam=cameraRef.current,dpr=window.devicePixelRatio||1
+    uiCtx.setTransform(1,0,0,1,0,0)
+    uiCtx.clearRect(0,0,uiCtx.canvas.width,uiCtx.canvas.height)
+    uiCtx.setTransform(dpr,0,0,dpr,0,0)
+    uiCtx.translate(cam.x,cam.y)
+    uiCtx.scale(cam.zoom,cam.zoom)
     // Los avances del lápiz y los marcadores de selección no son contenido
     // persistido y deben estar visibles sobre los objetos interactivos.
-    const uiCtx = foregroundCtx ?? ctx
     for (const remote of remoteStrokesRef.current.values()) {
       if (remote.stroke.points.length) drawStroke(uiCtx, remote.stroke)
     }
@@ -1767,6 +1773,12 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       uiCtx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
       uiCtx.setLineDash([])
     }
+    redrawCursors()
+  }
+
+  function redrawCursors() {
+    const cam=cameraRef.current,dpr=window.devicePixelRatio||1
+    const viewWidth=(canvasRef.current?.width||0)/dpr,viewHeight=(canvasRef.current?.height||0)/dpr
     // Los cursores remotos se dibujan en píxeles de pantalla pero se reciben
     // como coordenadas del mundo: no se desalinean con zooms distintos.
     const cursorCtx = cursorCanvasRef.current?.getContext('2d')
@@ -1982,6 +1994,41 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     }
   }
 
+  function applyRemoteScene(incoming: Partial<Snapshot>) {
+    const before: Snapshot = {strokes:strokesRef.current,texts:textsRef.current,media:mediaRef.current,
+      shapes:shapesRef.current,tables:tablesRef.current,graphs:graphsRef.current,videos:videosRef.current}
+    const next = reconcileRemoteScene(before, incoming)
+    if (sameBoardScene(before, next)) return false
+    undoRef.current = rebaseRemoteHistory(undoRef.current, before, next)
+    redoRef.current = rebaseRemoteHistory(redoRef.current, before, next)
+    const remapSelection = (selected: Selection): Selection | null => {
+      if (selected.kind === 'stroke') {
+        const id = before.strokes[Number(selected.id)]?.id
+        const index = id ? next.strokes.findIndex(item => item.id === id) : next.strokes.indexOf(before.strokes[Number(selected.id)])
+        return index < 0 ? null : index === selected.id ? selected : {...selected,id:index}
+      }
+      const list = next[`${selected.kind === 'media' ? 'media' : selected.kind + 's'}` as keyof Snapshot]
+      return list?.some(item => 'id' in item && item.id === selected.id) ? selected : null
+    }
+    groupRef.current = groupRef.current.map(remapSelection).filter((item): item is Selection => item !== null)
+    if (selectedRef.current) {
+      selectedRef.current = remapSelection(selectedRef.current)
+      setSelection(selectedRef.current)
+    }
+    strokesRef.current=next.strokes;textsRef.current=next.texts;mediaRef.current=next.media
+    shapesRef.current=next.shapes;tablesRef.current=next.tables;graphsRef.current=next.graphs;videosRef.current=next.videos
+    if (next.graphs !== before.graphs) setGraphs(next.graphs)
+    if (next.videos !== before.videos) setVideos(next.videos)
+    if (next.tables !== before.tables) refreshTables(n=>n+1)
+    if (next.media !== before.media) hydrateMedia(next.media)
+    setBoardSearchRevision(n=>n+1)
+    if (remotePaintFrameRef.current === null) remotePaintFrameRef.current = requestAnimationFrame(() => {
+      remotePaintFrameRef.current = null
+      latestRedrawRef.current()
+    })
+    return true
+  }
+
   function rememberChange() {
     finishPendingPen()
     undoRef.current.push(snapshot())
@@ -2043,11 +2090,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         if (merged === local) return
         // If drawing began during disk I/O, retry against the current draft.
         if (revision !== editRevisionRef.current || dirtyRef.current || savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
-        strokesRef.current = merged.strokes; textsRef.current = merged.texts; mediaRef.current = merged.media
-        shapesRef.current = (merged.shapes || []) as ShapeItem[]; tablesRef.current = (merged.tables || []) as SheetItem[]
-        graphsRef.current = (merged.graphs || []) as BoardGraphItem[]; videosRef.current = (merged.videos || []) as YouTubeItem[]
-        setGraphs([...graphsRef.current]); setVideos([...videosRef.current]); refreshTables(n => n + 1)
-        redraw(); hydrateMedia(mediaRef.current)
+        applyRemoteScene(merged as Snapshot)
         for (const [key, remote] of remoteStrokesRef.current) if (remote.done) remoteStrokesRef.current.delete(key)
         if(JSON.stringify(merged)!==JSON.stringify(local)&&await linkBinding(getActiveBoardId()))scheduleSave()
       } catch (error) { console.warn('No se pudo actualizar la pizarra cooperativa:', error) }
@@ -2081,7 +2124,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         if (msg.type === 'stroke_end' && remote) { remote.done = true; remote.updated = Date.now() }
         if (msg.type === 'stroke_cancel') remoteStrokesRef.current.delete(key)
       }
-      redraw()
+      if (['presence','cursor_move','cursor_hide'].includes(msg.type)) redrawCursors()
+      else redrawOverlay()
     }
     window.addEventListener('message', receive)
     return () => { stopped = true; clearTimeout(timer); window.removeEventListener('message', receive) }
@@ -2116,16 +2160,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           shapes:shapesRef.current,tables:tablesRef.current,graphs:graphsRef.current,
           videos:videosRef.current,camera:cameraRef.current,
         }, result.merged)
-        strokesRef.current=merged.strokes
-        textsRef.current=merged.texts
-        mediaRef.current=merged.media
-        shapesRef.current=merged.shapes as ShapeItem[]
-        tablesRef.current=merged.tables as SheetItem[]
-        graphsRef.current=merged.graphs as BoardGraphItem[]
-        videosRef.current=merged.videos as YouTubeItem[]
-        setVideos([...videosRef.current]);setGraphs([...graphsRef.current]);refreshTables(n=>n+1)
+        applyRemoteScene(merged as Snapshot)
         for(const [key,remote] of remoteStrokesRef.current) if(remote.done) remoteStrokesRef.current.delete(key)
-        redraw();hydrateMedia(mediaRef.current)
       }
       setSaveStatus(dirtyRef.current ? 'pending' : result.pending ? 'local' : 'saved')
     } catch (error) {
@@ -2339,12 +2375,9 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           if(stopped)return
           const merged=mergeBoard(before,{...snapshot(),camera:cameraRef.current},content)
           if (sameBoardScene(snapshot(), merged)) { await saveTopicWorkspace(); return }
-          strokesRef.current=merged.strokes;textsRef.current=merged.texts;mediaRef.current=merged.media
-          shapesRef.current=(merged.shapes||[]) as ShapeItem[];tablesRef.current=(merged.tables||[]) as SheetItem[]
-          graphsRef.current=(merged.graphs||[]) as BoardGraphItem[];videosRef.current=(merged.videos||[]) as YouTubeItem[]
-          setGraphs([...graphsRef.current]);setVideos([...videosRef.current]);refreshTables(n=>n+1)
+          applyRemoteScene(merged as Snapshot)
           await saveTopicWorkspace()
-          redraw();hydrateMedia(mediaRef.current);setLinkError('')
+          setLinkError('')
         }finally{savingRef.current=false;if(dirtyRef.current)scheduleSave()}
       }catch(error){setLinkError(error instanceof Error?error.message:String(error))}finally{busy=false}
     }
@@ -2401,25 +2434,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           await acceptBoardLiveVersion(boardId, snapshot.version, snapshot.content)
           return
         }
-        strokesRef.current = content.strokes ?? []
-        textsRef.current = content.texts ?? []
-        mediaRef.current = content.media ?? []
-        shapesRef.current = (content.shapes as ShapeItem[] | undefined) ?? []
-        tablesRef.current = (content.tables as SheetItem[] | undefined) ?? []
-        graphsRef.current = (content.graphs as BoardGraphItem[] | undefined) ?? []
-        videosRef.current = (content.videos ?? (content.camera as Camera & {youtubeVideos?:YouTubeItem[]})?.youtubeVideos ?? []) as YouTubeItem[]
-        setVideos([...videosRef.current])
-        // No modificar cameraRef.current: cada pantalla puede navegar libremente.
-        setGraphs([...graphsRef.current])
-        refreshTables(n => n + 1)
-        imageCacheRef.current!.retry()
-        redraw()
-        hydrateMedia(mediaRef.current)
-        undoRef.current = []
-        redoRef.current = []
-        // An open inspector is a local draft, not a reason to freeze incoming
-        // objects. Preserve it and its selection until the user applies it.
-        if (!editingRef.current && !visualEditorRef.current && !tableEditorBusyRef.current) selectElement(null)
+        applyRemoteScene({...content, videos:content.videos ?? (content.camera as Camera & {youtubeVideos?:YouTubeItem[]})?.youtubeVideos ?? []} as Snapshot)
         // Commit the version before asynchronous asset downloads. The user can
         // start editing while those downloads run; never mark an older scene
         // with a newer version or overwrite their new draft.
@@ -2427,9 +2442,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         // Los trazos terminados ya estan en SQLite; los activos siguen como vista previa.
         for (const [key, remote] of remoteStrokesRef.current)
           if (remote.done) remoteStrokesRef.current.delete(key)
+        redrawOverlay()
         setSaveStatus('saved')
-        redraw()
-        hydrateMedia(mediaRef.current)
     }
 
     async function applyLatest() {
@@ -2527,7 +2541,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
               for(const user of msg.users) if(user.view) viewsRef.current.set(user.id,user.view)
               if(followRef.current && !present.has(followRef.current)) stopFollowing()
               if(followRef.current)followView(followRef.current)
-              redraw()
+              redrawCursors()
             } else if (msg.type === 'camera_move' && msg.user_id && msg.center && typeof msg.zoom==='number') {
               viewsRef.current.set(msg.user_id,{center:msg.center,zoom:msg.zoom,viewport:msg.viewport,following:msg.following})
               if(followRef.current===msg.user_id) followView(msg.user_id)
@@ -2551,10 +2565,10 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
                 color:msg.color||'#6366f1',emoji:msg.emoji||'🙂',
                 point:msg.point,updated:Date.now()
               }, liveSelfRef.current)
-              redraw()
+              redrawCursors()
             } else if (msg.type === 'cursor_hide' && msg.client_id) {
               remoteCursorsRef.current.delete(msg.client_id)
-              redraw()
+              redrawCursors()
             } else if (msg.client_id && msg.stroke_id) {
               const key = `${msg.client_id}:${msg.stroke_id}`
               if (msg.type === 'stroke_start' && msg.point && msg.color && msg.width) {
@@ -2571,7 +2585,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
               } else if (msg.type === 'stroke_cancel') {
                 remoteStrokesRef.current.delete(key)
               }
-              redraw()
+              redrawOverlay()
             }
           } catch { /* Ignorar mensajes invalidos */ }
         }
@@ -3599,7 +3613,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       stopFollowing()
     }
     const heartbeat = setInterval(()=>{
-      if (expireCursors(remoteCursorsRef.current)) redraw()
+      if (expireCursors(remoteCursorsRef.current)) redrawCursors()
       sendCamera(true)
       const p=cursorScreenRef.current
       if(p && document.visibilityState==='visible') sendCursorPosition(p.x,p.y)

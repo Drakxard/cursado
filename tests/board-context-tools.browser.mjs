@@ -11,10 +11,11 @@ test('existing board shortcuts, contextual figure editing and external clipboard
     const root=await navigator.storage.getDirectory(),directory=await(await root.getDirectoryHandle('progreso',{create:true})).getDirectoryHandle('pizarras',{create:true});
     const content={camera:{x:0,y:0,zoom:1},strokes:[],texts:[],shapes:[],tables:[],graphs:[],media:[],videos:[]};
     for(const [id,shapes] of [['source',[{id:'shortcut',kind:'rounded',visualType:'board-shortcut',boardReference:{boardId:'study-existing',name:'Theory'},label:'Theory',x:100,y:200,width:220,height:60,color:'#2563eb',strokeWidth:1}]],['study-existing',[{id:'figure',kind:'rectangle',x:100,y:230,width:380,height:240,color:'#ff9900',strokeWidth:3}]]]){
-      const writer=await(await directory.getFileHandle(id+'.json',{create:true})).createWritable();await writer.write(JSON.stringify({version:1,boardId:id,name:id,assets:{},content:{...content,shapes}}));await writer.close();
+      const writer=await(await directory.getFileHandle(id+'.json',{create:true})).createWritable();await writer.write(JSON.stringify({version:1,boardId:id,name:id,assets:{},content:{...content,shapes,tables:id==='study-existing'?[{id:'stable-table',name:'Stable',x:600,y:230,cellWidth:100,cellHeight:30,cells:[[{input:'1'}]]}]:[]}}));await writer.close();
     }
     window.removeBoard=async id=>directory.removeEntry(id+'.json');
     window.readBoard=async id=>JSON.parse(await(await(await directory.getFileHandle(id+'.json')).getFile()).text());
+    window.remoteEdit=async id=>{const file=await directory.getFileHandle(id+'.json'),value=JSON.parse(await(await file.getFile()).text());value.content.shapes.push({id:'peer-shape',kind:'rectangle',x:550,y:500,width:100,height:80,color:'#00ff00',fill:'#00ff00',strokeWidth:2});const writer=await file.createWritable();await writer.write(JSON.stringify(value));await writer.close();};
     createRoot(document.getElementById('root')).render(<TopicBoardOverlay boardId="source" name="Source" rootHandle={root} onClose={()=>window.closedBoard=true}/>);
   ` }, jsx:'automatic', bundle:true,format:'esm',write:false,plugins:[{ name:'parent',setup(builder){builder.onResolve({filter:/^@\/lib\/(native-workspace|client\/cooperation|client\/cooperation-files)$/},args=>({path:args.path,namespace:'fixture'}));builder.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const isNativeReadOnly=()=>false;export const cooperationPresence=()=>undefined;export const cooperationState=()=>({mirrors:{}});export const sendCooperationEditor=()=>{};export const mapBindingText=x=>x;'}))} }] })
   const browser=await chromium.launch({channel:process.env.CI?undefined:'chrome'});t.after(()=>browser.close())
@@ -56,12 +57,15 @@ test('existing board shortcuts, contextual figure editing and external clipboard
     let paints=0;ctx.clearRect=(...args)=>{paints++;return clear(...args)}
     for(let i=0;i<8;i++){
       window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:parent,data:{type:'topic-board:refresh',boardId:'source'}}))
+      window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:parent,data:{type:'topic-board:live',boardId:'source',payload:{type:'cursor_move',user_id:'peer',client_id:'reloaded',name:'Peer',point:{x:750+i,y:200}}}}))
+      window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:parent,data:{type:'topic-board:live',boardId:'source',payload:i===0?{type:'stroke_start',client_id:'reloaded',stroke_id:'preview',point:{x:750,y:200},color:'#ff0000',width:2}:{type:'stroke_points',client_id:'reloaded',stroke_id:'preview',points:[{x:750+i,y:200+i}]}}}))
       await new Promise(resolve=>setTimeout(resolve,30))
     }
+    window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:parent,data:{type:'topic-board:live',boardId:'source',payload:{type:'stroke_cancel',client_id:'reloaded',stroke_id:'preview'}}}))
     ctx.clearRect=clear
     return paints
   })
-  assert.equal(refreshPaints,0,'unchanged cooperative refreshes leave the displayed scene intact')
+  assert.equal(refreshPaints,0,'cursor traffic, stroke previews and unchanged refreshes leave the document canvas intact')
   await canvas.click({position:{x:200,y:230}})
   await expect(child.locator('.app')).toHaveAttribute('data-board-id','local:important-study-existing')
   await child.getByRole('button',{name:'Seleccionar área',exact:true}).click()
@@ -79,6 +83,25 @@ test('existing board shortcuts, contextual figure editing and external clipboard
   await expect.poll(async()=>{const rect=await popup.boundingBox();return rect.x>=0&&rect.y>=0&&rect.x+rect.width<=360&&rect.y+rect.height<=640}).toBe(true)
   await page.setViewportSize({width:1000,height:760})
   await toolbar.getByRole('button',{name:'Relleno',exact:true}).first().click()
+  // A real remote addition must preserve the selected figure, active draft,
+  // existing table DOM and personal undo stack.
+  await expect.poll(()=>page.evaluate(async()=>(await window.readBoard('study-existing')).content.shapes[0].labelBold)).toBe(true)
+  await toolbar.getByRole('button',{name:'Editar texto de la figura'}).click()
+  const inline=child.getByRole('textbox',{name:'Texto de la figura'})
+  await inline.fill('Texto en la figura')
+  const activeFrame=page.frames().find(frame=>frame.url().includes('topicBoard='))
+  await activeFrame.evaluate(()=>{window.stableEditor=document.querySelector('.shape-inline-editor');window.stableTable=document.querySelector('[data-table-id="stable-table"]');window.tableVersion=document.querySelector('.sheet-static-layer').dataset.version;window.stableEditor.setSelectionRange(3,3)})
+  await page.evaluate(()=>window.remoteEdit('study-existing'))
+  await activeFrame.evaluate(()=>window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:parent,data:{type:'topic-board:refresh',boardId:'study-existing'}})))
+  const greenPixel=()=>child.locator('.board-content-canvas').first().evaluate(node=>{const dpr=devicePixelRatio;return [...node.getContext('2d').getImageData(580*dpr,530*dpr,1,1).data].slice(0,3)})
+  await expect.poll(greenPixel).toEqual([0,255,0])
+  await expect(inline).toBeFocused()
+  assert.equal(await activeFrame.evaluate(()=>document.querySelector('.shape-inline-editor')===window.stableEditor&&window.stableEditor.selectionStart===3&&document.querySelector('[data-table-id="stable-table"]')===window.stableTable&&document.querySelector('.sheet-static-layer').dataset.version===window.tableVersion),true)
+  await inline.press('Control+Enter')
+  await page.keyboard.press('Control+z')
+  await expect.poll(greenPixel).toEqual([0,255,0])
+  await page.keyboard.press('Control+Shift+z')
+  await expect.poll(greenPixel).toEqual([0,255,0])
   await canvas.click({position:{x:250,y:340}})
   await page.keyboard.press('Control+c')
   await canvas.click({position:{x:700,y:500}})
