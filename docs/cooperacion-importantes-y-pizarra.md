@@ -12,6 +12,10 @@
 - Las pizarras de esos botones comparten su contenido y sus imágenes originales.
   El contenido usa la combinación cooperativa existente; sus borrados sí forman
   parte de la edición conjunta. La cámara permanece personal.
+- La presencia descarta conexiones anteriores al recargar y muestra un solo
+  cursor por persona. Los cursores sin actividad caducan si se pierde el aviso
+  de desconexión. Las sincronizaciones sin cambios en la escena conservan la
+  selección y el historial; las lecturas cooperativas se ejecutan en serie.
 - Un acceso arrastrado apunta al ID local de la pizarra. También se reconocen
   los accesos históricos `study-*`, incluidos los de teoría y práctica que no
   aparecen en Importantes. Los nuevos arrastres conservan materia, semana y PDFs

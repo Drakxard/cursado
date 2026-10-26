@@ -261,7 +261,7 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
   if(!group.accepted)await acceptCooperationGroup(groupId)
   // The catalogue is the durable identity of an installed sphere, even when
   // its sync checkpoint was lost. Reattach it before considering publication.
-  const localCatalog = await readJson<{ subjects: Record<string, { cooperationId?: string }> }>(await root(), 'manifests/subject-catalog.json', { subjects: {} })
+  const localCatalog = await readJson<{ subjects: Record<string, { cooperationId?: string; storageKey?: string }> }>(await root(), 'manifests/subject-catalog.json', { subjects: {} })
   const installedId = localCatalog.subjects[subject.id]?.cooperationId
   if (installedId && !state.mirrors[installedId]) {
     let installed = state.groups.flatMap(group => group.spheres).find(sphere => sphere.id === installedId)
@@ -272,13 +272,38 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
     if (!installed) throw new Error('No se pudo recuperar el acceso a la esfera compartida. Reintentá para conservar su identidad.')
     await acceptCooperationSphere(installed)
   }
-  const binding = await withStateLock(async () => {
-  const sharedElsewhere = Object.values(state.mirrors).find(m => m.binding.subjectId === subject.id)
+  // A different device (or a restored workspace) may have the subject's files
+  // without either local checkpoint. Search the user's accessible publications
+  // before allocating a new room/R2 namespace. Names alone are not identity.
+  if (!installedId && !Object.values(state.mirrors).some(m => m.binding.subjectId === subject.id)) {
+    const key = subject.storageKey || localCatalog.subjects[subject.id]?.storageKey || subject.id
+    const accessible = [...new Map(state.groups.filter(g => g.accepted).flatMap(g => g.spheres).map(s => [s.id, s])).values()]
+    for (const sphere of accessible) {
+      if (sphere.ready === false || state.removedSpheres?.includes(sphere.id) || state.mirrors[sphere.id]) continue
+      const snapshot = await cooperationApi(`spheres/${sphere.id}/snapshot`) as Snapshot
+      const meta = snapshot.resources['sphere.json']?.value
+      if (!record(meta) || meta.subjectId !== subject.id || meta.storageKey !== key) continue
+      const probe: SphereBinding = { id:sphere.id, groupId:sphere.group_id, subjectId:subject.id, storageKey:key, sourceId:subject.id, sourceKey:key, name:sphere.name, color:sphere.color, owner:false, reuseLocalIds:true }
+      const evidence = (await scanSphere(await root(), probe)).filter(file => !file.key.startsWith('scope/'))
+      if (!evidence.length) continue
+      let matches = true
+      for (const file of evidence) {
+        const resource = snapshot.resources[file.key]
+        if (!resource || resource.deleted || (file.blob ? resource.blob?.hash !== await digest(file.blob) : !eq(resource.value, file.value))) { matches = false; break }
+      }
+      if (!matches) continue
+      await acceptCooperationSphere(sphere)
+      break
+    }
+  }
+  const publication = await withStateLock(async () => {
+  const sharedElsewhere = Object.values(state.mirrors).find(m => !m.copiedFrom && m.binding.subjectId === subject.id)
+    || Object.values(state.mirrors).find(m => m.binding.subjectId === subject.id)
   if (sharedElsewhere) {
     await cooperationApi('spheres', { groupId, sphereId: sharedElsewhere.binding.id, name: sharedElsewhere.binding.name, color: sharedElsewhere.binding.color })
     await installSubject(sharedElsewhere.binding, groupId)
     await save()
-    return sharedElsewhere.binding
+    return { binding:sharedElsewhere.binding, linked:true }
   }
   const result = await cooperationApi('spheres', { groupId, name: subject.name, color: subject.color })
   const catalog = await readJson<{ subjects: Record<string, { storageKey: string }> }>(await root(), 'manifests/subject-catalog.json', { subjects: {} })
@@ -288,9 +313,12 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
   state.mirrors[result.id] = { binding, baseline: { seq: 0, resources: {}, conflicts: [] } }
   await installSubject(binding)
   await save()
-  return binding
+  return { binding, linked:false }
   })
-  if(binding.groupId !== groupId) { await refreshCooperation(); return binding }
+  const { binding } = publication
+  // Linking is complete even when this is the publication's original group.
+  // Do not enter the publication/upload pipeline for an existing room.
+  if(publication.linked) { await refreshCooperation(); return binding }
   await withStateLock(async()=>{
     const mirror=state.mirrors[binding.id]
     try{await prepareCooperationCopy(mirror)}catch(reason){mirror.error=reason instanceof Error?reason.message:String(reason);await save();throw reason}

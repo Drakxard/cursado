@@ -1,4 +1,5 @@
 import SelectionActions from './components/SelectionActions'
+import { reconcileCursors, updateCursor, expireCursors } from './liveCursors'
 import { editableClipboardSvg } from './canvas/clipboardSvg'
 import AdvancedObjectToolbar, { type ObjectToolbarHandle } from './components/AdvancedObjectToolbar'
 import {navigateBoardLink,hasBoardReturn,consumeBoardView,isBoardNavigating} from './boardNavigation'
@@ -12,6 +13,7 @@ import { BOARD_PDF_MIME, BOARD_IMPORTANT_MIME, BOARD_LINK_MIME, parseImportantDr
 import { useBoardLibrary } from './BoardLibraryPanels'
 import { isTopicWorkspace, notifyTopicWorkspace, saveTopicWorkspace, receiveTopicWorkspace, sendTopicLive } from './topicWorkspace'
 import { mergeBoard } from './storage/merge'
+import { sameBoardScene } from './storage/sceneContent'
 import { applyScenePatch } from './storage/livePatch'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { LuHand, LuStickyNote, LuWorkflow, LuBookOpen, LuCalendarDays } from 'react-icons/lu'
@@ -2025,16 +2027,20 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   }
 
   useEffect(() => {
-    let stopped = false, timer: ReturnType<typeof setTimeout> | undefined
+    let stopped = false, refreshing = false, refreshAgain = false, timer: ReturnType<typeof setTimeout> | undefined
     const refresh = async () => {
       if (stopped || !isTopicWorkspace()) return
+      if (refreshing) { refreshAgain = true; return }
+      clearTimeout(timer)
       if (!loadedRef.current || dirtyRef.current || savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
+      refreshing = true
       const revision = editRevisionRef.current
       const local = { ...snapshot(), camera: cameraRef.current }
       try {
         const merged = await receiveTopicWorkspace(local, () => !stopped && revision === editRevisionRef.current && !dirtyRef.current && !savingRef.current && pointerRef.current === null && !editingRef.current && !activeStroke.current)
         if (stopped) return
         if (!merged) { timer = setTimeout(() => void refresh(), 80); return }
+        if (merged === local) return
         // If drawing began during disk I/O, retry against the current draft.
         if (revision !== editRevisionRef.current || dirtyRef.current || savingRef.current || pointerRef.current !== null || editingRef.current || activeStroke.current) { timer = setTimeout(() => void refresh(), 80); return }
         strokesRef.current = merged.strokes; textsRef.current = merged.texts; mediaRef.current = merged.media
@@ -2045,8 +2051,13 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         for (const [key, remote] of remoteStrokesRef.current) if (remote.done) remoteStrokesRef.current.delete(key)
         if(JSON.stringify(merged)!==JSON.stringify(local)&&await linkBinding(getActiveBoardId()))scheduleSave()
       } catch (error) { console.warn('No se pudo actualizar la pizarra cooperativa:', error) }
+      finally {
+        refreshing = false
+        if (refreshAgain && !stopped) { refreshAgain = false; clearTimeout(timer); timer = setTimeout(() => void refresh(), 80) }
+      }
     }
     const receive = (event: MessageEvent) => {
+      if (event.data?.boardId && event.data.boardId !== getActiveBoardId() && `local:important-${event.data.boardId}` !== getActiveBoardId()) return
       if (event.origin === location.origin && event.source === parent && event.data?.type === 'topic-board:refresh') { clearTimeout(timer); void refresh() }
       if (event.origin !== location.origin || event.source !== parent || event.data?.type !== 'topic-board:live') return
       const msg = event.data.payload
@@ -2059,10 +2070,9 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           saveTimerRef.current = setTimeout(() => { saveTimerRef.current = null; void persistBoard() }, 80)
         }
         setLiveConnected(msg.connected !== false); setLiveUsers(msg.users); setLiveSelf(msg.you || null); liveSelfRef.current = msg.you || null
-        const present = new Set(msg.users.map((user: LiveUser) => user.id))
-        for (const [key, cursor] of remoteCursorsRef.current) if (!present.has(cursor.userId)) remoteCursorsRef.current.delete(key)
+        reconcileCursors(remoteCursorsRef.current, msg.users, msg.you)
       } else if (msg.type === 'cursor_move' && msg.point && msg.client_id) {
-        remoteCursorsRef.current.set(msg.client_id, { clientId: msg.client_id, userId: msg.user_id, name: msg.name, color: msg.color || '#6366f1', emoji: msg.emoji || '🙂', point: msg.point, updated: Date.now() })
+        updateCursor(remoteCursorsRef.current, { clientId: msg.client_id, userId: msg.user_id, name: msg.name, color: msg.color || '#6366f1', emoji: msg.emoji || '🙂', point: msg.point, updated: Date.now() }, liveSelfRef.current)
       } else if (msg.type === 'cursor_hide') remoteCursorsRef.current.delete(msg.client_id)
       else if (msg.client_id && msg.stroke_id) {
         const key = `${msg.client_id}:${msg.stroke_id}`, remote = remoteStrokesRef.current.get(key)
@@ -2328,6 +2338,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           await acceptLinkedScene(id,content)
           if(stopped)return
           const merged=mergeBoard(before,{...snapshot(),camera:cameraRef.current},content)
+          if (sameBoardScene(snapshot(), merged)) { await saveTopicWorkspace(); return }
           strokesRef.current=merged.strokes;textsRef.current=merged.texts;mediaRef.current=merged.media
           shapesRef.current=(merged.shapes||[]) as ShapeItem[];tablesRef.current=(merged.tables||[]) as SheetItem[]
           graphsRef.current=(merged.graphs||[]) as BoardGraphItem[];videosRef.current=(merged.videos||[]) as YouTubeItem[]
@@ -2386,6 +2397,10 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
 
     async function showCommitted(snapshot: Awaited<ReturnType<typeof fetchBoardForLiveSync>>) {
         const content = snapshot.content || ({} as typeof snapshot.content)
+        if (sameBoardScene({strokes:strokesRef.current,texts:textsRef.current,media:mediaRef.current,shapes:shapesRef.current,tables:tablesRef.current,graphs:graphsRef.current,videos:videosRef.current}, content)) {
+          await acceptBoardLiveVersion(boardId, snapshot.version, snapshot.content)
+          return
+        }
         strokesRef.current = content.strokes ?? []
         textsRef.current = content.texts ?? []
         mediaRef.current = content.media ?? []
@@ -2508,10 +2523,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
               setLiveSelf(msg.you ?? null)
               liveSelfRef.current=msg.you??null
               const present = new Set(msg.users.map(user=>user.id))
-              for(const [key,cursor] of remoteCursorsRef.current) {
-                const user=msg.users.find(user=>user.id===cursor.userId)
-                if(!user || (user.client_ids && !user.client_ids.includes(cursor.clientId))) remoteCursorsRef.current.delete(key)
-              }
+              reconcileCursors(remoteCursorsRef.current, msg.users, msg.you)
               for(const user of msg.users) if(user.view) viewsRef.current.set(user.id,user.view)
               if(followRef.current && !present.has(followRef.current)) stopFollowing()
               if(followRef.current)followView(followRef.current)
@@ -2534,11 +2546,11 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
                 setVideos([...videosRef.current])
               }
             } else if (msg.type === 'cursor_move' && msg.client_id && msg.point && msg.user_id && msg.name) {
-              remoteCursorsRef.current.set(msg.client_id,{
+              updateCursor(remoteCursorsRef.current,{
                 clientId:msg.client_id,userId:msg.user_id,name:msg.name,
                 color:msg.color||'#6366f1',emoji:msg.emoji||'🙂',
                 point:msg.point,updated:Date.now()
-              })
+              }, liveSelfRef.current)
               redraw()
             } else if (msg.type === 'cursor_hide' && msg.client_id) {
               remoteCursorsRef.current.delete(msg.client_id)
@@ -3587,6 +3599,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       stopFollowing()
     }
     const heartbeat = setInterval(()=>{
+      if (expireCursors(remoteCursorsRef.current)) redraw()
       sendCamera(true)
       const p=cursorScreenRef.current
       if(p && document.visibilityState==='visible') sendCursorPosition(p.x,p.y)

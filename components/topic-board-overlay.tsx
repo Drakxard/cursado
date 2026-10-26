@@ -17,6 +17,8 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
   onClose: () => void
 }) {
   const frame = useRef<HTMLIFrameElement>(null)
+  const closeCallback = useRef(onClose)
+  closeCallback.current = onClose
   const currentBoard = useRef({ boardId, cooperationSubjectId })
   const [ready, setReady] = useState(false)
   const [error, setError] = useState("")
@@ -52,16 +54,16 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
       }
       if (event.data.type === "topic-board:ready") {
         setReady(true); setClosing(false); frame.current?.focus()
-        if (cooperationSubjectId) frame.current?.contentWindow?.postMessage({ type: 'topic-board:live', boardId, payload: { type: 'presence', ...cooperationPresence(cooperationSubjectId) } }, location.origin)
+        const current = currentBoard.current
+        if (current.cooperationSubjectId) frame.current?.contentWindow?.postMessage({ type: 'topic-board:live', boardId:current.boardId, payload: { type: 'presence', ...cooperationPresence(current.cooperationSubjectId) } }, location.origin)
       }
-      if (event.data.type === 'topic-board:ephemeral' && cooperationSubjectId) sendCooperationEditor(cooperationSubjectId, boardId, event.data.payload)
       if (event.data.type === 'topic-board:saved') window.dispatchEvent(new Event('cursado-workspace-saved'))
-      if (event.data.type === "topic-board:closed") onClose()
+      if (event.data.type === "topic-board:closed") closeCallback.current()
       if (event.data.type === "topic-board:reader-state") setReaderOpen(event.data.open === true)
       if (event.data.type === "topic-board:error") { setError(event.data.error || "No se pudo guardar la pizarra."); setClosing(false) }
     }
     window.addEventListener("message", receive)
-    const refresh = () => frame.current?.contentWindow?.postMessage({ type: 'topic-board:refresh', boardId }, location.origin)
+    const refresh = () => frame.current?.contentWindow?.postMessage({ type: 'topic-board:refresh', boardId:currentBoard.current.boardId }, location.origin)
     window.addEventListener('cursado-cooperation-applied', refresh)
     const live = (event: Event) => {
       const current = currentBoard.current
@@ -83,7 +85,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
       window.removeEventListener('cursado-cooperation-presence', live)
       previousFocus?.focus({ preventScroll: true })
     }
-  }, [boardId, name, rootHandle, onClose, pdfReferences, cooperationSubjectId, cooperationWeekNumber])
+  }, [boardId, name, rootHandle, pdfReferences, cooperationSubjectId, cooperationWeekNumber])
   const close = () => {
     if (isNativeReadOnly()) { onClose(); return }
     if (!ready) { onClose(); return }

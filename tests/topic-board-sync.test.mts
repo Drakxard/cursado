@@ -44,4 +44,12 @@ test('saved additions stay deleted on refresh and discarded reads do not advance
   assert.equal(await client.receiveTopicWorkspace(received, () => false), null)
   const current = await client.receiveTopicWorkspace(received)
   assert.deepEqual(current.shapes, [shape], 'a discarded read must not consume incoming changes')
+  const stable = { strokes:current.strokes, texts:current.texts, media:current.media, shapes:current.shapes, tables:current.tables, graphs:current.graphs, videos:current.videos, camera:{x:120,y:80,zoom:2} }
+  for (let i = 0; i < 10; i++) {
+    assert.equal(await client.receiveTopicWorkspace(stable), stable, 'unchanged refreshes preserve the scene identity even with a different key order and personal camera')
+  }
+  stable.shapes = []
+  fixture.board.content = stable
+  await client.saveTopicWorkspace()
+  assert.deepEqual((await fs.json(path)).content.shapes, [], 'later local deletions still use the acknowledged remote baseline')
 })

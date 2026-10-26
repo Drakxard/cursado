@@ -35,6 +35,33 @@ test('existing board shortcuts, contextual figure editing and external clipboard
   await page.goto('https://context.test/')
   const child=page.frameLocator('iframe'),canvas=child.locator('.app > canvas').first()
   await expect(page.locator('iframe')).toHaveCSS('visibility','visible')
+  const frame = page.frames().find(frame => frame.url().includes('topicBoard='))
+  await frame.evaluate(() => {
+    const canvas=document.querySelector('.board-cursor-canvas'),ctx=canvas.getContext('2d')
+    window.drawnCursors=[]
+    const clear=ctx.clearRect.bind(ctx),text=ctx.fillText.bind(ctx)
+    ctx.clearRect=(...args)=>{window.drawnCursors=[];return clear(...args)}
+    ctx.fillText=(...args)=>{window.drawnCursors.push(args[0]);return text(...args)}
+  })
+  const live = payload => page.locator('iframe').evaluate((node,payload)=>node.contentWindow.postMessage({type:'topic-board:live',boardId:'source',payload},location.origin),payload)
+  await live({type:'presence',you:'self',users:[{id:'self',client_ids:['mine']},{id:'peer',client_ids:['old']}]})
+  await live({type:'cursor_move',client_id:'old',user_id:'peer',name:'Peer',point:{x:700,y:200}})
+  await live({type:'cursor_move',client_id:'new',user_id:'peer',name:'Peer',point:{x:730,y:230}})
+  await expect.poll(()=>frame.evaluate(()=>window.drawnCursors.length)).toBe(1)
+  await live({type:'presence',you:'self',users:[{id:'self',client_ids:['mine']},{id:'peer',client_ids:['reloaded']}]})
+  await expect.poll(()=>frame.evaluate(()=>window.drawnCursors.length)).toBe(0)
+  // Periodic notifications without scene changes must not reapply the canvas.
+  const refreshPaints=await frame.evaluate(async()=>{
+    const ctx=document.querySelector('.app > canvas').getContext('2d'),clear=ctx.clearRect.bind(ctx)
+    let paints=0;ctx.clearRect=(...args)=>{paints++;return clear(...args)}
+    for(let i=0;i<8;i++){
+      window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:parent,data:{type:'topic-board:refresh',boardId:'source'}}))
+      await new Promise(resolve=>setTimeout(resolve,30))
+    }
+    ctx.clearRect=clear
+    return paints
+  })
+  assert.equal(refreshPaints,0,'unchanged cooperative refreshes leave the displayed scene intact')
   await canvas.click({position:{x:200,y:230}})
   await expect(child.locator('.app')).toHaveAttribute('data-board-id','local:important-study-existing')
   await child.getByRole('button',{name:'Seleccionar área',exact:true}).click()

@@ -116,9 +116,11 @@ async function saveTopicWorkspaceUnlocked() {
 
 export async function receiveTopicWorkspace(local: BoardContentWithExtras, isCurrent = () => true): Promise<BoardContentWithExtras | null> {
   if (!workspace) return null
-  const directory = await boardDirectory(workspace.rootHandle)
-  const snapshot = JSON.parse(await (await (await directory.getFileHandle(`${workspace.boardId}.json`)).getFile()).text()) as TopicSnapshot
-  if (!snapshot.content || snapshot.boardId !== workspace.boardId) throw new Error('Pizarra recibida inválida.')
+  const current = workspace
+  const directory = await boardDirectory(current.rootHandle)
+  const snapshot = JSON.parse(await (await (await directory.getFileHandle(`${current.boardId}.json`)).getFile()).text()) as TopicSnapshot
+  if (workspace !== current || !isCurrent()) return null
+  if (!snapshot.content || snapshot.boardId !== current.boardId) throw new Error('Pizarra recibida inválida.')
   const merged = mergeCooperation(presented as unknown as Json, local as unknown as Json, snapshot.content as unknown as Json) as unknown as BoardContentWithExtras
   merged.camera = local.camera
   for (const media of merged.media || []) {
@@ -128,10 +130,12 @@ export async function receiveTopicWorkspace(local: BoardContentWithExtras, isCur
     const bytes = Uint8Array.from(atob(data.slice(comma + 1)), c => c.charCodeAt(0))
     await (await deviceDB).put('assets', new Blob([bytes], { type: data.slice(5, data.indexOf(';')) }), `device:${media.assetId}`)
   }
-  if (!isCurrent()) return null
+  if (workspace !== current || !isCurrent()) return null
   presented = structuredClone(merged)
   saved = merged === snapshot.content ? presented : structuredClone(snapshot.content)
-  return merged
+  // An unrelated cooperative save must not rebuild the current scene or editors.
+  const keys = new Set([...Object.keys(merged), ...Object.keys(local)])
+  return [...keys].every(key => JSON.stringify(merged[key as keyof typeof merged]) === JSON.stringify(local[key as keyof typeof local])) ? local : merged
 }
 
 export function topicNavigationContext(){return {workspace,presented,saved}}
