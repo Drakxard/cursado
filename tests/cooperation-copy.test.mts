@@ -72,6 +72,19 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   assert.equal(groups.find(g=>g.id===second).spheres[0].id,firstBinding.id)
   assert.equal(groups.find(g=>g.id===first).spheres[0].id,firstBinding.id)
   assert.deepEqual(await(await api(actors[0],`spheres/${linked.id}/snapshot`)).json(),beforeSnapshot)
+  // Re-linking the original group must also avoid the publishing pipeline,
+  // including when there are unrelated pending local edits.
+  await fs.put('teoria/Ecu/uno.pdf',new Blob(['Pending local edit'],{type:'application/pdf'}))
+  let linkWrites=0
+  const fetchBeforeRelink=globalThis.fetch
+  globalThis.fetch=(async(url,options={})=>{
+    if(String(url).includes('/operations') || String(url).includes('/upload-session') || options.method==='PUT') linkWrites++
+    return fetchBeforeRelink(url,options)
+  }) as typeof fetch
+  assert.equal((await client.shareCooperationSphere(first,source)).id,firstBinding.id)
+  assert.equal(linkWrites,0,'linking an existing sphere must not scan/publish pending local changes')
+  globalThis.fetch=fetchBeforeRelink
+  await fs.put('teoria/Ecu/uno.pdf',new Blob(['PDF original'],{type:'application/pdf'}))
   assert.equal((await api(actors[2],`spheres/${linked.id}/snapshot`)).status,200)
   assert.equal((await api(actors[3],`spheres/${linked.id}/snapshot`)).status,403)
   assert.equal((await api(actors[3],'spheres',{groupId:second,sphereId:linked.id,name:source.name,color:source.color})).status,403)
@@ -111,10 +124,26 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   await fs.put(`.cooperation/${saved.userId}/state.json`,legacy)
   await client.refreshCooperation()
   downloads=0
-  await client.acceptCooperationSphere(groups.find(g=>g.id===first).spheres[0])
+  let recoveryUploads=0,newPublications=0
+  const fetchBeforeDiscovery=globalThis.fetch
+  globalThis.fetch=(async(url,options={})=>{
+    if(String(url).includes('/upload-session') || options.method==='PUT') recoveryUploads++
+    if(String(url).endsWith('/cooperation/spheres') && options.method==='POST' && !JSON.parse(String(options.body)).sphereId) newPublications++
+    return fetchBeforeDiscovery(url,options)
+  }) as typeof fetch
+  const recovered=await client.shareCooperationSphere(second,source)
+  assert.equal(recovered.id,firstBinding.id,'an accessible original is discovered before allocating a second R2 namespace')
+  assert.equal(newPublications,0)
+  assert.equal(recoveryUploads,0,'losing both local associations must not re-upload existing files')
+  globalThis.fetch=fetchBeforeDiscovery
   assert.equal(client.cooperationState().mirrors[firstBinding.id].binding.subjectId,'ecu')
   assert.equal(downloads,0)
   assert.equal((await fs.json('manifests/materials/Ecu/week-1.json')).materials[0].id,100)
+
+  const otherSubject={id:'different-course',name:source.name,storageKey:'DifferentCourse',color:source.color}
+  await fs.put('manifests/materials/DifferentCourse/week-1.json',{version:1,subjectId:'DifferentCourse',weekNumber:1,materials:[]})
+  const separate=await client.shareCooperationSphere(first,otherSubject)
+  assert.notEqual(separate.id,firstBinding.id,'equal display names must not combine unrelated subjects')
 
   const prog={id:'prog',name:'Prog 3',storageKey:'Prog3',color:'#ff6600'}
   await fs.put('manifests/materials/Prog3/week-1.json',{version:1,subjectId:'Prog3',weekNumber:1,materials:[]})

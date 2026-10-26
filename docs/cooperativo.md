@@ -9,6 +9,12 @@ En Estudio, Cooperativo muestra los grupos. Mantener pulsada una esfera permite
 referenciar sus archivos en el grupo o moverla. Referenciar agrega un acceso a la misma esfera y al mismo material; mover
 retira el acceso anterior. Una esfera puede pertenecer a varios grupos. Todos acceden a la misma sala, archivos R2 y réplica local; compartirla con otro grupo no crea una copia ni reinicia la transferencia. Los participantes de esos grupos colaboran sobre el mismo contenido.
 
+Referenciar una publicación existente termina al enlazar el grupo: tampoco
+vuelve a publicar si se elige su grupo original. Si se perdieron la asociación
+del catálogo y el estado de sincronización, se buscan primero las publicaciones
+accesibles y se comprueban sus identificadores y los hashes/contenidos locales
+antes de crear otra esfera. Coincidir en el nombre no basta para unir materias.
+
 La primera descarga requiere Confirmar y muestra el tamaño en MB. Cancelar
 deja la esfera gris. Aceptar una esfera también acepta participar en su grupo.
 La esfera aparece como «Preparando publicación» apenas se comparte. El aviso
