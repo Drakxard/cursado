@@ -31,12 +31,69 @@ test('at most two decoders run, zoom replaces previews, and hidden/deleted image
   cache.reconcile([{ id: 'a', width: 1200, height: 800 }]); await settle()
   assert.equal(cache.size, 1); assert.equal(released.length, 2)
   assert.equal(cache.get('a'), previous)
+  await new Promise(resolve => setTimeout(resolve, 170)); await settle()
   pending.splice(0).forEach(resolve => resolve()); await settle()
   assert.equal(cache.size, 1); assert.ok(cache.bytes <= IMAGE_CACHE_BYTES)
   assert.notEqual(cache.get('a'), previous)
   assert.equal(released.length, 3)
   cache.reconcile([])
   assert.equal(cache.bytes, 0); assert.equal(released.length, 4)
+})
+
+test('zoom bursts reuse the drawable preview and decode only the settled resolution', async () => {
+  let decodes = 0
+  const cache = new AdaptiveImageCache(async () => new Blob(), () => {}, async (_blob, width, height) => {
+    decodes++
+    return { width, height, source: {} as CanvasImageSource, release() {} }
+  })
+  cache.reconcile([{ id: 'a', width: 300, height: 200 }]); await settle()
+  const drawable = cache.get('a')
+  for (let width = 550; width < 1800; width += 30) {
+    cache.reconcile([{ id: 'a', width, height: width * 2 / 3 }])
+    assert.equal(cache.get('a'), drawable)
+  }
+  assert.equal(decodes, 1)
+  await new Promise(resolve => setTimeout(resolve, 180)); await settle()
+  assert.equal(decodes, 2)
+  cache.clear()
+})
+
+test('small originals keep their native dimensions without repeated decoding', async () => {
+  const sizes: number[][] = []
+  const cache = new AdaptiveImageCache(async () => ({ blob: new Blob(), width: 40, height: 20 }), () => {}, async (_blob, width, height) => {
+    sizes.push([width, height]); return { width, height, source: {} as CanvasImageSource, release() {} }
+  })
+  for (let i = 0; i < 5; i++) { cache.reconcile([{ id: 'a', width: 300, height: 150 }]); await settle() }
+  assert.deepEqual(sizes, [[40, 20]])
+  cache.clear()
+})
+
+test('camera motion within the same level postpones replacement until motion stops', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let decodes = 0
+  const cache = new AdaptiveImageCache(async () => new Blob(), () => {}, async (_blob, width, height) => {
+    decodes++; return { width, height, source: {} as CanvasImageSource, release() {} }
+  })
+  cache.reconcile([{ id: 'a', width: 300, height: 200 }], 'initial'); await settle()
+  cache.reconcile([{ id: 'a', width: 1000, height: 666 }], 'zoom-start')
+  t.mock.timers.tick(100); await settle()
+  cache.reconcile([{ id: 'a', width: 1000, height: 666 }], 'pan-continues')
+  t.mock.timers.tick(100); await settle()
+  assert.equal(decodes, 1)
+  t.mock.timers.tick(80); await settle()
+  assert.equal(decodes, 2); cache.clear()
+})
+
+test('mixed resolutions stay inside the retained budget while replacing previews', async () => {
+  let peak = 0
+  const cache = new AdaptiveImageCache(async () => new Blob(), () => { peak = Math.max(peak, cache.bytes) }, async (_blob, width, height) =>
+    ({ width, height, source: {} as CanvasImageSource, release() {} }))
+  const ids = Array.from({ length: 20 }, (_, i) => String(i))
+  cache.reconcile(ids.map(id => ({ id, width: 400, height: 300 }))); await settle()
+  cache.reconcile(ids.map((id, i) => ({ id, width: i % 2 ? 4000 : 100, height: i % 2 ? 3000 : 75 })))
+  await new Promise(resolve => setTimeout(resolve, 180)); await settle()
+  assert.equal(cache.size, 20); assert.ok(peak <= IMAGE_CACHE_BYTES)
+  cache.clear()
 })
 
 test('late loads and decodes cannot repopulate a deleted asset or a closed board', async () => {
@@ -55,4 +112,19 @@ test('late loads and decodes cannot repopulate a deleted asset or a closed board
   complete(); await settle()
   assert.equal(cache.size, 1)
   cache.clear()
+})
+
+test('a generated drawable is reused, and late generated pixels are released on close', async () => {
+  let releases = 0, finish!: () => void, wait = false
+  const source = {} as CanvasImageSource
+  const cache = new AdaptiveImageCache(async () => {
+    if (wait) await new Promise<void>(resolve => { finish = resolve })
+    return { blob: new Blob(), width: 128, height: 64, decoded: { source, width: 128, height: 64, release() { releases++ } } }
+  }, () => {}, async () => { throw new Error('Generated pixels must not be decoded again') })
+  cache.reconcile([{ id: 'a', width: 128, height: 64 }]); await settle()
+  assert.equal(cache.get('a'), source)
+  cache.clear(); assert.equal(releases, 1)
+  wait = true; cache.reconcile([{ id: 'b', width: 128, height: 64 }]); await settle()
+  cache.clear(); finish(); await settle()
+  assert.equal(releases, 2); assert.equal(cache.bytes, 0)
 })

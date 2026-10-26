@@ -9,6 +9,7 @@ export function initializeCooperation(sql) {
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_members (group_id TEXT NOT NULL, user_id TEXT NOT NULL, accepted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(group_id,user_id))')
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_spheres (id TEXT PRIMARY KEY, group_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL, created_by TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0)')
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_sphere_groups (sphere_id TEXT NOT NULL, group_id TEXT NOT NULL, PRIMARY KEY(sphere_id,group_id))')
+  if(!sql.exec('PRAGMA table_info(cooperation_spheres)').toArray().some(column=>column.name==='kind'))sql.exec("ALTER TABLE cooperation_spheres ADD COLUMN kind TEXT NOT NULL DEFAULT 'subject'")
   sql.exec('INSERT OR IGNORE INTO cooperation_sphere_groups SELECT id,group_id FROM cooperation_spheres')
 }
 export async function cooperationRequest(directory,request) {
@@ -41,6 +42,7 @@ export async function cooperationRequest(directory,request) {
           return {...sphere,ready:sphere.bytes>0}
         }))).filter(Boolean),
       })))
+      for(const group of groups){group.importantShares=group.spheres.filter(s=>s.kind==='important');group.spheres=group.spheres.filter(s=>s.kind!=='important')}
       return json({user:{id:user.id,name:user.display_name},groups})
     }
     if(request.method!=='POST')return json({detail:'Método no permitido.'},405)
@@ -77,7 +79,7 @@ export async function cooperationRequest(directory,request) {
       return json({id:source.id})
     }
     const id=crypto.randomUUID()
-    sql.exec('INSERT INTO cooperation_spheres(id,group_id,name,color,created_by) VALUES (?,?,?,?,?)',id,body.groupId,body.name,body.color,user.id)
+    sql.exec('INSERT INTO cooperation_spheres(id,group_id,name,color,created_by,kind) VALUES (?,?,?,?,?,?)',id,body.groupId,body.name,body.color,user.id,body.kind==='important'?'important':'subject')
     sql.exec('INSERT INTO cooperation_sphere_groups VALUES (?,?)',id,body.groupId)
     await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',body.groupId).toArray().map(member=>member.user_id))
     return json({id},201)

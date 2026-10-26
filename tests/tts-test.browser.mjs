@@ -134,8 +134,10 @@ test("Enter reproduce, conserva texto, evita duplicados y cancela respuestas obs
   const page = await setup(t)
   await open(page)
   const input = page.getByRole("textbox", { name: "Texto en español" })
-  assert.equal(await page.evaluate(async () => (await fetch("/api/tts")).status), 501)
-  assert.equal(await page.evaluate(() => window.requests.length), 0)
+  // Service configuration GETs are forwarded by the local service interceptor.
+  assert.equal(await page.evaluate(async () => (await fetch("/api/tts")).status), 200)
+  assert.equal(await page.evaluate(() => window.requests.length), 1)
+  await page.evaluate(() => { window.requests = [] })
   await input.press("Enter")
   assert.equal(await page.evaluate(() => window.requests.length), 0)
   await input.fill("Hola, ¿cómo estás?")

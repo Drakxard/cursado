@@ -88,5 +88,10 @@ export function paintShape(ctx: CanvasRenderingContext2D, shape: ShapeItem, reso
       ctx.moveTo(x+w,y+h-ry);ctx.lineTo(x+w,y+ry)
       ctx.moveTo(x+w,y+ry);ctx.ellipse(x+w/2,y+ry,w/2,ry,0,0,Math.PI)
     }
-    ctx.stroke();paintLabel(ctx,shape,color);ctx.restore()
+    if(shape.fill && !['line','arrow','double-arrow'].includes(kind)) {
+      ctx.save();ctx.globalAlpha*=Math.max(0,Math.min(1,shape.fillOpacity??1));ctx.fillStyle=shape.fill;ctx.fill();ctx.restore()
+    }
+    ctx.setLineDash(shape.strokeStyle==='dash'?[shape.strokeWidth*4,shape.strokeWidth*3]:shape.strokeStyle==='dot'?[1,Math.max(3,shape.strokeWidth*3)]:[])
+    if(shape.strokeWidth>0)ctx.stroke()
+    ctx.setLineDash([]);paintLabel(ctx,shape,color);ctx.restore()
   }

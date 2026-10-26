@@ -1,6 +1,9 @@
 "use client"
+
+import { hasMainStudySubjects, removeStudyTab } from "@/lib/study-workspace-tabs"
 import { useMaterialImagesDialog } from "./material-images-dialog"
-import { createPdfFromImages, isMaterialImage } from "@/lib/client/images-to-pdf"
+import { isMaterialImage } from "@/lib/client/material-image-files"
+import dynamic from "next/dynamic"
 import { HoldActionButton } from "./hold-action-button"
 import { InlinePdfName } from "./inline-pdf-name"
 
@@ -19,11 +22,9 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { ArrowDown, ArrowUp, BarChart3, CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Check, Copy, Eye, FilePenLine, Loader2, Pin, Sparkles, GraduationCap, Pencil, X, Link2, Mic, Pause, Play, Square, Plus } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { registerHomeSave } from "@/lib/client/home-navigation"
-import { AdminAccessModal } from "@/components/admin-access-modal"
 import { useLocalWorkspace } from "@/components/local-workspace-provider"
 import { MaterialTagBar } from "@/components/material-tag-bar"
-import { SubjectVoiceDialog, VoiceModeButton } from "@/components/subject-voice-dialog"
-import { TtsTestDialog } from "@/components/tts-test-dialog"
+import { VoiceModeButton } from "@/components/voice-mode-button"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -42,7 +43,6 @@ import type { AuthSession } from "@/lib/authz"
 import { getErrorMessage, parseJsonResponse, requireOkJson } from "@/lib/client/api"
 import { uploadCronogramaPdf } from "@/lib/client/cronograma"
 import { buildCronogramaViewerHref } from "@/lib/client/cronograma-viewer"
-import { createPdfFileFromText } from "@/lib/client/text-to-pdf"
 import { saveDailySession } from "@/lib/daily-study-client"
 import { getHomeSubjectCountdown, HOME_SUBJECT_WEEKDAY } from "@/lib/home-schedule"
 import {
@@ -115,6 +115,10 @@ import type {
 } from "@/lib/study-types"
 import { SUBJECTS, SUBJECT_ID_TO_INDEX } from "@/lib/subjects"
 import { formatDateKey, getCurrentWeekNumber, getWeekDates, getWeekNumberForDate, getWeekdayIndexFromDateKey, getWeekdayLabel, parseDateKey } from "@/lib/subject-utils"
+
+const AdminAccessModal = dynamic(() => import('./admin-access-modal').then(module => module.AdminAccessModal), { ssr: false })
+const SubjectVoiceDialog = dynamic(() => import('./subject-voice-dialog').then(module => module.SubjectVoiceDialog), { ssr: false })
+const TtsTestDialog = dynamic(() => import('./tts-test-dialog').then(module => module.TtsTestDialog), { ssr: false })
 
 interface Subject {
   id: string
@@ -552,7 +556,7 @@ function createEmptyWorkspaceTabsState(): WorkspaceTabsState {
     activeWorkspaceTabId: MAIN_WORKSPACE_TAB_ID,
     customSubjects: {},
     subjectWeekdays: { ...HOME_SUBJECT_WEEKDAY } as Record<string, number>,
-    isMainWorkspaceTabVisible: true,
+    isMainWorkspaceTabVisible: !LOCAL_STORAGE_MODE,
   }
 }
 
@@ -626,19 +630,20 @@ function normalizeWorkspaceTabsState(input: Partial<WorkspaceTabsState> | null |
           return accumulator
         }, {})
       : {}
-  const isMainWorkspaceTabVisible = input?.isMainWorkspaceTabVisible !== false
   const activeCandidate =
     typeof input?.activeWorkspaceTabId === "string" && input.activeWorkspaceTabId.trim()
       ? input.activeWorkspaceTabId.trim()
       : MAIN_WORKSPACE_TAB_ID
   const firstWorkspaceTabId = sortWorkspaceTabs(workspaceTabs)[0]?.id ?? null
-  const hasActiveCandidate =
-    activeCandidate === COOPERATIVE_TAB_ID || (activeCandidate === MAIN_WORKSPACE_TAB_ID ? isMainWorkspaceTabVisible : Boolean(workspaceTabs[activeCandidate]))
   const customSubjects = normalizeCustomSubjects(
     input?.customSubjects && typeof input.customSubjects === "object"
       ? (input.customSubjects as Record<string, CustomSubject>)
       : {}
   )
+  const isMainWorkspaceTabVisible = LOCAL_STORAGE_MODE
+    ? hasMainStudySubjects(customSubjects)
+    : input?.isMainWorkspaceTabVisible !== false
+  const hasActiveCandidate = activeCandidate === COOPERATIVE_TAB_ID || (activeCandidate === MAIN_WORKSPACE_TAB_ID ? isMainWorkspaceTabVisible : Boolean(workspaceTabs[activeCandidate]))
   const subjectWeekdays = Object.entries(input?.subjectWeekdays ?? {}).reduce<Record<string, number>>((accumulator, [subjectId, value]) => {
     const weekday = Number(value)
     if (subjectId.trim() && Number.isInteger(weekday) && weekday >= 0 && weekday <= 6) accumulator[subjectId] = weekday
@@ -1272,7 +1277,7 @@ function ContainerBoardDragIcon({subjectId, boardKey, name}: {subjectId:string;b
   return <span draggable={Boolean(boardId)&&!isNativeReadOnly()} title="Arrastrar acceso a esta pizarra"
     onPointerDown={event=>event.stopPropagation()}
     onClick={event=>{if(Date.now()-dragged.current<500){event.preventDefault();event.stopPropagation()}}}
-    onDragStart={event=>{dragged.current=Date.now();event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-cursado-board-link',JSON.stringify({boardId,name}))}}
+    onDragStart={event=>{dragged.current=Date.now();event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-cursado-board-link',JSON.stringify({boardId:`local:important-${boardId}`,name}))}}
     onDragEnd={()=>{dragged.current=Date.now()}}><img draggable={false} src="/pizarra-home.svg" alt="" className="h-7 w-7 object-contain" /></span>
 }
 
@@ -1339,8 +1344,8 @@ export function SubjectWheel({
     isMainWorkspaceTabVisible,
   }
   const workspaceTabList = useMemo(
-    () => [...getWorkspaceTabList(workspaceTabs, isMainWorkspaceTabVisible), { id: COOPERATIVE_TAB_ID, name: 'Cooperativo', color: '#16a34a', createdAt: '', subjectIds: [] }],
-    [isMainWorkspaceTabVisible, workspaceTabs]
+    () => [...getWorkspaceTabList(workspaceTabs, isMainWorkspaceTabVisible && (!LOCAL_STORAGE_MODE || hasMainStudySubjects(customSubjects))), { id: COOPERATIVE_TAB_ID, name: 'Cooperativo', color: '#16a34a', createdAt: '', subjectIds: [] }],
+    [isMainWorkspaceTabVisible, workspaceTabs, customSubjects]
   )
   const activeWorkspaceTab = useMemo(
     () => workspaceTabList.find((tab) => tab.id === activeWorkspaceTabId) ?? getMainWorkspaceTab(),
@@ -1806,8 +1811,9 @@ export function SubjectWheel({
   }, [customSubjects, workspaceTabs])
 
   useEffect(() => {
-    if (!deleteConfirmationTarget || !LOCAL_STORAGE_MODE) {
+    if (!deleteConfirmationTarget || deleteConfirmationTarget.type === 'tab' || !LOCAL_STORAGE_MODE) {
       setDeleteSummaries([])
+      setIsPreparingPermanentDelete(false)
       return
     }
     if(Object.values(cooperative.mirrors).some(m=>m.binding.owner&&(m.error||m.copySource)&&getDeleteTargetSubjectIds(deleteConfirmationTarget).includes(m.binding.subjectId))){setDeleteSummaries([]);setIsPreparingPermanentDelete(false);return}
@@ -1930,6 +1936,17 @@ export function SubjectWheel({
     }
   }, [activeWorkspaceTabId, deleteConfirmationTarget, getDeleteTargetSubjectIds, isPreparingPermanentDelete, workspaceTabList])
 
+  const removeWorkspaceTab = () => {
+    const target = deleteConfirmationTarget
+    if (target?.type !== 'tab') return
+    const next = removeStudyTab(workspaceTabs, customSubjects, target.id)
+    setWorkspaceTabs(next.workspaceTabs)
+    setCustomSubjects(next.customSubjects)
+    setIsMainWorkspaceTabVisible(next.isMainWorkspaceTabVisible)
+    setActiveWorkspaceTabId(next.activeWorkspaceTabId)
+    hasUserChangedWorkspaceStateRef.current = true
+    setDeleteConfirmationTarget(null); setDeleteSummaries([])
+  }
   const failedCooperationTarget = deleteConfirmationTarget?.type === 'subject' ? Object.values(cooperative.mirrors).find(m => m.binding.owner && (m.error || m.copySource) && getDeleteTargetSubjectIds(deleteConfirmationTarget).includes(m.binding.subjectId)) : undefined
   const deleteMoveDestinationTabs = useMemo(() => {
     if (!deleteConfirmationTarget) return []
@@ -2119,12 +2136,19 @@ export function SubjectWheel({
     if (LOCAL_STORAGE_MODE) return
 
     let isCancelled = false
+    let inFlight = false
+    let lastSync = 0
+    const controller = new AbortController()
 
     const syncSession = async () => {
+      if (document.hidden || inFlight || Date.now() - lastSync < 1000) return
+      inFlight = true
+      lastSync = Date.now()
       try {
         const response = await fetch("/api/auth/session", {
           cache: "no-store",
           credentials: "same-origin",
+          signal: controller.signal,
         })
 
         if (response.status === 401) {
@@ -2165,7 +2189,9 @@ export function SubjectWheel({
           router.refresh()
         }
       } catch (error) {
-        console.error("Failed to sync auth session:", error)
+        if (!isCancelled) console.error("Failed to sync auth session:", error)
+      } finally {
+        inFlight = false
       }
     }
 
@@ -2185,6 +2211,7 @@ export function SubjectWheel({
 
     return () => {
       isCancelled = true
+      controller.abort()
       window.clearInterval(intervalId)
       window.removeEventListener("focus", handleFocus)
       document.removeEventListener("visibilitychange", handleFocus)
@@ -5094,6 +5121,7 @@ export function SubjectWheel({
       if (!choice) return
       setIsConvertingImages(true)
       try {
+        const { createPdfFromImages } = await import('@/lib/client/images-to-pdf')
         const batches = choice.combined ? [choice.files] : choice.files.map(file => [file])
         for (const batch of batches) {
           try {
@@ -5295,6 +5323,7 @@ export function SubjectWheel({
     setDroppedTextPdfError("")
 
     try {
+      const { createPdfFileFromText } = await import('@/lib/client/text-to-pdf')
       const file = await createPdfFileFromText(draft.text, droppedTextPdfName)
       setDroppedTextPdfDraft(null)
       setDroppedTextPdfName("")
@@ -7624,12 +7653,12 @@ export function SubjectWheel({
         </div>
       </header>
 
-      <TtsTestDialog open={isTtsTestOpen} onOpenChange={setIsTtsTestOpen} />
-      <SubjectVoiceDialog
+      {isTtsTestOpen && <TtsTestDialog open={isTtsTestOpen} onOpenChange={setIsTtsTestOpen} />}
+      {voiceSubject && <SubjectVoiceDialog
         subject={voiceSubject ? { id: voiceSubject.id, name: getSubjectDisplayName(voiceSubject) } : null}
         weekNumber={homeSelectedWeekNumber}
         onClose={() => setVoiceSubject(null)}
-      />
+      />}
       {/* Main Content */}
       <main className="absolute inset-0 overflow-y-auto px-4 py-12 sm:px-6">
         {activeWorkspaceTabId === COOPERATIVE_TAB_ID ? <CooperationPanel onOpen={(subjectId, groupId) => {
@@ -7745,7 +7774,7 @@ export function SubjectWheel({
         <p>Las materias se reiniciarán mañana</p>
       </footer>
 
-      {session.isAdmin && !LOCAL_STORAGE_MODE ? (
+      {session.isAdmin && !LOCAL_STORAGE_MODE && isAdminModalOpen ? (
         <AdminAccessModal open={isAdminModalOpen} onOpenChange={setIsAdminModalOpen} subjectOptions={SUBJECTS} />
       ) : null}
 
@@ -7944,9 +7973,9 @@ export function SubjectWheel({
       }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{deleteConfirmationTarget?.type === "tab" ? "Opciones de pestaña" : "Opciones de materia"}</DialogTitle>
+            <DialogTitle>{deleteConfirmationTarget?.type === "tab" ? "Eliminar pestaña" : "Opciones de materia"}</DialogTitle>
             <DialogDescription>
-              {isPreparingPermanentDelete
+              {deleteConfirmationTarget?.type === 'tab' ? 'Se elimina la pestaña y se conservan sus materias y archivos. Las materias propias pasan a Inicio; si quitás Inicio, pasan a Mis materias.' : isPreparingPermanentDelete
                 ? `Revisando ${deleteConfirmationTarget?.label ?? ""}...`
                 : `${deleteConfirmationTarget?.label ?? ""}: ${deleteSummaries.reduce((total, summary) => total + summary.fileCount, 0)} archivos y ${deleteSummaries.reduce((total, summary) => total + summary.materialCount, 0)} materiales locales.`}
             </DialogDescription>
@@ -7956,6 +7985,7 @@ export function SubjectWheel({
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={isPermanentlyDeleting}>Cancelar</Button>
             </DialogClose>
+            {deleteConfirmationTarget?.type === 'tab' ? <Button type="button" variant="destructive" onClick={removeWorkspaceTab}>Eliminar pestaña</Button> : <>
             <DropdownMenu onOpenChange={open=>{if(open)void refreshCooperation().catch(error=>setWorkspaceNoticeMessage(error instanceof Error?error.message:String(error)))}}>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.length === 0 || isPermanentlyDeleting}>
@@ -8005,6 +8035,7 @@ export function SubjectWheel({
               {isPermanentlyDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {failedCooperationTarget ? 'Deshacer' : 'Borrar'}
             </Button>
+            </>}
           </DialogFooter>
         </DialogContent>
       </Dialog>

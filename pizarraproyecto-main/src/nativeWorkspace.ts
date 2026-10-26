@@ -53,4 +53,5 @@ export async function loadNativeAsset(id: string) {
   if (path.startsWith('data:')) { const match=/^data:([^;,]+);base64,(.*)$/.exec(path); if (!match) throw new Error('Imagen inválida.'); return new Blob([Uint8Array.from(atob(match[2]),char=>char.charCodeAt(0))],{type:match[1]}) }
   return (await read(path)).blob()
 }
+export function nativeAssetCacheKey(id: string) { return `native:${nativeSnapshot().manifest?.revision}:${current?.id}:${id}` }
 export { readOnlyError }

@@ -1,0 +1,10 @@
+.advanced-object-toolbar{position:absolute;z-index:75;display:flex;flex-wrap:wrap;align-items:center;gap:3px;max-width:calc(100% - 16px);padding:5px;border-radius:14px;background:#202020;color:#fff;box-shadow:0 5px 15px #0003;font:13px system-ui}
+.advanced-object-toolbar button{background:transparent;color:inherit;border:0;border-radius:7px;min-width:34px;min-height:32px;padding:5px 8px;cursor:pointer;white-space:nowrap}
+.advanced-object-toolbar button:hover,.advanced-object-toolbar button[aria-pressed=true]{background:#9747ff}
+.object-fill-swatch{display:inline-block;vertical-align:middle;width:19px;height:19px;border-radius:50%;border:1px solid #ffffff60;margin-right:6px}
+.object-toolbar-popup{position:absolute;box-sizing:border-box;width:350px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 90px);overflow:auto;background:#202020;color:white;border-radius:14px;padding:12px;box-shadow:0 5px 15px #0004}
+.object-toolbar-popup label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:6px 0}.object-toolbar-popup select,.object-toolbar-popup input[type=number]{background:#343434;color:white;border:1px solid #555;border-radius:6px;padding:5px;max-width:180px}
+.object-fill-modes{display:flex;gap:3px;border-bottom:1px solid #444;padding-bottom:10px;margin-bottom:10px}.object-fill-modes button{font-size:12px;padding:4px 6px}
+.object-color-grid{display:grid;grid-template-columns:repeat(11,1fr);gap:7px}.object-color-grid button,.object-color-grid input{box-sizing:border-box;width:23px;height:23px;min-height:23px;min-width:0;border-radius:50%;padding:0;border:1px solid #ffffff30}.object-color-grid button[aria-pressed=true]{outline:2px solid #9747ff;outline-offset:2px}
+.shape-inline-editor{position:absolute;box-sizing:border-box;z-index:65;resize:none;background:#ffffff09;border:1px dashed #9747ff;outline:none;padding:12px;line-height:1.25;transform-origin:center;}
+@media(max-width:600px){.advanced-object-toolbar{gap:0}.advanced-object-toolbar button{min-width:28px;padding:4px}.object-toolbar-popup{width:320px}.object-color-grid{gap:5px}}

@@ -23,6 +23,8 @@ export function studyNoteText(study:StudyNote):string {
   return `${study.deck} · ${study.face==='question'?'Pregunta':'Respuesta'}\n${study[study.face]}`.slice(0,10000)
 }
 export type ShapeItem = Bounds & {
+  fill?:string;fillOpacity?:number;strokeStyle?:'solid'|'dash'|'dot';
+  labelColor?:string;labelFontFamily?:string;labelBold?:boolean;labelItalic?:boolean;labelStrike?:boolean;labelList?:boolean;labelAlign?:'left'|'center'|'right';labelHref?:string;
   id:string;kind:ShapeKind;color:string;strokeWidth:number;reverse?:boolean;backwards?:boolean;rotation?:number;
   groupId?:string;zIndex?:number;visualType?:'sticky'|'connector'|'symbol'|'page'|'code'|'pdf-shortcut'|'review-marker'|'important-countdown'|'board-shortcut';code?:CodeData;
   pdfReference?: BoardPdfReference;

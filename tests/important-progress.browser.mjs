@@ -172,7 +172,8 @@ test("Important rows stay in place until leaving and reentering, including after
   // Change the new task to a short deadline without moving its row.
   await rows.last().getByText("7d", { exact: true }).click()
   const calendar = page.locator("[data-calendar-gestures]")
-  await calendar.locator("button.border.h-24").filter({ hasText: /^1$/ }).click()
+  // The day may already contain an event (e.g. seven days from Oct 25 is Nov 1).
+  await calendar.locator("button.border.h-24").filter({ has: page.getByText("1", { exact: true }) }).click()
   assert.deepEqual(await order(), ["BD", "EO", "Igual", "P3", "Nueva"])
   // A board overlay is still part of this visit to Important tasks.
   await rows.first().getByRole("button", { name: /Tema Tema\. Abrir pizarra/ }).click()

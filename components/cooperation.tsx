@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
+const ShareImportantTasksDialog = lazy(() => import('./share-important-tasks-dialog'))
 import { cooperationUndoStatus } from '@/lib/client/cooperation'
 import { ListChecks, RefreshCw, X } from 'lucide-react'
 import { undoCooperationSphere, acceptCooperationGroup, acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
@@ -112,9 +113,12 @@ function CooperationGroupInvitation({ groupId }: { groupId: string }) {
 }
 export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, groupId: string) => void }) {
   const state = useCooperation(), [invite, setInvite] = useState<CooperativeSphere | null>(null), [error, setError] = useState('')
+  const [sharingImportant, setSharingImportant] = useState(false)
   return <section className="relative z-10 mx-auto w-full max-w-2xl space-y-5 rounded-2xl border bg-background p-6 shadow-sm" aria-label="Estudio cooperativo">
     <h1 className="text-xl font-medium">Cooperativo</h1>
     <CooperationGroupForm />
+    {!isNativeReadOnly() && <button className="rounded-lg border px-4 py-2" onClick={() => setSharingImportant(true)}>Compartir mis importantes</button>}
+    {sharingImportant && <Suspense fallback={<p role="status">Cargando importantes?</p>}><ShareImportantTasksDialog onClose={() => setSharingImportant(false)} /></Suspense>}
     {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
     {!state.groups.length && <p className="text-muted-foreground">Todavía no hay esferas compartidas. Agregá compañeros y referenciá una esfera en el grupo. Los archivos se mantienen compartidos.</p>}
     {state.groups.map(group => <section key={group.id} data-cooperation-group={group.id} className="space-y-3 rounded-xl border p-4">
@@ -122,7 +126,8 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
         <h2 className="min-w-0 break-words">{group.members.map(m => m.display_name).join(', ')}</h2>
         {!group.accepted && <CooperationGroupInvitation groupId={group.id} />}
       </div>
-      {!group.spheres.length && <p className="text-sm text-muted-foreground">Este grupo está vacío.</p>}
+      {!group.spheres.length && !group.importantShares?.length && <p className="text-sm text-muted-foreground">Este grupo está vacío.</p>}
+      {!!group.importantShares?.length && <p className="text-sm text-muted-foreground">Importantes compartidos: {group.importantShares.length}. Las filas se reciben en tu lista al sincronizar.</p>}
       <div className="flex flex-wrap gap-4">{group.spheres.map(sphere => {
         const undoStage = cooperationUndoStatus(sphere.id)
         if (undoStage) return <div key={sphere.id} role="status" aria-live="polite" className="w-48 space-y-2 rounded-xl border p-3 text-left text-sm">

@@ -2,12 +2,16 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { isNativeReadOnly } from "@/lib/native-workspace"
-import ImportantProgressView from "@/components/important-progress-view"
+import dynamic from "next/dynamic"
+const ImportantProgressView = dynamic(() => import("@/components/important-progress-view"), { ssr: false })
 import "./progress-original/theme.css"
 const editing = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=slider], [role=spinbutton]"))
 
 export function StudyImportantTasks({ children, boardLibrary = false }: { children: ReactNode; boardLibrary?: boolean }) {
   const [open, setOpen] = useState(false)
+  const [hasOpened, setHasOpened] = useState(false)
+  // Retain drafts and pending save queues after the first visit.
+  useEffect(() => { if (open) setHasOpened(true) }, [open])
   const [tabsOpen, setTabsOpen] = useState(false)
   const touch = useRef<{ x: number; y: number } | null>(null)
   const navigation = useRef({open,tabsOpen})
@@ -59,6 +63,6 @@ export function StudyImportantTasks({ children, boardLibrary = false }: { childr
     }}>
     {boardLibrary && !open && <button type="button" className="fixed bottom-4 left-4 z-40 rounded-xl border bg-background px-4 py-2 text-foreground shadow" onClick={() => setOpen(true)}>Importantes</button>}
     <div hidden={open} inert={open}>{children}</div>
-    <div hidden={!open} inert={!open} className="progress-original"><ImportantProgressView active={open} onBack={() => setOpen(false)} /></div>
+    {(open || hasOpened) && <div hidden={!open} inert={!open} className="progress-original"><ImportantProgressView active={open} onBack={() => setOpen(false)} /></div>}
   </div>
 }

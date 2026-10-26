@@ -10,7 +10,7 @@ import { getReadyInscreenConfigToken, getReadyWorkspaceHandle, loadServicesFile,
 import { applyMirrorFile, digest, isFileReferenced, mapBindingJson, mapBindingText, readFile, readJson, removeFile, scanSphere, writeFile, writeJson, type SphereBinding } from './cooperation-files.ts'
 
 export type CooperativeSphere = { id: string; group_id: string; name: string; color: string; created_by: string; bytes: number; ready?: boolean }
-export type CooperativeGroup = { id: string; accepted: boolean; members: { id: string; display_name: string }[]; spheres: CooperativeSphere[] }
+export type CooperativeGroup = { id: string; accepted: boolean; members: { id: string; display_name: string }[]; spheres: CooperativeSphere[]; importantShares?: CooperativeSphere[] }
 export type Resource = { key: string; type: 'json' | 'blob' | 'delete'; value?: Json; blob?: { hash: string; size: number; mime: string }; deleted?: boolean; seq?: number; author?: string }
 type Snapshot = { seq: number; resources: Record<string, Resource>; conflicts: Json[] }
 type Operation = { id: string; changes: (Resource & { base?: Json; baseHash?: string })[] }
@@ -881,7 +881,7 @@ async function connectMirror(id: string) {
   const userId = state.userId, directory = id === '@directory', generation = connectionGeneration
   try {
     const { url } = await cooperationApi(directory ? 'notifications/ticket' : `spheres/${id}/ticket`, {})
-    if (isUndoPending(id) || (!directory && !state.mirrors[id]) || sockets.has(id) || state.userId !== userId || generation !== connectionGeneration) return
+    if (isUndoPending(id) || (!directory && !state.mirrors[id] && !state.groups.some(g=>g.accepted&&g.importantShares?.some(s=>s.id===id))) || sockets.has(id) || state.userId !== userId || generation !== connectionGeneration) return
     const socket = new WebSocket(url); sockets.set(id, socket)
     let initialChange = true
     socket.onopen = () => connectedBackground?.()
@@ -943,6 +943,7 @@ export function synchronizeCooperation(): Promise<void> {
         }
       }
       await withStateLock(execute)
+      if(state.groups.some(g=>g.accepted&&g.importantShares?.length)) await (await import('./important-cooperation')).synchronizeImportantShares()
     } while (syncAgain)
   }
   syncing = work().finally(() => { syncing = null })
@@ -1018,12 +1019,12 @@ export function localCooperationBoardId(subjectId: string, id: string) {
 }
 export function cooperationPresence(subjectId: string) {
   const b = Object.values(state.mirrors).find(m => m.binding.subjectId === subjectId)?.binding
-  return b ? presences.get(b.id) : undefined
+  return presences.get(subjectId.startsWith('important-share:')?subjectId.slice(16):b?.id||'')
 }
 export function sendCooperationEditor(subjectId: string, document: string, payload: unknown) {
   const b = Object.values(state.mirrors).find(m => m.binding.subjectId === subjectId)?.binding
-  const socket = b && sockets.get(b.id)
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'editor', document: mapBindingText(document, b!, false), payload }))
+  const socket = sockets.get(subjectId.startsWith('important-share:')?subjectId.slice(16):b?.id||'')
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'editor', document: b?mapBindingText(document, b, false):document, payload }))
 }
 export async function guardCooperationElement(subjectId: string, elementId: string | number | undefined, open: () => void, fileKey?: string) {
   const pending = cooperationDeletionFor(subjectId, elementId, fileKey)
@@ -1070,6 +1071,10 @@ export function startCooperationBackground() {
           // Presence must connect before scanning files, so a peer joining can
           // immediately switch pending local changes to live synchronization.
           for (const mirror of Object.values(state.mirrors)) void connectMirror(mirror.binding.id)
+          for(const group of state.groups)if(group.accepted)for(const share of group.importantShares||[])void connectMirror(share.id)
+          // Deliver rows on discovery even if the sender has gone offline or
+          // this browser cannot establish a WebSocket connection.
+          if(state.groups.some(group=>group.accepted&&group.importantShares?.length)) await (await import('./important-cooperation')).synchronizeImportantShares()
           scheduler.request()
         }
       } while (refreshAgain && !stopped)

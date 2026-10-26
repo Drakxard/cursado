@@ -1,5 +1,8 @@
 # Memoria de la pizarra
 
+La implementación y las mediciones de vistas previas persistentes e inicio de
+Estudio del 2026-10-25 se detallan en [Imágenes escalables](pizarra-imagenes-rendimiento.md).
+
 La pizarra conserva los archivos originales en almacenamiento. Las vistas previas
 se decodifican según zoom, tamaño mostrado y densidad de pantalla, con un presupuesto
 conjunto de 64 MiB y un máximo de dos operaciones simultáneas. Los recursos que salen

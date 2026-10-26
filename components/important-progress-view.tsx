@@ -228,6 +228,7 @@ interface CalendarEvent {
 }
 
 interface TaskItem {
+  cooperation?: ImportantTask["cooperation"]
   id: string
   text: string
   numerator: number
@@ -260,7 +261,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
   const [isLoading, setIsLoading] = useState(true)
   const [topicInputs, setTopicInputs] = useState<Record<string, string>>({})
   const [addingTopicId, setAddingTopicId] = useState<string | null>(null)
-  const [selectedTopicBoard, setSelectedTopicBoard] = useState<{ boardId: string; name: string } | null>(null)
+  const [selectedTopicBoard, setSelectedTopicBoard] = useState<{ boardId: string; name: string; cooperationSubjectId?: string } | null>(null)
   const closeTopicBoard = useCallback(() => setSelectedTopicBoard(null), [])
   const [deleteTarget, setDeleteTarget] = useState<
     { kind: "task"; taskId: string; label: string } |
@@ -292,6 +293,9 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
   const subjectSchedules: { name: string; theoryDate?: string; practiceDate?: string }[] = []
   const queue = useRef(Promise.resolve())
   const loaded = useRef(false)
+  const baseline = useRef<ImportantTask[]>([])
+  const [externalRevision, setExternalRevision] = useState(0)
+  useEffect(() => { const refresh = () => { void queue.current.finally(() => setExternalRevision(n => n + 1)) }; window.addEventListener("cursado-cooperation-applied", refresh); return () => window.removeEventListener("cursado-cooperation-applied", refresh) }, [])
   useEffect(() => {
     if (!active) return
     let subscribed = true
@@ -300,19 +304,20 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
     setStorageError("")
     if (rootHandle && isReady) readImportantTasks(rootHandle, isNativeReadOnly()).then(tasks => {
       if (!subscribed) return
+      baseline.current = tasks
       if(initialCalendarTaskId){
         const task=tasks.find(task=>task.id===initialCalendarTaskId)
         if(task){const [year,month,day]=task.dueDate.split('-').map(Number);setCalendarDate(new Date(year,month-1,day))}
       }
       setTables([{ title: "Importantes", tasks: tasks.map(task => {
         const progress = importantTaskProgress(task)
-        return { id: task.id, text: task.text, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
+        return { cooperation: task.cooperation, id: task.id, text: task.text, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
       }).sort(compareTaskDaysRemaining) }])
       loaded.current = true
       setIsLoading(false)
     }).catch(error => { if (subscribed) { setStorageError(String(error)); setIsLoading(false) } })
     return () => { subscribed = false }
-  }, [rootHandle, isReady, active, initialCalendarTaskId])
+  }, [rootHandle, isReady, active, initialCalendarTaskId, externalRevision])
   useEffect(() => {
     if (!active || !loaded.current) return
     setTables(previous => {
@@ -329,9 +334,11 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
       due.setDate(due.getDate() + (task.days ?? task.denominator - task.numerator))
       const start = new Date(due)
       start.setDate(start.getDate() - task.denominator)
-      return { id: task.id, text: task.text, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [], topicBoardIds: task.topicBoardIds ?? [] }
+      return { cooperation: task.cooperation, id: task.id, text: task.text, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [], topicBoardIds: task.topicBoardIds ?? [] }
     })
-    queue.current = queue.current.catch(() => {}).then(() => writeImportantTasks(rootHandle, tasks)).then(() => setStorageError("")).catch(error => setStorageError(String(error)))
+    const previous = baseline.current
+    baseline.current = tasks
+    queue.current = queue.current.catch(() => {}).then(async () => { await writeImportantTasks(rootHandle, tasks, previous) }).then(() => setStorageError("")).catch(error => setStorageError(String(error)))
   }, [tables, rootHandle])
   const changeTask = (id: string, patch: Partial<TaskItem>) => { if (!isNativeReadOnly()) setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, ...patch } : task) }]) }
   const saveTask = async (id: string) => { changeTask(id, { text: editText }); setEditingId(null); setEditText("") }

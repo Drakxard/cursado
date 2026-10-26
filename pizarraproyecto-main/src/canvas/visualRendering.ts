@@ -31,10 +31,14 @@ export function paintLabel(ctx:CanvasRenderingContext2D,item:ShapeItem,color:str
   if(!item.label)return
   const font=item.labelFontSize??16
   const code=item.symbol==='code'
-  ctx.save();ctx.fillStyle=color;ctx.font=`${font}px ${code?'ui-monospace,Consolas,monospace':'system-ui,sans-serif'}`;ctx.textBaseline='middle';ctx.textAlign=code?'left':'center'
+  ctx.save();ctx.fillStyle=item.labelColor||color;ctx.font=`${item.labelItalic?'italic ':''}${item.labelBold?'700 ':''}${font}px ${code?'ui-monospace,Consolas,monospace':item.labelFontFamily||'system-ui,sans-serif'}`;ctx.textBaseline='middle';ctx.textAlign=code?'left':item.labelAlign||'center'
   ctx.beginPath();ctx.rect(item.x+6,item.y+4,Math.max(1,item.width-12),Math.max(1,item.height-8));ctx.clip()
-  const lines=wrapped(ctx,item.label,Math.max(1,item.width-20))
-  lines.forEach((line,i)=>ctx.fillText(line,code?item.x+12:item.x+item.width/2,item.y+item.height/2+(i-(lines.length-1)/2)*font*1.25))
+  const lines=wrapped(ctx,item.labelList?item.label.split('\n').map(line=>`• ${line}`).join('\n'):item.label,Math.max(1,item.width-20))
+  lines.forEach((line,i)=>{
+    const x=ctx.textAlign==='left'?item.x+12:ctx.textAlign==='right'?item.x+item.width-12:item.x+item.width/2,y=item.y+item.height/2+(i-(lines.length-1)/2)*font*1.25
+    ctx.fillText(line,x,y)
+    if(item.labelStrike){const width=ctx.measureText(line).width,start=ctx.textAlign==='left'?x:ctx.textAlign==='right'?x-width:x-width/2;ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=Math.max(1,font/16);ctx.beginPath();ctx.moveTo(start,y);ctx.lineTo(start+width,y);ctx.stroke()}
+  })
   ctx.restore()
 }
 function cap(ctx:CanvasRenderingContext2D,tip:Point,previous:Point,kind:ConnectorCap,size:number) {

@@ -17,6 +17,7 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
   onClose: () => void
 }) {
   const frame = useRef<HTMLIFrameElement>(null)
+  const currentBoard = useRef({ boardId, cooperationSubjectId })
   const [ready, setReady] = useState(false)
   const [error, setError] = useState("")
   const [closing, setClosing] = useState(false)
@@ -28,11 +29,22 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
     } catch { return '#ffffff' }
   })
   useEffect(() => {
+    currentBoard.current = { boardId, cooperationSubjectId }
     const previousFocus = document.activeElement as HTMLElement | null
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = "hidden"
     const receive = (event: MessageEvent) => {
-      if (event.origin !== location.origin || event.source !== frame.current?.contentWindow || event.data?.boardId !== boardId) return
+      if (event.origin !== location.origin || event.source !== frame.current?.contentWindow) return
+      if (event.data?.type === 'topic-board:context') {
+        currentBoard.current = { boardId:event.data.boardId, cooperationSubjectId:event.data.cooperationSubjectId }
+        return
+      }
+      if (event.data?.type === 'topic-board:ephemeral') {
+        const current = currentBoard.current
+        if (current.cooperationSubjectId && event.data.boardId === current.boardId) sendCooperationEditor(current.cooperationSubjectId, current.boardId, event.data.payload)
+        return
+      }
+      if (event.data?.boardId !== boardId && !['topic-board:saved','topic-board:closed','topic-board:error'].includes(event.data?.type)) return
       if (event.data.type === "topic-board:request-init") {
         try {
           if (!isNativeReadOnly()) frame.current?.contentWindow?.postMessage({ type: "topic-board:init", boardId, name, rootHandle, pdfReferences, cooperationSubjectId, cooperationWeekNumber }, location.origin)
@@ -52,12 +64,14 @@ export function TopicBoardOverlay({ boardId, name, rootHandle, onClose, pdfRefer
     const refresh = () => frame.current?.contentWindow?.postMessage({ type: 'topic-board:refresh', boardId }, location.origin)
     window.addEventListener('cursado-cooperation-applied', refresh)
     const live = (event: Event) => {
-      if (!cooperationSubjectId) return
+      const current = currentBoard.current
+      if (!current.cooperationSubjectId) return
       const message = (event as CustomEvent).detail
       const b = cooperationState().mirrors[message.sphereId]?.binding
-      if (b?.subjectId !== cooperationSubjectId) return
-      if (message.type === 'editor' && mapBindingText(message.document, b, true) !== boardId) return
-      frame.current?.contentWindow?.postMessage({ type: 'topic-board:live', boardId, payload: message.type === 'presence' ? message : message.payload }, location.origin)
+      const important = current.cooperationSubjectId === `important-share:${message.sphereId}`
+      if (!important && b?.subjectId !== current.cooperationSubjectId) return
+      if (message.type === 'editor' && (b ? mapBindingText(message.document, b, true) : message.document) !== current.boardId) return
+      frame.current?.contentWindow?.postMessage({ type: 'topic-board:live', boardId: current.boardId, payload: message.type === 'presence' ? message : message.payload }, location.origin)
     }
     window.addEventListener('cursado-cooperation-editor', live)
     window.addEventListener('cursado-cooperation-presence', live)

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
 
 async function openLocal(page) {
   await page.route('**/api/**', route => route.fulfill({ status: 503, body: 'offline' }))
@@ -79,8 +80,9 @@ test('previews follow zoom, release deleted images and leave stored originals in
   await page.locator('input[type=file][accept*="image/svg+xml"]').setInputFiles({ name: 'large.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
   await expect.poll(() => page.evaluate(() => window.previewMemory.bytes)).toBeGreaterThan(0)
   const first = await page.evaluate(() => window.previewMemory.widths.at(-1))
-  expect(first).toBeLessThan(1000)
-  await page.locator('.zoom-controls').getByRole('button', { name: 'Acercar', exact: true }).click()
+  expect(first).toBeLessThanOrEqual(1024)
+  // Resolution changes only after crossing a level, rather than at every zoom tick.
+  for (let i = 0; i < 4; i++) await page.locator('.zoom-controls').getByRole('button', { name: 'Acercar', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.previewMemory.widths.at(-1))).toBeGreaterThan(first)
   const originalWidth = await page.evaluate(async () => {
     const db = await new Promise(resolve => { const r = indexedDB.open('pizarra-dispositivo', 1); r.onsuccess = () => resolve(r.result) })
@@ -100,6 +102,70 @@ test('previews follow zoom, release deleted images and leave stored originals in
   await page.keyboard.press('Control+z')
   await expect.poll(() => page.evaluate(() => window.previewMemory.bytes)).toBeGreaterThan(0)
   expect(await page.evaluate(() => window.previewMemory.peak)).toBeLessThanOrEqual(64 * 1024 * 1024)
+})
+
+test('derived previews survive reopen offline, preserve alpha, and tolerate unavailable preview storage', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.previewInputs = []
+    const decode = window.createImageBitmap.bind(window)
+    window.createImageBitmap = async (...args) => {
+      const bitmap = await decode(...args)
+      if (args[1]?.resizeWidth) window.previewInputs.push({ width: bitmap.width, blobBytes: args[0].size })
+      return bitmap
+    }
+  })
+  await openLocal(page)
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement('canvas'); canvas.width = 3200; canvas.height = 2400
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#e21'; ctx.fillRect(800, 600, 1600, 1200)
+    return canvas.toDataURL().split(',')[1]
+  })
+  await page.locator('input[type=file][accept*="image/svg+xml"]').setInputFiles({ name: 'alpha.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
+  await expect.poll(() => page.evaluate(async () => {
+    if (!(await indexedDB.databases()).some(db => db.name === 'pizarra-image-previews-v1')) return 0
+    const db = await new Promise(resolve => { const r = indexedDB.open('pizarra-image-previews-v1'); r.onsuccess = () => resolve(r.result) })
+    const count = await new Promise(resolve => { const r = db.transaction('blobs').objectStore('blobs').count(); r.onsuccess = () => resolve(r.result) }); db.close(); return count
+  })).toBeGreaterThan(0)
+  await expect.poll(() => page.evaluate(() => window.previewInputs.length)).toBeGreaterThanOrEqual(2)
+  await page.waitForTimeout(800)
+  await page.reload(); await expect(page.locator('.app')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.previewInputs.length)).toBe(1)
+  const alpha = await page.evaluate(async () => {
+    const db = await new Promise(resolve => { const r = indexedDB.open('pizarra-image-previews-v1'); r.onsuccess = () => resolve(r.result) })
+    const blobs = await new Promise(resolve => { const r = db.transaction('blobs').objectStore('blobs').getAll(); r.onsuccess = () => resolve(r.result) }); db.close()
+    const bitmap = await createImageBitmap(blobs[0]), canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d'); ctx.drawImage(bitmap, 0, 0); bitmap.close()
+    return [ctx.getImageData(0, 0, 1, 1).data[3], ctx.getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data[3]]
+  })
+  expect(alpha).toEqual([0, 255])
+  // Failure of the disposable cache must not prevent drawing originals.
+  await page.addInitScript(() => {
+    const open = indexedDB.open.bind(indexedDB)
+    indexedDB.open = (name, ...args) => { if (name.startsWith('pizarra-image-previews')) throw new DOMException('Denied', 'SecurityError'); return open(name, ...args) }
+  })
+  await page.reload(); await expect(page.locator('.app')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.previewInputs.length)).toBeGreaterThanOrEqual(2)
+})
+
+test('a JPEG photograph keeps its original bytes and native aspect ratio', async ({ page }) => {
+  await openLocal(page)
+  const bytes = await readFile(new URL('../../../sintesis/sintesis-fondo.jpg', import.meta.url))
+  await page.locator('input[type=file][accept*="image/svg+xml"]').setInputFiles({ name: 'photograph.jpg', mimeType: 'image/jpeg', buffer: bytes })
+  await expect.poll(() => page.evaluate(async () => {
+    const db = await new Promise(resolve => { const r = indexedDB.open('pizarra-dispositivo', 1); r.onsuccess = () => resolve(r.result) })
+    const rows = await new Promise(resolve => { const r = db.transaction('boards').objectStore('boards').getAll(); r.onsuccess = () => resolve(r.result) }); db.close()
+    return rows[0]?.content.media.length ?? 0
+  })).toBe(1)
+  const result = await page.evaluate(async () => {
+    const db = await new Promise(resolve => { const r = indexedDB.open('pizarra-dispositivo', 1); r.onsuccess = () => resolve(r.result) })
+    const rows = await new Promise(resolve => { const r = db.transaction('boards').objectStore('boards').getAll(); r.onsuccess = () => resolve(r.result) })
+    const item = rows[0].content.media[0]
+    const blob = await new Promise(resolve => { const r = db.transaction('assets').objectStore('assets').get('device:' + item.assetId); r.onsuccess = () => resolve(r.result) }); db.close()
+    return { ratio: item.width / item.height, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))] }
+  })
+  expect(result.ratio).toBeCloseTo(2400 / 1597, 8)
+  const { createHash } = await import('node:crypto')
+  expect(Buffer.from(result.hash).toString('hex')).toBe(createHash('sha256').update(bytes).digest('hex'))
 })
 
 function pdfFixture() {

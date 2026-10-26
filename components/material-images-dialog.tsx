@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, GripVertical } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { sortMaterialImages } from "@/lib/client/images-to-pdf"
+import { sortMaterialImages } from "@/lib/client/material-image-files"
 
 export type ImageUploadChoice = { files: File[]; combined: boolean; name: string }
 

@@ -1,5 +1,5 @@
 import { PIZARRA_API_ROOT } from './backend'
-import { nativeBoardMode, nativeBoardLibrary, loadNativeBoard, loadNativeAsset, readOnlyError } from './nativeWorkspace'
+import { nativeBoardMode, nativeBoardLibrary, loadNativeBoard, loadNativeAsset, nativeAssetCacheKey, readOnlyError } from './nativeWorkspace'
 import type { Point, Stroke, TextItem, MediaItem, BoardData } from './storage/database'
 import { deviceDB, isPrivate, newLocalId, emptyContent, readDeviceBoard, writeDeviceBoard, localLibrary, migrateLegacy } from './storage/device'
 import type { DeviceBoard } from './storage/device'
@@ -377,6 +377,7 @@ export async function saveAsset(id: string, blob: Blob) {
     if(remoteEnabled&&navigator.onLine!==false)void uploadPendingAsset(id).catch(()=>{})
   }
 }
+export function imageAssetCacheKey(id: string) { return nativeBoardMode() ? nativeAssetCacheKey(id) : assetKey(id) }
 export async function loadAsset(id: string): Promise<Blob | undefined> {
   if (nativeBoardMode()) return loadNativeAsset(id)
   if(await linkBinding(activeId)) {

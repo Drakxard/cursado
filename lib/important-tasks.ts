@@ -1,4 +1,7 @@
+import { withWorkspaceFileLock } from './workspace-file-lock.ts'
+import { mergeCooperation, type Json } from './cooperation-model.ts'
 export type ImportantTask = {
+  cooperation?: { shareId: string; deliveryId: string }
   id: string
   text: string
   startDate: string
@@ -37,18 +40,23 @@ export async function readImportantTasks(root: FileSystemDirectoryHandle, requir
     task && typeof task.id === "string" && typeof task.text === "string" &&
     /^\d{4}-\d{2}-\d{2}$/.test(task.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate) &&
     typeof task.url === "string" && Array.isArray(task.topics) && task.topics.every(topic => typeof topic === "string") &&
+    (task.cooperation === undefined || (!!task.cooperation && /^[a-f0-9-]{36}$/.test(task.cooperation.shareId) && /^[a-f0-9-]{36}$/.test(task.cooperation.deliveryId))) &&
     (task.topicBoardIds === undefined || (Array.isArray(task.topicBoardIds) && task.topicBoardIds.length === task.topics.length && task.topicBoardIds.every(id => /^[a-zA-Z0-9-]{1,100}$/.test(id))))
   )) throw new Error("El archivo de importantes no tiene un formato válido.")
   return data.tasks
 }
 
-export async function writeImportantTasks(root: FileSystemDirectoryHandle, tasks: ImportantTask[]) {
+export async function writeImportantTasks(root: FileSystemDirectoryHandle, tasks: ImportantTask[], baseline?: ImportantTask[]) {
+ return withWorkspaceFileLock('important-tasks', async () => {
+  if (baseline) tasks = mergeCooperation(baseline as unknown as Json, tasks as unknown as Json, await readImportantTasks(root) as unknown as Json) as unknown as ImportantTask[]
   const directory = await root.getDirectoryHandle("progreso", { create: true })
   const file = await directory.getFileHandle("importantes.json", { create: true })
   const writer = await file.createWritable()
   await writer.write(JSON.stringify({ version: 1, tasks }, null, 2))
   await writer.close()
   if (typeof window !== "undefined") window.dispatchEvent(new Event("cursado-workspace-saved"))
+  return tasks
+ })
 }
 
 export function importantCountdownStyle(days: number) {

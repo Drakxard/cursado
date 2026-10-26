@@ -1,0 +1,1017 @@
+{
+  "date": "2026-10-25",
+  "timezone": "America/Buenos_Aires",
+  "baselineCommit": "fa4b17c7ad7856c83a1a44cb63ddfa3d7f944c5c",
+  "nodeVersion": "v22.16.0",
+  "builds": {
+    "beforeBoard": [
+      "assets/index-wfOHC7It.js"
+    ],
+    "afterBoard": [
+      "assets/index-MzbGXuwj.js"
+    ],
+    "after": "working tree"
+  },
+  "method": "Both board versions use fresh persistent Chrome profiles, then reopen each profile in a fresh browser process. Study uses an isolated context with an OPFS fixture. Single exploratory runs; process working set includes browser/GPU and is not tab memory.",
+  "study": {
+    "before": {
+      "fixture": "production Study, one synthetic local subject and important task, embedded board, OPFS; 1366x900 DPR 1",
+      "note": "Working set includes browser/GPU.",
+      "results": [
+        {
+          "label": "Study initial",
+          "workingSetBytes": 490442752,
+          "jsHeapBytes": 7240196,
+          "dom": {
+            "documents": 1,
+            "nodes": 113,
+            "jsEventListeners": 395
+          },
+          "decodedBytes": 0,
+          "peakDecodedBytes": 0,
+          "decodes": 0,
+          "longTasks": 2,
+          "longestTaskMs": 81,
+          "frameP95Ms": null,
+          "canvases": 0,
+          "canvasBytes": 0,
+          "iframes": 0,
+          "workers": 0
+        },
+        {
+          "label": "Study idle",
+          "workingSetBytes": 500064256,
+          "jsHeapBytes": 7292136,
+          "dom": {
+            "documents": 1,
+            "nodes": 113,
+            "jsEventListeners": 390
+          },
+          "decodedBytes": 0,
+          "peakDecodedBytes": 0,
+          "decodes": 0,
+          "longTasks": 2,
+          "longestTaskMs": 81,
+          "frameP95Ms": null,
+          "canvases": 0,
+          "canvasBytes": 0,
+          "iframes": 0,
+          "workers": 0
+        },
+        {
+          "label": "Important tasks opened",
+          "workingSetBytes": 504578048,
+          "jsHeapBytes": 7426560,
+          "dom": {
+            "documents": 1,
+            "nodes": 142,
+            "jsEventListeners": 396
+          },
+          "decodedBytes": 0,
+          "peakDecodedBytes": 0,
+          "decodes": 0,
+          "longTasks": 2,
+          "longestTaskMs": 81,
+          "frameP95Ms": null,
+          "canvases": 0,
+          "canvasBytes": 0,
+          "iframes": 0,
+          "workers": 0
+        },
+        {
+          "label": "Study after board return",
+          "workingSetBytes": 522424320,
+          "jsHeapBytes": 7597248,
+          "dom": {
+            "documents": 1,
+            "nodes": 147,
+            "jsEventListeners": 396
+          },
+          "decodedBytes": 0,
+          "peakDecodedBytes": 0,
+          "decodes": 0,
+          "longTasks": 4,
+          "longestTaskMs": 128,
+          "frameP95Ms": null,
+          "canvases": 0,
+          "canvasBytes": 0,
+          "iframes": 0,
+          "workers": 0
+        }
+      ],
+      "javascriptBytes": 1383162
+    },
+    "after": {
+      "fixture": "production Study, one synthetic local subject and important task, embedded board, OPFS; 1366x900 DPR 1",
+      "note": "Working set includes browser/GPU.",
+      "results": [
+        {
+          "label": "Study initial",
+          "workingSetBytes": 495120384,
+          "jsHeapBytes": 6992168,
+          "dom": {
+            "documents": 1,
+            "nodes": 107,
+            "jsEventListeners": 394
+          },
+          "decodedBytes": 0,
+          "peakDecodedBytes": 0,
+          "decodes": 0,
+          "originalDecodes": 0,
+          "longTasks": 5,
+          "longestTaskMs": 147,
+          "frameP95Ms": null,
+          "canvases": 0,
+          "canvasBytes": 0,
+          "iframes": 0,
+          "workers": 0
+        },
+        {
+          "label": "Study idle",
+          "workingSetBytes": 503324672,
+          "jsHeapBytes": 7046312,
+          "dom": {
+            "documents": 1,
+            "nodes": 107,
+            "jsEventListeners": 389
+          },
+          "decodedBytes": 0,
+          "peakDecodedBytes": 0,
+          "decodes": 0,
+          "originalDecodes": 0,
+          "longTasks": 5,
+          "longestTaskMs": 147,
+          "frameP95Ms": null,
+          "canvases": 0,
+          "canvasBytes": 0,
+          "iframes": 0,
+          "workers": 0
+        },
+        {
+          "label": "Important tasks opened",
+          "workingSetBytes": 506380288,
+          "jsHeapBytes": 7267684,
+          "dom": {
+            "documents": 1,
+            "nodes": 144,
+            "jsEventListeners": 398
+          },
+          "decodedBytes": 0,
+          "peakDecodedBytes": 0,
+          "decodes": 0,
+          "originalDecodes": 0,
+          "longTasks": 5,
+          "longestTaskMs": 147,
+          "frameP95Ms": null,
+          "canvases": 0,
+          "canvasBytes": 0,
+          "iframes": 0,
+          "workers": 0
+        },
+        {
+          "label": "Study after board return",
+          "workingSetBytes": 524922880,
+          "jsHeapBytes": 7462644,
+          "dom": {
+            "documents": 1,
+            "nodes": 149,
+            "jsEventListeners": 398
+          },
+          "decodedBytes": 0,
+          "peakDecodedBytes": 0,
+          "decodes": 0,
+          "originalDecodes": 0,
+          "longTasks": 7,
+          "longestTaskMs": 147,
+          "frameP95Ms": null,
+          "canvases": 0,
+          "canvasBytes": 0,
+          "iframes": 0,
+          "workers": 0
+        }
+      ],
+      "javascriptBytes": 1283178
+    }
+  },
+  "images": {
+    "before": {
+      "fixture": "real imports of 3200x2400 PNGs: text, gradients with detail, transparency; 1366x900 DPR1",
+      "note": "Synthetic fixtures, not personal files or real photos. Working set includes browser and GPU; decoded peaks include transient bitmaps, not all decoder buffers.",
+      "reports": [
+        {
+          "count": 10,
+          "importMs": 4658,
+          "disk": null,
+          "results": [
+            {
+              "label": "after actual import, images overlapping",
+              "workingSetBytes": 771223552,
+              "jsHeapBytes": 6081396,
+              "dom": {
+                "documents": 2,
+                "nodes": 206,
+                "jsEventListeners": 260
+              },
+              "decodedBytes": 17694720,
+              "peakDecodedBytes": 17694720,
+              "decodes": 10,
+              "originalDecodes": 10,
+              "longTasks": 12,
+              "longestTaskMs": 135,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "grid after reopen",
+              "workingSetBytes": 724123648,
+              "jsHeapBytes": 4634916,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 655360,
+              "peakDecodedBytes": 655360,
+              "decodes": 10,
+              "originalDecodes": 10,
+              "longTasks": 1,
+              "longestTaskMs": 97,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "zoom burst settled",
+              "workingSetBytes": 734916608,
+              "jsHeapBytes": 5519208,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 655360,
+              "peakDecodedBytes": 983040,
+              "decodes": 36,
+              "originalDecodes": 36,
+              "longTasks": 2,
+              "longestTaskMs": 97,
+              "frameP95Ms": 17,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 10 camera cycles",
+              "workingSetBytes": 746708992,
+              "jsHeapBytes": 5570940,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 655360,
+              "peakDecodedBytes": 983040,
+              "decodes": 70,
+              "originalDecodes": 70,
+              "longTasks": 2,
+              "longestTaskMs": 97,
+              "frameP95Ms": 17,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 20 camera cycles",
+              "workingSetBytes": 721879040,
+              "jsHeapBytes": 5629940,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 655360,
+              "peakDecodedBytes": 983040,
+              "decodes": 107,
+              "originalDecodes": 107,
+              "longTasks": 2,
+              "longestTaskMs": 97,
+              "frameP95Ms": 17,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "fresh browser with cached board",
+              "workingSetBytes": 554172416,
+              "jsHeapBytes": 4529464,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 655360,
+              "peakDecodedBytes": 655360,
+              "decodes": 10,
+              "originalDecodes": 10,
+              "longTasks": 2,
+              "longestTaskMs": 127,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            }
+          ]
+        },
+        {
+          "count": 30,
+          "importMs": 9673,
+          "disk": null,
+          "results": [
+            {
+              "label": "after actual import, images overlapping",
+              "workingSetBytes": 939294720,
+              "jsHeapBytes": 6188060,
+              "dom": {
+                "documents": 2,
+                "nodes": 206,
+                "jsEventListeners": 260
+              },
+              "decodedBytes": 53084160,
+              "peakDecodedBytes": 53084160,
+              "decodes": 30,
+              "originalDecodes": 30,
+              "longTasks": 32,
+              "longestTaskMs": 157,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "grid after reopen",
+              "workingSetBytes": 761200640,
+              "jsHeapBytes": 4769352,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 249
+              },
+              "decodedBytes": 1966080,
+              "peakDecodedBytes": 1966080,
+              "decodes": 30,
+              "originalDecodes": 30,
+              "longTasks": 1,
+              "longestTaskMs": 94,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "zoom burst settled",
+              "workingSetBytes": 773070848,
+              "jsHeapBytes": 5572968,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 1966080,
+              "peakDecodedBytes": 2064384,
+              "decodes": 64,
+              "originalDecodes": 64,
+              "longTasks": 2,
+              "longestTaskMs": 94,
+              "frameP95Ms": 17.5,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 10 camera cycles",
+              "workingSetBytes": 776290304,
+              "jsHeapBytes": 5614716,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 1966080,
+              "peakDecodedBytes": 2064384,
+              "decodes": 125,
+              "originalDecodes": 125,
+              "longTasks": 2,
+              "longestTaskMs": 94,
+              "frameP95Ms": 17.5,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 20 camera cycles",
+              "workingSetBytes": 781680640,
+              "jsHeapBytes": 5662804,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 1966080,
+              "peakDecodedBytes": 2064384,
+              "decodes": 188,
+              "originalDecodes": 188,
+              "longTasks": 2,
+              "longestTaskMs": 94,
+              "frameP95Ms": 17.5,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "fresh browser with cached board",
+              "workingSetBytes": 552914944,
+              "jsHeapBytes": 4650612,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 1966080,
+              "peakDecodedBytes": 1966080,
+              "decodes": 30,
+              "originalDecodes": 30,
+              "longTasks": 2,
+              "longestTaskMs": 140,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            }
+          ]
+        },
+        {
+          "count": 100,
+          "importMs": 32290,
+          "disk": null,
+          "results": [
+            {
+              "label": "after actual import, images overlapping",
+              "workingSetBytes": 1090842624,
+              "jsHeapBytes": 6440020,
+              "dom": {
+                "documents": 2,
+                "nodes": 206,
+                "jsEventListeners": 240
+              },
+              "decodedBytes": 66835200,
+              "peakDecodedBytes": 66835200,
+              "decodes": 120,
+              "originalDecodes": 120,
+              "longTasks": 81,
+              "longestTaskMs": 253,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "grid after reopen",
+              "workingSetBytes": 818343936,
+              "jsHeapBytes": 4855020,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 6553600,
+              "peakDecodedBytes": 6553600,
+              "decodes": 100,
+              "originalDecodes": 100,
+              "longTasks": 1,
+              "longestTaskMs": 99,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "zoom burst settled",
+              "workingSetBytes": 729100288,
+              "jsHeapBytes": 5652004,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 6553600,
+              "peakDecodedBytes": 6651904,
+              "decodes": 183,
+              "originalDecodes": 183,
+              "longTasks": 1,
+              "longestTaskMs": 99,
+              "frameP95Ms": 16.900000000001455,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 10 camera cycles",
+              "workingSetBytes": 735576064,
+              "jsHeapBytes": 5708976,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 6553600,
+              "peakDecodedBytes": 6651904,
+              "decodes": 309,
+              "originalDecodes": 309,
+              "longTasks": 1,
+              "longestTaskMs": 99,
+              "frameP95Ms": 16.900000000001455,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 20 camera cycles",
+              "workingSetBytes": 733667328,
+              "jsHeapBytes": 5761752,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 6553600,
+              "peakDecodedBytes": 6651904,
+              "decodes": 436,
+              "originalDecodes": 436,
+              "longTasks": 1,
+              "longestTaskMs": 99,
+              "frameP95Ms": 16.900000000001455,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "fresh browser with cached board",
+              "workingSetBytes": 571006976,
+              "jsHeapBytes": 4769540,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 249
+              },
+              "decodedBytes": 6553600,
+              "peakDecodedBytes": 6553600,
+              "decodes": 100,
+              "originalDecodes": 100,
+              "longTasks": 2,
+              "longestTaskMs": 134,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "fixture": "real imports of 3200x2400 PNGs: text, gradients with detail, transparency; 1366x900 DPR1",
+      "note": "Synthetic fixtures, not personal files or real photos. Working set includes browser and GPU; decoded peaks include transient bitmaps, not all decoder buffers.",
+      "reports": [
+        {
+          "count": 10,
+          "importMs": 5188,
+          "disk": {
+            "entries": 24,
+            "bytes": 6745152
+          },
+          "results": [
+            {
+              "label": "after actual import, images overlapping",
+              "workingSetBytes": 716812288,
+              "jsHeapBytes": 6150392,
+              "dom": {
+                "documents": 2,
+                "nodes": 216,
+                "jsEventListeners": 260
+              },
+              "decodedBytes": 17694720,
+              "peakDecodedBytes": 20840448,
+              "decodes": 20,
+              "originalDecodes": 10,
+              "longTasks": 13,
+              "longestTaskMs": 196,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "grid after reopen",
+              "workingSetBytes": 707915776,
+              "jsHeapBytes": 4686180,
+              "dom": {
+                "documents": 2,
+                "nodes": 207,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 491520,
+              "peakDecodedBytes": 835584,
+              "decodes": 20,
+              "originalDecodes": 0,
+              "longTasks": 2,
+              "longestTaskMs": 123,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "zoom burst settled",
+              "workingSetBytes": 732184576,
+              "jsHeapBytes": 5507660,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 249
+              },
+              "decodedBytes": 491520,
+              "peakDecodedBytes": 2491272,
+              "decodes": 44,
+              "originalDecodes": 0,
+              "longTasks": 3,
+              "longestTaskMs": 123,
+              "frameP95Ms": 17,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 10 camera cycles",
+              "workingSetBytes": 743108608,
+              "jsHeapBytes": 5613240,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 491520,
+              "peakDecodedBytes": 2491272,
+              "decodes": 144,
+              "originalDecodes": 0,
+              "longTasks": 3,
+              "longestTaskMs": 123,
+              "frameP95Ms": 17,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 20 camera cycles",
+              "workingSetBytes": 732504064,
+              "jsHeapBytes": 5645416,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 491520,
+              "peakDecodedBytes": 2491272,
+              "decodes": 244,
+              "originalDecodes": 0,
+              "longTasks": 3,
+              "longestTaskMs": 123,
+              "frameP95Ms": 17,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "fresh browser with cached board",
+              "workingSetBytes": 529924096,
+              "jsHeapBytes": 4571908,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 491520,
+              "peakDecodedBytes": 491520,
+              "decodes": 10,
+              "originalDecodes": 0,
+              "longTasks": 2,
+              "longestTaskMs": 129,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            }
+          ]
+        },
+        {
+          "count": 30,
+          "importMs": 16003,
+          "disk": {
+            "entries": 64,
+            "bytes": 19374294
+          },
+          "results": [
+            {
+              "label": "after actual import, images overlapping",
+              "workingSetBytes": 796798976,
+              "jsHeapBytes": 6297792,
+              "dom": {
+                "documents": 2,
+                "nodes": 236,
+                "jsEventListeners": 260
+              },
+              "decodedBytes": 53084160,
+              "peakDecodedBytes": 56229888,
+              "decodes": 60,
+              "originalDecodes": 30,
+              "longTasks": 32,
+              "longestTaskMs": 257,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "grid after reopen",
+              "workingSetBytes": 744878080,
+              "jsHeapBytes": 4807224,
+              "dom": {
+                "documents": 2,
+                "nodes": 227,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 1474560,
+              "peakDecodedBytes": 1671168,
+              "decodes": 60,
+              "originalDecodes": 0,
+              "longTasks": 1,
+              "longestTaskMs": 105,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "zoom burst settled",
+              "workingSetBytes": 777207808,
+              "jsHeapBytes": 5641764,
+              "dom": {
+                "documents": 2,
+                "nodes": 207,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 1474560,
+              "peakDecodedBytes": 4213544,
+              "decodes": 104,
+              "originalDecodes": 0,
+              "longTasks": 1,
+              "longestTaskMs": 105,
+              "frameP95Ms": 17.300000000000182,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 10 camera cycles",
+              "workingSetBytes": 790806528,
+              "jsHeapBytes": 5705176,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 1474560,
+              "peakDecodedBytes": 4213544,
+              "decodes": 303,
+              "originalDecodes": 0,
+              "longTasks": 1,
+              "longestTaskMs": 105,
+              "frameP95Ms": 17.300000000000182,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 20 camera cycles",
+              "workingSetBytes": 811319296,
+              "jsHeapBytes": 5754380,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 1474560,
+              "peakDecodedBytes": 4213544,
+              "decodes": 493,
+              "originalDecodes": 0,
+              "longTasks": 2,
+              "longestTaskMs": 105,
+              "frameP95Ms": 17.300000000000182,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "fresh browser with cached board",
+              "workingSetBytes": 537415680,
+              "jsHeapBytes": 4674076,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 226
+              },
+              "decodedBytes": 1474560,
+              "peakDecodedBytes": 1474560,
+              "decodes": 30,
+              "originalDecodes": 0,
+              "longTasks": 3,
+              "longestTaskMs": 142,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            }
+          ]
+        },
+        {
+          "count": 100,
+          "importMs": 29596,
+          "disk": {
+            "entries": 212,
+            "bytes": 33217220
+          },
+          "results": [
+            {
+              "label": "after actual import, images overlapping",
+              "workingSetBytes": 877596672,
+              "jsHeapBytes": 6541380,
+              "dom": {
+                "documents": 2,
+                "nodes": 305,
+                "jsEventListeners": 260
+              },
+              "decodedBytes": 66835200,
+              "peakDecodedBytes": 67621632,
+              "decodes": 225,
+              "originalDecodes": 100,
+              "longTasks": 59,
+              "longestTaskMs": 194,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "grid after reopen",
+              "workingSetBytes": 826048512,
+              "jsHeapBytes": 4945016,
+              "dom": {
+                "documents": 2,
+                "nodes": 297,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 4915200,
+              "peakDecodedBytes": 5210112,
+              "decodes": 200,
+              "originalDecodes": 0,
+              "longTasks": 1,
+              "longestTaskMs": 74,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "zoom burst settled",
+              "workingSetBytes": 844627968,
+              "jsHeapBytes": 5736608,
+              "dom": {
+                "documents": 2,
+                "nodes": 232,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 4915200,
+              "peakDecodedBytes": 9857844,
+              "decodes": 310,
+              "originalDecodes": 0,
+              "longTasks": 1,
+              "longestTaskMs": 74,
+              "frameP95Ms": 17.30000000000109,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 10 camera cycles",
+              "workingSetBytes": 867344384,
+              "jsHeapBytes": 5820564,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 269
+              },
+              "decodedBytes": 4915200,
+              "peakDecodedBytes": 9857844,
+              "decodes": 525,
+              "originalDecodes": 0,
+              "longTasks": 9,
+              "longestTaskMs": 90,
+              "frameP95Ms": 17.30000000000109,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "after 20 camera cycles",
+              "workingSetBytes": 780324864,
+              "jsHeapBytes": 5864940,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 246
+              },
+              "decodedBytes": 4915200,
+              "peakDecodedBytes": 9857844,
+              "decodes": 728,
+              "originalDecodes": 0,
+              "longTasks": 12,
+              "longestTaskMs": 98,
+              "frameP95Ms": 17.30000000000109,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            },
+            {
+              "label": "fresh browser with cached board",
+              "workingSetBytes": 558645248,
+              "jsHeapBytes": 4792912,
+              "dom": {
+                "documents": 2,
+                "nodes": 197,
+                "jsEventListeners": 249
+              },
+              "decodedBytes": 4915200,
+              "peakDecodedBytes": 4915200,
+              "decodes": 100,
+              "originalDecodes": 0,
+              "longTasks": 6,
+              "longestTaskMs": 136,
+              "frameP95Ms": null,
+              "canvases": 3,
+              "canvasBytes": 14752800,
+              "iframes": 1,
+              "workers": 0
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

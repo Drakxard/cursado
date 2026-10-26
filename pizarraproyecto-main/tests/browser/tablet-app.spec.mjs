@@ -41,7 +41,7 @@ test('install button offers tablet instructions and invokes native installation 
 test('app opens a saved private board in a fresh window with internet completely disabled',async({page,context})=>{
   await openLocal(page)
   await page.evaluate(async()=>{await navigator.serviceWorker.ready})
-  const manifest=await(await page.request.get('/manifest.webmanifest')).json()
+  const manifest=await(await page.request.get('/pizarra/manifest.webmanifest')).json()
   expect(manifest.display).toBe('standalone')
   await page.mouse.move(200,300);await page.mouse.down();await page.mouse.move(310,370,{steps:8});await page.mouse.up()
   await expect.poll(async()=>(await board(page))?.strokes.length).toBe(1)

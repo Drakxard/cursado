@@ -15,6 +15,7 @@ let workspace: TopicWorkspace | null = null
 let presented: BoardContentWithExtras | null = null
 let saved: BoardContentWithExtras | null = null
 export const getTopicWorkspaceRoot = () => workspace?.rootHandle ?? navigationRoot
+export function notifyTopicContext() { parent.postMessage({ type:'topic-board:context', boardId:workspace?.boardId, cooperationSubjectId:workspace?.cooperationSubjectId },location.origin) }
 export function sendTopicLive(payload: Record<string, unknown>) { if (!workspace?.cooperationSubjectId) return; parent.postMessage({ type: 'topic-board:ephemeral', boardId: workspace.boardId, payload }, location.origin) }
 export const isTopicWorkspace = () => workspace !== null || (nativeBoardMode() && new URLSearchParams(location.search).has('topicBoard'))
 export function notifyTopicWorkspace(type: 'ready' | 'closed' | 'error', error?: string) {

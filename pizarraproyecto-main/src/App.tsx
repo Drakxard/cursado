@@ -1,3 +1,6 @@
+import SelectionActions from './components/SelectionActions'
+import { editableClipboardSvg } from './canvas/clipboardSvg'
+import AdvancedObjectToolbar, { type ObjectToolbarHandle } from './components/AdvancedObjectToolbar'
 import {navigateBoardLink,hasBoardReturn,consumeBoardView,isBoardNavigating} from './boardNavigation'
 import {refreshCountdowns} from './canvas/countdowns'
 import { PIZARRA_API_ROOT } from './backend'
@@ -53,10 +56,12 @@ import type { PenBreak } from './canvas/penRecovery'
 import type { Ref, CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { PointerEvent as ReactPointerEvent, DragEvent as ReactDragEvent, ChangeEvent, MouseEvent as ReactMouseEvent } from 'react'
 import { AdaptiveImageCache } from './canvas/imageCache'
+import { loadImagePreview } from './canvas/imagePreviewStore'
+import { imageDimensions } from './canvas/imageDimensions'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { nativeBoardMode } from './nativeWorkspace'
 import {
-  loadBoard, saveBoard, saveAsset, loadAsset, getLibrary, fetchBoardForLiveSync, acceptBoardLiveVersion, getActiveBoardVersion, getCommittedBoardContent, addFolder, addBoard, renameBoard, removeBoard, removeFolder, selectBoard, getActiveBoardId,
+  loadBoard, saveBoard, saveAsset, loadAsset, imageAssetCacheKey, getLibrary, fetchBoardForLiveSync, acceptBoardLiveVersion, getActiveBoardVersion, getCommittedBoardContent, addFolder, addBoard, renameBoard, removeBoard, removeFolder, selectBoard, getActiveBoardId,
   privateBoard, storageNotice, hasPendingShared, duplicateAsPrivate, publishPrivateCopy, exportBoardBackup, importBoardBackup, canUseServer,
   liveSocketUrl, prepareBoardOffline,
   usingOfflineCopy,
@@ -818,10 +823,15 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null)
   const inlineTableRef=useRef<HTMLDivElement>(null)
   const inlineNoteRef=useRef<StickyNoteEditorHandle>(null)
+  const objectToolbarRef=useRef<ObjectToolbarHandle|null>(null)
+  const [shapeTextEditing,setShapeTextEditing]=useState<string|null>(null)
   const [tableRevision, refreshTables] = useState(0)
   const [excelNotice, setExcelNotice] = useState('')
   const imageCacheRef = useRef<AdaptiveImageCache | null>(null)
-  if (!imageCacheRef.current) imageCacheRef.current = new AdaptiveImageCache(loadAsset, () => redraw())
+  if (!imageCacheRef.current) imageCacheRef.current = new AdaptiveImageCache((id, request) => {
+    const key = imageAssetCacheKey(id)
+    return loadImagePreview(key, () => imageAssetCacheKey(id) === key ? loadAsset(id) : Promise.resolve(undefined), request.width, request.height)
+  }, () => redraw())
   const importControllerRef = useRef<AbortController | null>(null)
   const [,refreshAudio]=useState(0)
   const audioRef=useRef<BoardAudio|null>(null)
@@ -1503,7 +1513,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     const pixels = cameraRef.current.zoom * (window.devicePixelRatio || 1)
     imageCacheRef.current!.reconcile(items.filter(item => item.kind !== 'audio').map(item => ({
       id: item.assetId, width: item.width * pixels, height: item.height * pixels,
-    })))
+    })), `${cameraRef.current.x}:${cameraRef.current.y}:${cameraRef.current.zoom}`)
   }
 
   function redraw() {
@@ -1523,6 +1533,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       pin.style.visibility=rectsIntersect(visibleWorldRect(camera,width,height,0),bounds)?'visible':'hidden'
     }
     inlineNoteRef.current?.layout()
+    objectToolbarRef.current?.layout()
     if(sceneRef.current){
       const cam=cameraRef.current
       sceneRef.current.style.transform=`translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})`
@@ -2191,17 +2202,6 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     document.addEventListener('visibilitychange',onVisibility)
     return()=>{window.removeEventListener('pagehide',flush);document.removeEventListener('visibilitychange',onVisibility)}
   },[])
-
-  async function imageDimensions(blob: Blob): Promise<{ width: number; height: number }> {
-    const url = URL.createObjectURL(blob), image = new Image()
-    try {
-      return await new Promise((resolve, reject) => {
-        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight })
-        image.onerror = () => reject(new Error('No se pudo leer la imagen.'))
-        image.src = url
-      })
-    } finally { image.src = ''; URL.revokeObjectURL(url) }
-  }
 
   async function imageFromBlob(blob: Blob): Promise<HTMLImageElement> {
     const url = URL.createObjectURL(blob)
@@ -3817,7 +3817,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     if(index<0)return
     rememberChange()
     shapesRef.current[index]=mergeVisual(base,next,materializeConnector(shapesRef.current[index],resolveObject))
-    redraw();scheduleSave()
+    refreshSelection(n=>n+1);redraw();scheduleSave()
   }
 
   function selectedTreeExpression():string|undefined {
@@ -3988,6 +3988,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     if(hit?.kind==='text'){selectElement(hit);startText(point);return}
     if(hit?.kind==='shape'){
       const visual=shapesRef.current.find(item=>item.id===hit.id)
+      if(visual&&!visual.visualType){selectElement(hit);setShapeTextEditing(visual.id);return}
       if(visual&&(visual.visualType||visual.label!==undefined)){
         if(['pdf-shortcut','board-shortcut','important-countdown'].includes(visual.visualType??''))return
         selectElement(hit);setVisualEditor(visual.symbol==='cartesian'?null:visual.id);return
@@ -4618,11 +4619,26 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       const files = fromItems.length ? fromItems : Array.from(clipboard?.files ?? [])
       const svgText = clipboard?.getData('image/svg+xml') ||
         (/^\s*(?:<\?xml[^>]*>\s*)?<svg[\s>]/i.test(plain) ? plain : '')
-      if (files.length) {
-        e.preventDefault();void importFiles(files)
-      } else if (svgText) {
+      if (svgText) {
         e.preventDefault()
-        void importFiles([new File([svgText], 'imagen-pegada.svg', {type:'image/svg+xml'})])
+        const editable=editableClipboardSvg(svgText)
+        if(editable){
+          const center=boardCenter(),dx=center.x-editable.width/2,dy=center.y-editable.height/2
+          for(const item of [...editable.shapes,...editable.texts]){item.x+=dx;item.y+=dy}
+          rememberChange();shapesRef.current.push(...editable.shapes);textsRef.current.push(...editable.texts)
+          const first=editable.shapes[0]||editable.texts[0];selectElement({kind:editable.shapes.length?'shape':'text',id:first.id});redraw();scheduleSave()
+        }else void importFiles([new File([svgText], 'imagen-pegada.svg', {type:'image/svg+xml'})])
+      } else if (files.length) {
+        e.preventDefault();void importFiles(files)
+      } else if (plain.trim() || html) {
+        e.preventDefault()
+        const dom=new DOMParser().parseFromString(html,'text/html')
+        dom.querySelectorAll('script,style,meta,[data-metadata]').forEach(node=>node.remove())
+        const text=(plain.trim()?plain:dom.body.innerText||dom.body.textContent||'').slice(0,100000).trim()
+        if(text){
+          const point=boardCenter(),item:TextItem={id:createId(),x:point.x,y:point.y,text,color:theme==='dark'?'#ffffff':'#202020',fontSize:24}
+          rememberChange();textsRef.current=[...textsRef.current,item];selectElement({kind:'text',id:item.id});redraw();scheduleSave()
+        }else if(/figmeta|data-buffer|figma/i.test(html))setSelectionError('Este contenido de Figma usa un formato privado. En Figma elegí Copiar como SVG o PNG; el texto también se puede copiar desde su editor.')
       } else if (clipboardRef.current) {
         e.preventDefault();pasteSelected()
       }
@@ -5149,6 +5165,26 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       onAuxClick={e=>{if(e.button===1&&(e.target as HTMLElement).closest('canvas,.board-scene'))e.preventDefault()}}
       onDragEnter={onFileDragEnter} onDragOver={onFileDragOver}
       onDragLeave={onFileDragLeave} onDrop={onFileDrop}>
+      {(() => {
+        const selected=selectedRef.current
+        if(selected&&groupRef.current.length===1&&(selected.kind==='media'||selected.kind==='text')&&!navigationBusy&&!nativeBoardMode()){
+          const text=selected.kind==='text'?textsRef.current.find(item=>item.id===selected.id):null
+          const media=selected.kind==='media'?mediaRef.current.find(item=>item.id===selected.id):null
+          return <SelectionActions key={String(selected.id)} layoutRef={objectToolbarRef} bounds={()=>{const box=selectionBounds(selected),canvas=canvasRef.current,camera=cameraRef.current;if(!box||!canvas)return null;return {x:box.x*camera.zoom+camera.x,y:box.y*camera.zoom+camera.y,width:box.width*camera.zoom,height:box.height*camera.zoom,viewportWidth:canvas.clientWidth,viewportHeight:canvas.clientHeight}}}>
+            {media&&media.kind!=='audio'&&<button onClick={()=>void openImageCrop()}>Recortar</button>}
+            {text&&<><button onClick={()=>startText({x:text.x,y:text.y})}>Editar texto</button><input aria-label="Tama?o del texto" type="number" min="8" max="144" value={text.fontSize} style={{width:58}} onChange={e=>{rememberChange();text.fontSize=Math.max(8,Math.min(144,Number(e.target.value)));refreshSelection(n=>n+1);redraw();scheduleSave()}}/><input aria-label="Color del texto" type="color" value={/^#[0-9a-f]{6}$/i.test(text.color)?text.color:'#202020'} onChange={e=>{rememberChange();text.color=e.target.value;refreshSelection(n=>n+1);redraw();scheduleSave()}}/></>}
+            <button aria-label="Traer al frente" onClick={()=>reorderSelected(true)}>Al frente</button><button aria-label="Enviar al fondo" onClick={()=>reorderSelected(false)}>Al fondo</button>
+          </SelectionActions>
+        }
+        const item=selected?.kind==='shape'&&groupRef.current.length===1?shapesRef.current.find(shape=>shape.id===selected.id):null
+        if(!item||item.visualType||navigationBusy||nativeBoardMode())return null
+        return <AdvancedObjectToolbar key={item.id} item={item} layoutRef={objectToolbarRef} editing={shapeTextEditing===item.id} onEdit={()=>setShapeTextEditing(item.id)} onEndEdit={()=>setShapeTextEditing(null)} patch={patch=>{const current=shapesRef.current.find(shape=>shape.id===item.id);if(current)applyVisualEdit(current,{...current,...patch})}} bounds={()=>{
+          const current=shapesRef.current.find(shape=>shape.id===item.id),canvas=canvasRef.current
+          if(!current||!canvas)return null
+          const camera=cameraRef.current,box=rotatedRect(current,current.rotation)
+          return {x:box.x*camera.zoom+camera.x,y:box.y*camera.zoom+camera.y,width:box.width*camera.zoom,height:box.height*camera.zoom,viewportWidth:canvas.clientWidth,viewportHeight:canvas.clientHeight}
+        }}/>
+      })()}
       {liveBoardId && liveUsers.some(user=>user.id!==liveSelf) && (linkActive || !privateBoard(liveBoardId) || (isTopicWorkspace() && liveUsers.length > 0)) && <aside className="live-presence" aria-label="Usuarios activos en esta pizarra">
         <span className={`live-presence-state ${liveConnected?'':'disconnected'}`} title={liveConnected?'Conectado':'Reconectando'} />
         {liveUsers.map(user=><button type="button" key={user.id}
