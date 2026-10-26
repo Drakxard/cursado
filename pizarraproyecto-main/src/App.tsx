@@ -4918,7 +4918,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     selectedRef.current = groupRef.current.length === 1 ? groupRef.current[0] : null
     setSelection(selectedRef.current)
     setTool('select')
-    void hydrateMedia(media)
+    // redraw reconciles every visible asset. Passing only the pasted media here
+    // would evict unrelated previews (all of them when pasting text).
     redraw()
     scheduleSave()
   }
