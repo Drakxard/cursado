@@ -40,6 +40,21 @@ function server(boardContent=content()) {
 }
 
 describe('private boards and shared device replicas',()=>{
+  it('imports source PDF pages with one original and consistent document identities',async()=>{
+    const source='data:application/pdf;base64,JVBERi0xLjQKb3JpZ2luYWwgYnl0ZXM='
+    fetched.mockImplementation(async(input:string)=>{
+      if(input===source)return new Response(new Blob(['%PDF-1.4\noriginal bytes'],{type:'application/pdf'}))
+      throw new Error(`Unexpected request ${input}`)
+    })
+    const scene={...content(),media:[1,2,3].map(pageNumber=>({id:`pdf-${pageNumber}`,assetId:'pdf-original',documentId:'pdf-original',pdfSource:true as const,kind:'pdf-page' as const,pageNumber,name:'Original.pdf',x:10,y:pageNumber*800,width:600,height:780,groupId:'pdf-group'}))}
+    const id=await library.importBoardBackup(new File([JSON.stringify({format:'pizarra-backup-v1',name:'PDF',content:scene,assets:{'pdf-original':source}})],'backup.json'))
+    const saved=(await device.readDeviceBoard(id))!,db=await device.deviceDB
+    expect(new Set(saved.content.media.map(item=>item.assetId)).size).toBe(1)
+    expect(saved.content.media.every(item=>item.pdfSource&&item.documentId===item.assetId)).toBe(true)
+    expect(await db.getAllKeys('assets')).toHaveLength(1)
+    expect((await db.get('assets',`device:${saved.content.media[0].assetId}`))?.type).toBe('application/pdf')
+    expect(fetched).toHaveBeenCalledTimes(1)
+  })
   it('lists only metadata with a cursor and never returns scenes, drafts or draft bases',async()=>{
     const db=await device.deviceDB
     const base={name:'Board',folder_id:null,version:4,updated_at:'2026-10-24',storage:'private' as const}

@@ -155,6 +155,16 @@ test('publisher skips unchanged content, excludes secrets, retries interrupted c
     assert.equal(third.files.some(f => f.path.endsWith('a.pdf')), false)
     assert.equal(third.items.find(i => i.id === 'material:1')?.fileId, undefined)
     assert.equal(legacyReads, 3)
+    // Folder boards are published even in a fresh browser without IndexedDB.
+    const folderBoard = { id:'local:folder-board',name:'Desde carpeta',folderId:null,scene:{strokes:[],texts:[],media:[],camera:{x:0,y:0,zoom:1}},assets:{} }
+    const folderIndex = {version:1,folders:[],boards:[{id:folderBoard.id,name:folderBoard.name,folderId:null,path:'boards/folder-board.json'}]}
+    put('boards/library.json',JSON.stringify(folderIndex))
+    put('boards/folder-board.json',JSON.stringify(folderBoard))
+    const withBoards = await publish(root)
+    const publishedIndex = withBoards.files.find(file=>file.path==='boards/library.json')!
+    assert.ok(publishedIndex)
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(uploaded.get(publishedIndex.hash))),folderIndex)
+    assert.ok(withBoards.files.some(file=>file.path==='boards/folder-board.json'))
   } finally {
     globalThis.fetch = originalFetch
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow); else Reflect.deleteProperty(globalThis, 'window')

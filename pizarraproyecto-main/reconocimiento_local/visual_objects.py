@@ -23,6 +23,12 @@ def validate_visual_content(content: dict):
     def text(value, maximum):
         return isinstance(value, str) and len(value) <= maximum
 
+    for media in content.get('media', []):
+        if isinstance(media, dict) and 'pdfSource' in media:
+            require(media['pdfSource'] is True and media.get('kind') == 'pdf-page'
+                    and type(media.get('pageNumber')) is int and media['pageNumber'] > 0,
+                    'La página del PDF original no es válida.')
+
     def point(value):
         return isinstance(value, dict) and number(value.get('x')) and number(value.get('y'))
 

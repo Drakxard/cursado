@@ -56,7 +56,10 @@ export async function initializeTopicWorkspace(input: TopicWorkspace, preserveSe
     existing.add(reference.materialId)
   }
   if (snapshot) {
+    const restored=new Set<string>()
     for (const media of content.media) {
+      if(restored.has(media.assetId))continue
+      restored.add(media.assetId)
       const data = snapshot.assets[media.assetId]
       if (!data || !/^data:[^,]*;base64,/.test(data)) throw new Error('Falta una imagen en el respaldo de la pizarra.')
       const comma = data.indexOf(',')
@@ -94,6 +97,7 @@ async function saveTopicWorkspaceUnlocked() {
   } catch (error) { if ((error as Error).name !== 'NotFoundError') throw error }
   const assets: Record<string, string> = {}
   for (const media of content.media) {
+    if(assets[media.assetId])continue
     const blob = await (await deviceDB).get('assets', `device:${media.assetId}`) as Blob | undefined
     if (!blob) throw new Error('Falta una imagen de la pizarra.')
     assets[media.assetId] = await new Promise<string>((resolve, reject) => {
@@ -123,7 +127,10 @@ export async function receiveTopicWorkspace(local: BoardContentWithExtras, isCur
   if (!snapshot.content || snapshot.boardId !== current.boardId) throw new Error('Pizarra recibida inválida.')
   const merged = mergeCooperation(presented as unknown as Json, local as unknown as Json, snapshot.content as unknown as Json) as unknown as BoardContentWithExtras
   merged.camera = local.camera
+  const restored=new Set<string>()
   for (const media of merged.media || []) {
+    if(restored.has(media.assetId))continue
+    restored.add(media.assetId)
     const data = snapshot.assets[media.assetId]
     if (!data || !/^data:[^,]*;base64,/.test(data)) continue
     const comma = data.indexOf(',')

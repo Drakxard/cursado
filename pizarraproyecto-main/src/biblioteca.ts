@@ -6,6 +6,7 @@ import type { DeviceBoard } from './storage/device'
 import { mergeBoard, strokeIds } from './storage/merge'
 import { createScenePatch } from './storage/livePatch'
 import { isLinkGuest, guestLibrary, syncLinkedBoard, linkBinding, linkedAsset, linkAssetCacheKey } from './linkSharing'
+import { homeBoardStore, loadHomeWorkspaceBoard, saveHomeWorkspaceBoard, loadHomeWorkspaceAsset } from './workspaceBoardStorage'
 export type { Point, Stroke, TextItem, MediaItem, BoardData }
 export type BoardContentWithExtras = BoardData & { shapes?: unknown[]; tables?: unknown[]; graphs?: unknown[]; videos?: unknown[] }
 
@@ -16,7 +17,7 @@ let activeVersion = 0
 // tab has actually displayed; never mix a cached base with a different version.
 let committed: {key:string;version:number;content:BoardContentWithExtras}|null = null
 export type Folder = { id: string; name: string }
-export type BoardInfo = { id: string; name: string; folder_id: string | null; version: number; updated_at: string; storage?: 'private' | 'shared'; role?: string }
+export type BoardInfo = { id: string; name: string; folder_id: string | null; version: number; updated_at: string; storage?: 'private' | 'shared'; role?: string; workspace?: boolean }
 let account: string | null = null
 let remoteEnabled = false
 let notice = ''
@@ -92,6 +93,12 @@ export async function getLibrary() {
   if (isLinkGuest()) return guestLibrary()
   await migrateLegacy()
   const local = await localLibrary()
+  const target = await homeBoardStore()
+  if (target) {
+    const folder = await target.store.library(), ids = new Set([...folder.boards.map(b => b.id), ...folder.deleted])
+    local.boards = [...local.boards.filter(b => !ids.has(b.id)), ...folder.boards]
+    local.folders = [...local.folders.filter(f => !folder.deletedFolders.includes(f.id) && !folder.folders.some(other => other.id === f.id)), ...folder.folders]
+  }
   let remote: { folders: Folder[]; boards: BoardInfo[] } = { folders: [], boards: [] }
   if (account) {
     const db = await deviceDB
@@ -125,11 +132,13 @@ export async function addFolder(name: string) {
   if (nativeBoardMode()) readOnlyError()
   const folder = { id: newLocalId(), name }
   await (await deviceDB).put('folders', folder)
+  await (await homeBoardStore())?.store.addFolder(folder)
   return folder
 }
 export async function removeFolder(id: string) {
   if (nativeBoardMode()) readOnlyError()
   if (!isPrivate(id)) return request(`/api/folders/${id}`, {method: 'DELETE'})
+  await (await homeBoardStore())?.store.removeFolder(id)
   const db = await deviceDB
   const tx = db.transaction(['boards', 'folders'], 'readwrite')
   for (const board of await tx.objectStore('boards').getAll() as DeviceBoard[]) {
@@ -169,8 +178,10 @@ export async function renameBoard(id: string, name: string, folder_id: string | 
     return result
   }
   if (folder_id && !isPrivate(folder_id)) throw new Error('Una privada no puede moverse a una carpeta del servidor.')
-  const board = await readDeviceBoard(id)
+  let board = await readDeviceBoard(id)
+  board = await loadHomeWorkspaceBoard(id, board) ?? board
   if (!board) throw new Error('Pizarra local inexistente.')
+  if (board.workspace) await (await homeBoardStore(id))!.store.rename(id, name, folder_id)
   await writeDeviceBoard({ ...board, name, folder_id })
 }
 export async function removeBoard(id: string) {
@@ -184,6 +195,7 @@ export async function removeBoard(id: string) {
     // Preserve pending local work and personal placement for a later rejoin.
     return
   }
+  await (await homeBoardStore(id))?.store.remove(id)
   await (await deviceDB).delete('boards', cacheKey(id))
 }
 
@@ -244,14 +256,16 @@ export async function loadBoard(): Promise<BoardContentWithExtras | undefined> {
   if (!library.boards.some(b => b.id === activeId)) {
     selectBoard(library.boards[0]?.id ?? (await addBoard('Mi pizarra privada', null)).id)
   }
-  const saved = await readDeviceBoard(cacheKey(activeId))
+  let saved = await readDeviceBoard(cacheKey(activeId))
   if (privateBoard()) {
+    saved = await loadHomeWorkspaceBoard(activeId, saved) ?? saved
     if (!saved) throw new Error('No se encontró la pizarra privada.')
     activeVersion = saved.version
     const linked = await syncLinkedBoard(activeId,saved.content)
     if(linked.content!==saved.content)await writeDeviceBoard({...saved,content:linked.content})
-    announce('Privada: guardada solo en este dispositivo.')
-    return strokeIds(linked.content)
+    const folderContent = linked.content!==saved.content ? await saveHomeWorkspaceBoard({...saved,content:linked.content}) : undefined
+    announce(saved.workspace?'Pizarra guardada en la carpeta de Estudio.':'Privada: guardada solo en este dispositivo. Conectá la carpeta de Estudio para conservarla entre navegadores.')
+    return strokeIds(folderContent ?? linked.content)
   }
   if (saved?.draft) {
     rememberCommitted(activeId,saved.draftBase?.version??saved.version,saved.draftBase?.content??saved.content)
@@ -298,14 +312,16 @@ export async function saveBoard(content: BoardContentWithExtras) {
     activeVersion=version
     const linked=await syncLinkedBoard(id,content)
     if(linked.content!==content)await writeDeviceBoard({...current!,content:linked.content,version,updated_at:new Date().toISOString()})
+    const folderContent = await saveHomeWorkspaceBoard({...current!,content:linked.content,version,updated_at:new Date().toISOString()})
     const history=await listBoardHistory(id)
     const automatic=history.history.filter(h=>h.kind==='auto')
     if (!automatic[0] || Date.now()-Date.parse(automatic[0].created_at)>=5*60*1000) {
       await localSnapshot(id,'','auto')
       for (const old of automatic.slice(39)) await db.delete('history',old.id)
     }
-    announce('Privada: guardada solo en este dispositivo.')
-    return { pending: linked.pending, merged: linked.content===content?undefined:linked.content }
+    announce(folderContent?'Pizarra guardada en la carpeta de Estudio.':'Privada: guardada solo en este dispositivo.')
+    const result = folderContent ?? linked.content
+    return { pending: linked.pending, merged: JSON.stringify(result)===JSON.stringify(content)?undefined:result }
   }
   // Persist first, so a disconnect or rejected save cannot discard the user's work.
   const draftBase=confirmed?{version:confirmed.version,content:confirmed.content}:previous.draftBase??{version:previous.version,content:previous.content}
@@ -392,6 +408,8 @@ export async function saveAsset(id: string, blob: Blob) {
 export function imageAssetCacheKey(id: string) { return nativeBoardMode() ? nativeAssetCacheKey(id) : assetKey(id) }
 export async function loadAsset(id: string): Promise<Blob | undefined> {
   if (nativeBoardMode()) return loadNativeAsset(id)
+  const workspaceAsset = await loadHomeWorkspaceAsset(activeId,id)
+  if (workspaceAsset) return workspaceAsset
   if(await linkBinding(activeId)) {
     const db=await deviceDB, key=linkAssetCacheKey(activeId,id),local=await db.get('assets',key) as Blob|undefined
     if(local)return local
@@ -422,14 +440,17 @@ export async function duplicateAsPrivate() {
   const saved = await readDeviceBoard(cacheKey(activeId))
   if (!saved) throw new Error('No hay copia descargada.')
   const content = saved.draft ?? saved.content
+  const copied=new Set<string>()
   for (const media of content.media) {
+    if(copied.has(media.assetId))continue
+    copied.add(media.assetId)
     const blob = await loadAsset(media.assetId)
     if (!blob) throw new Error('Falta una imagen. Conectá el servidor antes de duplicar.')
     await (await deviceDB).put('assets', blob, assetKey(media.assetId, true))
   }
   const id = newLocalId()
   await writeDeviceBoard({ ...saved, key: id, id, name: `${saved.name} (copia privada)`, folder_id: null,
-    storage: 'private', role: undefined, version: 0, content, draft: undefined })
+    storage: 'private', workspace: undefined, role: undefined, version: 0, content, draft: undefined })
   return id
 }
 
@@ -448,6 +469,7 @@ export async function acceptLinkedScene(id:string,content:BoardContentWithExtras
   const board=await readDeviceBoard(cacheKey(id))
   if(!board)throw new Error('No se encontró la copia local de la pizarra.')
   await writeDeviceBoard({...board,content,version:board.version+1})
+  await saveHomeWorkspaceBoard({...board,content,version:board.version+1})
   activeVersion=board.version+1
 }
 export async function listBoardHistory(boardId: string): Promise<BoardHistoryList> {
@@ -482,6 +504,7 @@ export async function restoreBoardHistory(boardId: string, snapshotId: string, e
     const safety = await localSnapshot(boardId,'Antes de restaurar','safety',expected_version)
     const board = (await readDeviceBoard(boardId))!
     await writeDeviceBoard({...board,content:snapshot.content,version:board.version+1})
+    await saveHomeWorkspaceBoard({...board,content:snapshot.content,version:board.version+1})
     return {ok:true,new_version:board.version+1,safety_snapshot_id:safety.id}
   }
   return request<{ok:boolean;new_version:number;safety_snapshot_id:string}>(
@@ -535,13 +558,18 @@ export async function publishPrivateCopy() {
   const saved = await readDeviceBoard(activeId)
   if (!saved) throw new Error('No se encontró la privada.')
   const content = structuredClone(saved.content)
+  const replacements = new Map<string,string>()
   for (const media of content.media) {
-    const blob = await (await deviceDB).get('assets', assetKey(media.assetId, true)) as Blob | undefined
+    const previous=replacements.get(media.assetId)
+    if(previous){media.assetId=previous;if(media.pdfSource)media.documentId=previous;continue}
+    const blob = await loadAsset(media.assetId)
     if (!blob) throw new Error('Falta una imagen de la privada.')
     const id = crypto.randomUUID()
     await request(`/api/assets/${id}`, {method:'PUT', headers:{'Content-Type':blob.type}, body:blob})
     await (await deviceDB).put('assets', blob, `${account}:${id}`)
+    replacements.set(media.assetId,id)
     media.assetId = id
+    if(media.pdfSource)media.documentId=id
   }
   const created = await addBoard(saved.name, null, 'shared')
   const result = await request<{version:number}>(`/api/boards/${created.id}`, json('PUT', {content,version:0}))
@@ -556,6 +584,7 @@ export async function exportBoardBackup() {
   const content = board.draft ?? board.content
   const assets: Record<string,string> = {}
   for (const media of content.media) {
+    if(assets[media.assetId])continue
     const blob = await loadAsset(media.assetId)
     if (!blob) throw new Error('Falta una imagen. Conectá el servidor antes de exportar.')
     assets[media.assetId] = await new Promise<string>((resolve,reject) => {
@@ -592,11 +621,12 @@ export async function importBoardBackup(file:File) {
   // New asset IDs prevent imports from replacing another board's images.
   const replacements = new Map<string,string>()
   for (const media of content.media) {
-    if (replacements.has(media.assetId)) {media.assetId=replacements.get(media.assetId)!;continue}
+    if(media.pdfSource!==undefined&&(media.pdfSource!==true||media.kind!=='pdf-page'||!Number.isSafeInteger(media.pageNumber)||media.pageNumber!<1))throw new Error('La página PDF del respaldo no es válida.')
+    if (replacements.has(media.assetId)) {media.assetId=replacements.get(media.assetId)!;if(media.pdfSource)media.documentId=media.assetId;continue}
     const data = backup.assets[media.assetId]
     const supported=media.kind==='audio'
       ? /^data:audio\/(webm|ogg|mp4)(?:;codecs=[^;,]+)?;base64,/i
-      : /^data:image\/(png|jpeg|webp);base64,/
+      : media.pdfSource ? /^data:application\/pdf;base64,/ : /^data:image\/(png|jpeg|webp);base64,/
     if (typeof data!=='string' || !supported.test(data)) throw new Error('Falta un recurso válido en el respaldo.')
     if(media.kind==='audio'&&(typeof media.durationMs!=='number'||!Number.isFinite(media.durationMs)||media.durationMs<0))throw new Error('La duración de la nota de audio no es válida.')
     const blob = await (await fetch(data)).blob()
@@ -605,6 +635,7 @@ export async function importBoardBackup(file:File) {
     await (await deviceDB).put('assets',blob,assetKey(id,true))
     replacements.set(media.assetId,id)
     media.assetId=id
+    if(media.pdfSource)media.documentId=id
   }
   const id = newLocalId()
   await writeDeviceBoard({key:id,id,name:backup.name,folder_id:null,storage:'private',version:0,

@@ -10,6 +10,21 @@ from fastapi.testclient import TestClient
 
 
 class BackendTest(unittest.TestCase):
+    def test_pdf_pages_share_one_owned_original_and_keep_source_metadata(self):
+        with TestClient(self.app,base_url='https://testserver') as owner, TestClient(self.app,base_url='https://testserver') as outsider:
+            for client,name in [(owner,'PDF owner'),(outsider,'PDF outsider')]:
+                self.assertEqual(client.post('/api/auth/guest',json={'name':name,'password':'pdf-test'}).status_code,200)
+            board=owner.post('/api/boards',json={'name':'PDF pages'}).json()['id']
+            original=b'%PDF-1.4\noriginal bytes'
+            response=owner.put('/api/assets/pdf-original',content=original,headers={'Content-Type':'application/pdf'})
+            self.assertEqual(response.status_code,200,response.text)
+            pages=[{'id':f'page-{number}','kind':'pdf-page','pdfSource':True,'assetId':'pdf-original','documentId':'pdf-original','pageNumber':number,'name':'Original.pdf','x':0,'y':number*800,'width':600,'height':780,'groupId':'document'} for number in (1,2)]
+            response=owner.put(f'/api/boards/{board}',json={'version':0,'content':{'strokes':[],'texts':[],'media':pages}})
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(owner.get(f'/api/boards/{board}').json()['content']['media'],pages)
+            self.assertEqual(owner.get('/api/assets/pdf-original').content,original)
+            self.assertEqual(outsider.get('/api/assets/pdf-original').status_code,404)
+
     def test_board_audio_is_an_owned_resource_available_to_collaborators(self):
         with TestClient(self.app,base_url='https://testserver') as owner, TestClient(self.app,base_url='https://testserver') as editor, TestClient(self.app,base_url='https://testserver') as outsider:
             for client, name in [(owner,'Audio owner'),(editor,'Audio editor'),(outsider,'Audio outsider')]:

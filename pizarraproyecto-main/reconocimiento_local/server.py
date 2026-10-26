@@ -180,7 +180,7 @@ async def put_asset(asset_id: str, request: HTTPRequest):
     data = await request.body()
     if len(data) > 30_000_000: raise HTTPException(413, 'Archivo demasiado grande')
     mime = request.headers.get('content-type', 'image/png').split(';')[0]
-    if mime not in ('image/png','image/jpeg','image/webp','audio/webm','audio/ogg','audio/mp4'):
+    if mime not in ('image/png','image/jpeg','image/webp','application/pdf','audio/webm','audio/ogg','audio/mp4'):
         raise HTTPException(415, 'Formato no admitido')
     with db_connection() as db:
         db.execute('''INSERT INTO assets (id,data,mime) VALUES (?,?,?)

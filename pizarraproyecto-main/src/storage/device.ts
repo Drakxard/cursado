@@ -38,8 +38,8 @@ export async function localLibrary() {
   for (let cursor = await tx.store.openCursor(); cursor; cursor = await cursor.continue()) {
     const board = cursor.value
     if (!isPrivate(board.id) || board.id.startsWith('local:link-')) continue
-    const { id, name, folder_id, version, updated_at, storage, role } = board
-    boards.push({ id, name, folder_id, version, updated_at, storage, role })
+    const { id, name, folder_id, version, updated_at, storage, role, workspace } = board
+    boards.push({ id, name, folder_id, version, updated_at, storage, role, ...(workspace?{workspace:true}:{}) })
   }
   await tx.done
   return {

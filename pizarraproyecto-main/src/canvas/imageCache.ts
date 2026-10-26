@@ -1,9 +1,19 @@
 import { previewLevel } from './imageResolution.ts'
 
-export type ImageRequest = { id: string; width: number; height: number }
+export type ImageRequest = { id: string; width: number; height: number; defer?: boolean }
 export type DecodedImage = { source: CanvasImageSource; width: number; height: number; release: () => void }
 export const IMAGE_CACHE_BYTES = 64 * 1024 * 1024
 export type PreviewInput = Blob | { blob: Blob; width: number; height: number; decoded?: DecodedImage }
+
+let mediaJobs = 0
+const mediaWaiters: (() => void)[] = []
+/** Screen previews and explicit PDF captures share two execution slots. */
+export async function mediaWork<T>(work: () => Promise<T>): Promise<T> {
+  if (mediaJobs >= 2) await new Promise<void>(resolve => mediaWaiters.push(resolve))
+  else mediaJobs++
+  try { return await work() }
+  finally { const next = mediaWaiters.shift(); if (next) next(); else mediaJobs-- }
+}
 
 /** Resize during decoding where supported; never retain the original pixels. */
 export async function decodePreview(blob: Blob, width: number, height: number): Promise<DecodedImage> {
@@ -49,17 +59,19 @@ export class AdaptiveImageCache {
   private signatures = new Map<string, string>()
   private wanted = new Map<string, ImageRequest>()
   private running = new Set<string>()
+  private controllers = new Map<string, AbortController>()
   private failures = new Map<string, string>()
   private generation = 0
   private stopped = false
-  private load: (id: string, request: ImageRequest) => Promise<PreviewInput | undefined>
+  private load: (id: string, request: ImageRequest, signal: AbortSignal) => Promise<PreviewInput | undefined>
   private changed: () => void
   private decode: typeof decodePreview
   readonly budget: number
   private resizeTimer?: ReturnType<typeof setTimeout>
   private cameraKey?: string
   private levels = new Map<string, number>()
-  constructor(load: (id: string, request: ImageRequest) => Promise<PreviewInput | undefined>, changed: () => void,
+  private deferred = new Set<string>()
+  constructor(load: (id: string, request: ImageRequest, signal: AbortSignal) => Promise<PreviewInput | undefined>, changed: () => void,
     decode = decodePreview, budget = IMAGE_CACHE_BYTES) {
     this.load = load; this.changed = changed; this.decode = decode; this.budget = budget
   }
@@ -70,6 +82,7 @@ export class AdaptiveImageCache {
   retry() { this.failures.clear() }
   reconcile(items: ImageRequest[], cameraKey?: string) {
     this.stopped = false
+    this.deferred = new Set(items.filter(item => item.defer).map(item => item.id))
     const sides = new Map<string, number>()
     for (const item of items) sides.set(item.id, Math.max(sides.get(item.id) ?? 1, item.width, item.height))
     for (const [id, side] of sides) this.levels.set(id, previewLevel(side, this.levels.get(id)))
@@ -80,6 +93,7 @@ export class AdaptiveImageCache {
       return previous && this.signature(previous) !== this.signature(item)
     })
     this.wanted = next
+    for (const [id, controller] of this.controllers) if (!next.has(id)) controller.abort()
     const moved = cameraKey !== undefined && this.cameraKey !== undefined && cameraKey !== this.cameraKey
     this.cameraKey = cameraKey
     if (resized || moved) {
@@ -99,16 +113,20 @@ export class AdaptiveImageCache {
     for (const [id, request] of this.wanted) {
       if (this.running.size >= 2) break
       const signature = this.signature(request)
+      if (this.resizeTimer !== undefined && this.deferred.has(id)) continue
       const existing = this.entries.get(id)
       if (this.signatures.get(id) === signature || (existing && this.resizeTimer !== undefined) || this.running.has(id) || this.failures.get(id) === signature) continue
       const generation = this.generation
+      const controller = new AbortController()
+      this.controllers.set(id, controller)
       this.running.add(id)
-      void (async () => {
+      void mediaWork(async () => {
         let image: DecodedImage | undefined
         try {
-          const input = await this.load(id, request)
+          controller.signal.throwIfAborted()
+          const input = await this.load(id, request, controller.signal)
           const wanted = this.wanted.get(id)
-          if (generation !== this.generation || !wanted) {
+          if (controller.signal.aborted || generation !== this.generation || !wanted) {
             if (input && !(input instanceof Blob)) input.decoded?.release()
             return
           }
@@ -120,7 +138,7 @@ export class AdaptiveImageCache {
           const height = input instanceof Blob ? request.height : Math.max(1, Math.floor(input.height * scale))
           image = input instanceof Blob || !input.decoded ? await this.decode(blob, width, height) : input.decoded
           const current = this.wanted.get(id)
-          if (generation !== this.generation || !current) { image.release(); return }
+          if (controller.signal.aborted || generation !== this.generation || !current) { image.release(); return }
           // An intermediate result can still fill a blank while the camera moves.
           if (this.signature(current) !== signature && this.entries.has(id)) { image.release(); return }
           const previous = this.entries.get(id)
@@ -138,12 +156,13 @@ export class AdaptiveImageCache {
           this.signatures.set(id, signature)
           previous?.release()
         } catch {
-          if (generation === this.generation) this.failures.set(id, signature)
+          if (!controller.signal.aborted && generation === this.generation) this.failures.set(id, signature)
         } finally {
           this.running.delete(id)
+          this.controllers.delete(id)
           if (!this.stopped) { this.changed(); this.pump() }
         }
-      })()
+      })
     }
   }
   clear() {
@@ -151,6 +170,7 @@ export class AdaptiveImageCache {
     clearTimeout(this.resizeTimer); this.resizeTimer = undefined
     this.cameraKey = undefined
     this.stopped = true
+    for (const controller of this.controllers.values()) controller.abort()
     this.wanted.clear(); this.failures.clear()
     for (const image of this.entries.values()) image.release()
     this.entries.clear(); this.signatures.clear(); this.levels.clear()

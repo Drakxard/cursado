@@ -1,5 +1,10 @@
 # Accesos a PDF en la pizarra
 
+Mantener pulsado un acceso del lienzo durante 600 ms lo despliega como páginas
+agrupadas, con renderizado bajo demanda desde una copia del PDF original.
+El gesto del icono lateral conserva su función de centrar el acceso.
+Ver [PDF desplegado en la pizarra](pizarra-pdf-desplegado.md).
+
 En InScreen, un toque sobre el acceso o su icono fijado abre el lector PDF nativo.
 Arrastrar y usar dos dedos sigue desplazando o ampliando la pizarra, sin mover
 elementos ni abrir un PDF accidentalmente. Se vuelve con el botón o gesto de

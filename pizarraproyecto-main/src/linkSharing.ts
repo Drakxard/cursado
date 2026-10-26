@@ -6,6 +6,7 @@ import { mergeBoard, strokeIds } from './storage/merge'
 import type { BoardPdfReference } from '../../lib/board-library-contract'
 import { withWorkspaceFileLock } from '../../lib/workspace-file-lock'
 import { validBoardContent } from '../../lib/board-link-model'
+import { loadHomeWorkspaceBoard, saveHomeWorkspaceBoard, loadHomeWorkspaceAsset } from './workspaceBoardStorage'
 
 type SharedFile = {hash:string;mime:string;name:string}
 type Remote = {id:string;name:string;version:number;content:BoardContentWithExtras;files:Record<string,SharedFile>}
@@ -70,7 +71,8 @@ async function sourceBoard(source:string) {
     await restoreBoardLinkBinding(source,snapshot.sharedBoard)
     return {name:snapshot.name,content:snapshot.content as BoardContentWithExtras,assets:snapshot.assets as Record<string,string>}
   }
-  const board=await readDeviceBoard(source)
+  const cached=await readDeviceBoard(source)
+  const board=await loadHomeWorkspaceBoard(source,cached)??cached
   if(!board || !source.startsWith('local:') || source.startsWith('local:link-'))throw new MissingSource('No tenés permiso para publicar esta pizarra.')
   return {name:board.name,content:board.draft??board.content,assets:{} as Record<string,string>}
 }
@@ -87,7 +89,8 @@ async function uploadFile(binding:Binding,key:string,blob:Blob,name:string,mime=
 async function prepare(source:string,content:BoardContentWithExtras,binding:Binding,assets:Record<string,string>={}) {
   const result=await encode(content), files:Record<string,SharedFile>={}
   for(const media of result.media) {
-    const blob=await (await deviceDB).get('assets',linkAssetCacheKey(source,media.assetId)) as Blob|undefined
+    if(files[media.assetId])continue
+    const blob=await (await deviceDB).get('assets',linkAssetCacheKey(source,media.assetId)) as Blob|undefined ?? await loadHomeWorkspaceAsset(source,media.assetId)
     if(blob)files[media.assetId]=await uploadFile(binding,media.assetId,blob,media.name)
     else if(assets[media.assetId]?.startsWith('data:'))files[media.assetId]=await uploadFile(binding,media.assetId,await (await fetch(assets[media.assetId])).blob(),media.name)
     else if(binding.files[media.assetId])files[media.assetId]=binding.files[media.assetId]
@@ -133,6 +136,8 @@ async function persistSource(source:string,content:BoardContentWithExtras,base:B
   const tx=db.transaction('boards','readwrite'),board=await tx.store.get(source)
   if(board){const merged=mergeBoard(base,board.content,content);if(!equal(board.content,merged))await tx.store.put({...board,content:merged,version:board.version+1})}
   await tx.done
+  const updated=await readDeviceBoard(source)
+  if(updated)await saveHomeWorkspaceBoard(updated)
   if(source.startsWith('local:important-')) {
     const root=await workspaceRoot();if(!root)throw new Error('Conectá la carpeta de la pizarra.')
     const path=`progreso/pizarras/${source.slice('local:important-'.length)}.json`

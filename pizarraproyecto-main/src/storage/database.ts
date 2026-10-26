@@ -12,6 +12,8 @@ export type MediaItem = {
   height: number
   name: string
   kind: 'image' | 'pdf-page' | 'audio'
+  /** Original PDF bytes shared by all pages; legacy pdf-page assets remain images. */
+  pdfSource?: true
   durationMs?: number
   mimeType?: string
   documentId?: string

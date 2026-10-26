@@ -20,5 +20,6 @@ export function validBoardContent(value: any): boolean {
     (value.shapes ?? []).every((shape: any) => shape && typeof shape.id === 'string') &&
     value.strokes.every((stroke:any)=>stroke && Array.isArray(stroke.points)) &&
     value.texts.every((text:any)=>text && typeof text.id==='string' && typeof text.text==='string') &&
-    value.media.every((media:any)=>media && typeof media.id==='string' && typeof media.assetId==='string' && typeof media.name==='string')
+    value.media.every((media:any)=>media && typeof media.id==='string' && typeof media.assetId==='string' && typeof media.name==='string' &&
+      (media.pdfSource===undefined || (media.pdfSource===true && media.kind==='pdf-page' && Number.isSafeInteger(media.pageNumber) && media.pageNumber>0)))
 }

@@ -87,6 +87,11 @@ test('PDFs and images require verified uploads and remain scoped to the current 
   const get=()=>backend.request(`/api/board-links/boards/${id}/files/pdf_test?link=${link}`,{cookie:guest})
   assert.equal(await(await get()).text(),'%PDF-1.7 test')
   assert.equal((await backend.request(`/api/board-links/boards/${id}/files/unknown?link=${link}`,{cookie:guest})).status,404)
-  assert.equal((await api(`/boards/${id}`,{version:1,content:scene(),files:{}},'PUT')).status,200)
+  const expanded={...scene(),media:[1,2].map(pageNumber=>({id:`page-${pageNumber}`,assetId:'pdf_test',name:'test.pdf',kind:'pdf-page',pdfSource:true,pageNumber,documentId:'pdf_test',groupId:'document'}))}
+  assert.equal((await api(`/boards/${id}`,{version:1,content:expanded,files},'PUT')).status,200)
+  assert.equal((await get()).status,200,'expanded pages retain the same authorized PDF bytes')
+  const invalid=structuredClone(expanded);invalid.media[0].pageNumber=0
+  assert.equal((await api(`/boards/${id}`,{version:2,content:invalid,files},'PUT')).status,422)
+  assert.equal((await api(`/boards/${id}`,{version:2,content:scene(),files:{}},'PUT')).status,200)
   assert.equal((await get()).status,404)
 })

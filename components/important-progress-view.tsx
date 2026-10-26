@@ -251,6 +251,7 @@ interface Table {
 
 import { importantCountdownStyle, importantTaskProgress, readImportantTasks, writeImportantTasks, type ImportantTask } from "@/lib/important-tasks"
 import { useLocalWorkspace } from "@/components/local-workspace-provider"
+import { readCalendarMarks, writeCalendarMark, type CalendarMarks } from '@/lib/calendar-marks'
 
 // UI copied from progreso/components/progress-tracker.tsx; only local persistence and study navigation are adapted.
 export default function ImportantProgressView({ active, onBack, initialCalendarTaskId }: { active: boolean; onBack: () => void; initialCalendarTaskId?: string }) {
@@ -276,6 +277,13 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
   const [eventZoom, setEventZoom] = useState(2)
   const [isCalendarMode, setIsCalendarMode] = useState(Boolean(initialCalendarTaskId))
   const [calendarDate, setCalendarDate] = useState(new Date())
+  const [calendarMarks, setCalendarMarks] = useState<CalendarMarks>({})
+  const [markDraft, setMarkDraft] = useState<{ date: string; name: string } | null>(null)
+  const dayHold = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const heldDay = useRef<string | null>(null)
+  const dayOrigin = useRef({ x: 0, y: 0 })
+  const cancelDayHold = () => { if(dayHold.current !== null)clearTimeout(dayHold.current); dayHold.current = null }
+  useEffect(() => { setMarkDraft(null); cancelDayHold(); return cancelDayHold }, [calendarDate, isCalendarMode])
   const moveCalendarMonth = useCallback((direction: number) => {
     setCalendarDate(prev => new Date(prev.getFullYear(), prev.getMonth() + direction, 1))
   }, [])
@@ -302,8 +310,9 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
     loaded.current = false
     setIsLoading(true)
     setStorageError("")
-    if (rootHandle && isReady) readImportantTasks(rootHandle, isNativeReadOnly()).then(tasks => {
+    if (rootHandle && isReady) Promise.all([readImportantTasks(rootHandle, isNativeReadOnly()), readCalendarMarks(rootHandle)]).then(([tasks, marks]) => {
       if (!subscribed) return
+      setCalendarMarks(marks)
       baseline.current = tasks
       if(initialCalendarTaskId){
         const task=tasks.find(task=>task.id===initialCalendarTaskId)
@@ -553,6 +562,8 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
     }
 
     for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = formatDateForStorage(new Date(year, month, day))
+      const mark = calendarMarks[dateKey]
       const dayEvents = calendarEvents.filter(
         (e) =>
           e.date.getFullYear() === year &&
@@ -570,21 +581,38 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
         selectedDate.getDate() === day
 
       cells.push(
+        <div key={dateKey} className="relative min-w-0">
         <button
           type="button"
-          key={day}
+          title={mark}
+          data-calendar-date={dateKey}
+          onPointerDown={event => {
+            if(isNativeReadOnly() || !rootHandle || !loaded.current || !event.isPrimary || event.button !== 0)return
+            cancelDayHold(); heldDay.current = null
+            dayOrigin.current = { x: event.clientX, y: event.clientY }
+            event.currentTarget.setPointerCapture(event.pointerId)
+            dayHold.current = setTimeout(() => {
+              dayHold.current = null; heldDay.current = dateKey
+              setMarkDraft({ date: dateKey, name: mark ?? '' })
+            }, 650)
+          }}
+          onPointerMove={event => { if(Math.hypot(event.clientX-dayOrigin.current.x,event.clientY-dayOrigin.current.y)>12)cancelDayHold() }}
+          onPointerUp={cancelDayHold} onPointerCancel={cancelDayHold} onLostPointerCapture={cancelDayHold} onPointerLeave={cancelDayHold}
+          onContextMenu={event => event.preventDefault()}
           onClick={() => {
+            if(heldDay.current === dateKey){heldDay.current = null;return}
             if (isSelectingDate) {
               void handleCalendarDateSelection(new Date(year, month, day))
             }
           }}
-          className={`border h-24 p-1 overflow-hidden text-left transition-colors ${
+          className={`relative border h-24 w-full p-1 overflow-hidden text-left select-none transition-colors ${
             isToday ? "bg-blue-200 dark:bg-blue-900" : ""
           } ${isSelected ? "ring-2 ring-blue-500" : ""} ${
             isSelectingDate ? "cursor-pointer hover:border-blue-500" : "cursor-default"
           }`}
         >
           <div className="text-[10px] font-bold">{day}</div>
+          {mark && <span data-calendar-mark={dateKey} aria-label={`Marca: ${mark}`} className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl font-normal leading-none text-red-500">X</span>}
           <div className="space-y-1 mt-1">
             {dayEvents.map((ev, idx) => (
               <div
@@ -595,7 +623,26 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
               </div>
             ))}
           </div>
-        </button>,
+        </button>
+        {markDraft?.date === dateKey && <input
+          autoFocus aria-label="Nombre de la marca" placeholder="Nombre…" maxLength={120}
+          style={{ width: 'calc(100% - 0.5rem)' }}
+          value={markDraft.name} onChange={event => setMarkDraft({ date: dateKey, name: event.target.value })}
+          className="absolute left-1 right-1 top-7 z-10 min-w-0 rounded border border-gray-300 bg-white px-1 py-0.5 text-xs text-black shadow-sm outline-none focus:border-blue-500"
+          onBlur={() => setMarkDraft(null)}
+          onPointerDown={event => event.stopPropagation()}
+          onKeyDown={event => {
+            event.stopPropagation()
+            if(event.key === 'Escape'){event.preventDefault();setMarkDraft(null)}
+            if(event.key !== 'Enter' || event.nativeEvent.isComposing)return
+            event.preventDefault()
+            const name = markDraft.name.trim()
+            setMarkDraft(null)
+            if(!name || !rootHandle || isNativeReadOnly())return
+            void writeCalendarMark(rootHandle,dateKey,name).then(marks => {setCalendarMarks(marks);setStorageError('')}).catch(error => setStorageError(String(error)))
+          }}
+        />}
+        </div>,
       )
     }
     return cells
@@ -682,6 +729,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
             ))}
             {renderCalendarCells()}
           </div>
+          {storageError && <p role="alert" className="mt-1 text-xs text-red-500">{storageError}</p>}
           {calendarSelection && (
             <p className="text-xs text-muted-foreground text-center">
               Haz clic en una fecha para asignar los días restantes de este evento.

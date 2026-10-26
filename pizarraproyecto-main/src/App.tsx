@@ -45,6 +45,7 @@ import {cartesianHandles,resizeCartesian} from './canvas/cartesianResize'
 import type {CartesianHandle} from './canvas/cartesianResize'
 import {TRANSCRIPTION_PROMPT,transcriptionKey} from './assistant/transcription'
 import {deviceDB} from './storage/device'
+import { loadWorkspaceHandle, requestWorkspacePermission, pickWorkspaceRootHandle } from '../../lib/local-workspace-client'
 import StudyCheckIn from './components/StudyCheckIn'
 import {fitFollowCamera,followCycle} from './collaborationCamera'
 import type {CameraView} from './collaborationCamera'
@@ -58,6 +59,10 @@ import type { PenBreak } from './canvas/penRecovery'
 import type { Ref, CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { PointerEvent as ReactPointerEvent, DragEvent as ReactDragEvent, ChangeEvent, MouseEvent as ReactMouseEvent } from 'react'
 import { AdaptiveImageCache } from './canvas/imageCache'
+import { PdfPages } from './canvas/pdfPages'
+import { pdfParts } from './canvas/pdfLayout'
+import type { PdfPart } from './canvas/pdfLayout'
+import { readShortcutPdf } from './pdfSource'
 import { loadImagePreview } from './canvas/imagePreviewStore'
 import { imageDimensions } from './canvas/imageDimensions'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -829,8 +834,18 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const [shapeTextEditing,setShapeTextEditing]=useState<string|null>(null)
   const [tableRevision, refreshTables] = useState(0)
   const [excelNotice, setExcelNotice] = useState('')
+  const pdfPagesRef = useRef<PdfPages | null>(null)
+  if(!pdfPagesRef.current)pdfPagesRef.current=new PdfPages(pdfWorker)
+  const pdfPartsRef=useRef(new Map<string,PdfPart>())
+  const pdfItemPartsRef=useRef(new Map<string,PdfPart[]>())
+  const pdfConversionRef=useRef<{id:string;boardId:string;controller:AbortController}|null>(null)
+  const shortcutHoldRef=useRef<{id:string;pointerId:number;pointerType:string;x:number;y:number;camera:string;timer:ReturnType<typeof setTimeout>;fired:boolean}|null>(null)
+  function cancelShortcutHold(){const hold=shortcutHoldRef.current;if(hold)clearTimeout(hold.timer);shortcutHoldRef.current=null;return hold}
+  useEffect(()=>{const cancel=()=>{if(cancelShortcutHold())pdfPointer.current=null;pdfConversionRef.current?.controller.abort()};window.addEventListener('blur',cancel);return()=>{cancel();window.removeEventListener('blur',cancel)}},[])
   const imageCacheRef = useRef<AdaptiveImageCache | null>(null)
-  if (!imageCacheRef.current) imageCacheRef.current = new AdaptiveImageCache((id, request) => {
+  if (!imageCacheRef.current) imageCacheRef.current = new AdaptiveImageCache((id, request, signal) => {
+    const part=pdfPartsRef.current.get(id)
+    if(part)return pdfPagesRef.current!.preview(part,request.width,request.height,()=>imageAssetCacheKey(part.assetId)===part.scope?loadAsset(part.assetId):Promise.resolve(undefined),signal)
     const key = imageAssetCacheKey(id)
     return loadImagePreview(key, () => imageAssetCacheKey(id) === key ? loadAsset(id) : Promise.resolve(undefined), request.width, request.height)
   }, () => redraw())
@@ -1517,12 +1532,22 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
 
   function enqueueVisibleMedia(items: MediaItem[]) {
     const pixels = cameraRef.current.zoom * (window.devicePixelRatio || 1)
-    imageCacheRef.current!.reconcile(items.filter(item => item.kind !== 'audio').map(item => ({
-      id: item.assetId, width: item.width * pixels, height: item.height * pixels,
-    })), `${cameraRef.current.x}:${cameraRef.current.y}:${cameraRef.current.zoom}`)
+    const view=visibleBounds(),parts=new Map<string,PdfPart>(),byItem=new Map<string,PdfPart[]>()
+    const requests=items.filter(item=>item.kind!=='audio').flatMap(item=>{
+      if(!item.pdfSource)return [{id:item.assetId,width:item.width*pixels,height:item.height*pixels}]
+      const tiles=pdfParts(item,pixels,view,imageAssetCacheKey(item.assetId))
+      byItem.set(item.id,tiles);for(const part of tiles)parts.set(part.id,part)
+      return tiles
+    })
+    pdfPartsRef.current=parts;pdfItemPartsRef.current=byItem
+    imageCacheRef.current!.reconcile(requests, `${cameraRef.current.x}:${cameraRef.current.y}:${cameraRef.current.zoom}`)
   }
 
   function redraw() {
+    const held=shortcutHoldRef.current,camKey=`${cameraRef.current.x}:${cameraRef.current.y}:${cameraRef.current.zoom}`
+    if(held&&!held.fired&&held.camera!==camKey){cancelShortcutHold();pdfPointer.current=null}
+    const conversion=pdfConversionRef.current
+    if(conversion&&(conversion.boardId!==getActiveBoardId()||!shapesRef.current.some(item=>item.id===conversion.id)))conversion.controller.abort()
     boardAudio.reconcile(mediaRef.current)
     const draft=boardAudio.draft
     if(draft&&audioDraftRef.current){
@@ -1648,13 +1673,23 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         continue
       }
       renderables.push({z:(item as GroupedItem).zIndex??-300000,index:renderIndex++,bounds:rotatedRect(item,item.rotation),paint:(surface)=>{
-        const image=imageCacheRef.current!.get(item.assetId)
+        const image=item.pdfSource?undefined:imageCacheRef.current!.get(item.assetId)
         surface.save()
         if(item.rotation){
           const center={x:item.x+item.width/2,y:item.y+item.height/2}
           surface.translate(center.x,center.y);surface.rotate(item.rotation);surface.translate(-center.x,-center.y)
         }
-        if(image){surface.drawImage(image,item.x,item.y,item.width,item.height)}
+        if(item.pdfSource){
+          surface.fillStyle='#ffffff';surface.fillRect(item.x,item.y,item.width,item.height)
+          let painted=false
+          for(const part of pdfItemPartsRef.current.get(item.id)??[]){
+            const pixels=imageCacheRef.current!.get(part.id)
+            if(!pixels)continue
+            const r=part.region;surface.drawImage(pixels,item.x+r.x*item.width,item.y+r.y*item.height,r.width*item.width,r.height*item.height);painted=true
+          }
+          if(!painted){surface.fillStyle='#555';surface.font='16px system-ui';surface.fillText(`Cargando página ${item.pageNumber}…`,item.x+16,item.y+30)}
+        }
+        else if(image){surface.drawImage(image,item.x,item.y,item.width,item.height)}
         else {surface.fillStyle='#f4f4f5';surface.fillRect(item.x,item.y,item.width,item.height);surface.fillStyle='#555';surface.font='16px system-ui';surface.fillText('Cargando archivo...',item.x+16,item.y+30)}
         surface.restore()
       }})
@@ -1859,7 +1894,11 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
 
   function groupBounds(): Bounds | null {
     const ctx = canvasRef.current?.getContext('2d')
-    const boxes = groupRef.current.map(s => selectionBounds(s, ctx)).filter((b): b is Bounds => b !== null)
+    const media=new Map(mediaRef.current.map(item=>[item.id,item]))
+    const boxes = groupRef.current.map(s => {
+      if(s.kind!=='media')return selectionBounds(s,ctx)
+      const item=media.get(String(s.id));return item?rotatedRect(item,item.rotation):null
+    }).filter((b): b is Bounds => b !== null)
     if (!boxes.length) return null
     const x = Math.min(...boxes.map(b => b.x))
     const y = Math.min(...boxes.map(b => b.y))
@@ -2316,6 +2355,10 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         if (!cancelled) {
           console.error(error)
           setSaveStatus('error')
+          if(!isTopicWorkspace()&&!nativeBoardMode()&&!isLinkGuest()){
+            setLibraryError(error instanceof Error?error.message:String(error))
+            setLibraryOpen(true)
+          }
           notifyTopicWorkspace('error', error instanceof Error ? error.message : String(error))
         }
       }
@@ -2336,6 +2379,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     const canvases = [canvasRef.current, foregroundCanvasRef.current, cursorCanvasRef.current]
     return () => {
       imageCacheRef.current?.clear()
+      pdfPagesRef.current?.clear()
       importControllerRef.current?.abort()
       undoRef.current = []; redoRef.current = []
       for (const canvas of canvases) {
@@ -2874,7 +2918,11 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   }
 
   function hitSelectionAt(point:Point):Selection|undefined {
-    return everySelection().map((sel,index)=>({sel,index,z:selectionZ(sel)})).sort((a,b)=>b.z-a.z||b.index-a.index).find(({sel})=>{
+    const media=new Map(mediaRef.current.map(item=>[item.id,item]))
+    return everySelection().map((sel,index)=>({sel,index,z:sel.kind==='media'?(media.get(String(sel.id)) as GroupedItem|undefined)?.zIndex??-300000:selectionZ(sel)})).sort((a,b)=>b.z-a.z||b.index-a.index).find(({sel})=>{
+      if(sel.kind==='media'){
+        const item=media.get(String(sel.id));return !!item&&overlaps({x:point.x,y:point.y,width:0,height:0},rotatedRect(item,item.rotation))
+      }
       if(sel.kind==='shape'){
         const shape=shapesRef.current.find(s=>s.id===sel.id)!
         if(shape.visualType==='page')return shapeTouchesEraser(shape,point,12/cameraRef.current.zoom)
@@ -3036,6 +3084,30 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   }
   function tabletPointerDown(e:ReactPointerEvent<HTMLCanvasElement>){
     if (nativeBoardMode()) { pointerDown(e); return }
+    const held=shortcutHoldRef.current
+    if(e.pointerType==='touch'&&held&&held.pointerId!==e.pointerId&&held.pointerType==='touch'){
+      cancelShortcutHold();pdfPointer.current=null
+      touchPointersRef.current.set(held.pointerId,{x:held.x,y:held.y})
+      touchPointersRef.current.set(e.pointerId,{x:e.clientX,y:e.clientY})
+      e.currentTarget.setPointerCapture(e.pointerId);touchGestureRef.current=readTouchGesture(e.currentTarget);e.preventDefault();return
+    }
+    if(held&&held.pointerId!==e.pointerId)cancelShortcutHold()
+    if(e.button===0&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&loadedRef.current&&!selectionPicking&&tool!=='eraser'&&!touchPointersRef.current.size){
+      const hit=hitSelectionAt(toWorld(e.clientX,e.clientY))
+      const shortcut=hit?.kind==='shape'?shapesRef.current.find(item=>item.id===hit.id&&item.visualType==='pdf-shortcut'&&item.pdfReference):null
+      if(shortcut){
+        clearPenHold();pointerDown(e)
+        if(pdfPointer.current&&!importBusyRef.current){
+          const hold={id:shortcut.id,pointerId:e.pointerId,pointerType:e.pointerType,x:e.clientX,y:e.clientY,camera:`${cameraRef.current.x}:${cameraRef.current.y}:${cameraRef.current.zoom}`,fired:false,timer:setTimeout(()=>{
+            if(shortcutHoldRef.current!==hold||pdfPointer.current?.moved)return
+            hold.fired=true;pdfPointer.current=null
+            void expandPdfShortcut(shortcut.id)
+          },600)}
+          shortcutHoldRef.current=hold
+        }
+        return
+      }
+    }
     if(e.pointerType==='pen'&&tool==='select'){
       const hit=hitSelectionAt(toWorld(e.clientX,e.clientY))
       if(hit?.kind==='shape'&&shapesRef.current.some(item=>item.id===hit.id&&item.visualType==='review-marker')){
@@ -3059,6 +3131,11 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     penHoldRef.current=hold
   }
   function tabletPointerMove(e:ReactPointerEvent<HTMLCanvasElement>){
+    const shortcut=shortcutHoldRef.current
+    if(shortcut?.pointerId===e.pointerId){
+      if(shortcut.fired){e.preventDefault();return}
+      if(Math.hypot(e.clientX-shortcut.x,e.clientY-shortcut.y)>5)cancelShortcutHold()
+    }
     const hold=penHoldRef.current
     if(hold&&hold.event.pointerId===e.pointerId){
       sendCursorPosition(e.clientX,e.clientY)
@@ -3072,6 +3149,10 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     pointerMove(e)
   }
   function tabletPointerUp(e:ReactPointerEvent<HTMLCanvasElement>){
+    if(shortcutHoldRef.current?.pointerId===e.pointerId){
+      const shortcut=cancelShortcutHold()!
+      if(shortcut.fired){if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);return}
+    }
     const hold=penHoldRef.current
     if(hold&&hold.event.pointerId===e.pointerId){
       clearPenHold()
@@ -3082,6 +3163,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     pointerUp(e)
   }
   function tabletPointerCancel(e:ReactPointerEvent<HTMLCanvasElement>){
+    if(shortcutHoldRef.current?.pointerId===e.pointerId){cancelShortcutHold();pdfPointer.current=null}
     if(penHoldRef.current?.event.pointerId===e.pointerId){clearPenHold();return}
     pointerCancel(e)
   }
@@ -3769,7 +3851,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         renderers.push({z:(item as GroupedItem).zIndex??-300000,paint:ctx=>paintAudioNote(ctx,item)})
         continue
       }
-      const blob=await loadAsset(item.assetId)
+      const blob=await mediaImageBlob(item,Math.min(4096,Math.max(2048,item.width*outputWidth/Math.max(1,Math.min(...pages.map(page=>page.width))))))
       if(!blob)throw new Error(`No se pudo cargar ${item.name} para preparar la imagen.`)
       const url=URL.createObjectURL(blob);let bitmap:HTMLImageElement
       try{bitmap=await image(url)}finally{URL.revokeObjectURL(url)}
@@ -4355,7 +4437,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     if(!item)return
     const boardId=getActiveBoardId(),assetId=item.assetId
     try {
-      const blob=await loadAsset(assetId)
+      const blob=await mediaImageBlob(item,4096)
       if(!blob)throw new Error('No se pudo cargar la imagen para recortarla.')
       if(boardId!==getActiveBoardId()||!mediaRef.current.some(m=>m.id===item.id&&m.assetId===assetId))return
       setImageCrop({boardId,itemId:item.id,assetId,blob,name:item.name})
@@ -4370,11 +4452,61 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     const assetId=createId();await saveAsset(assetId,file)
     if(target.boardId!==getActiveBoardId()||current()?.assetId!==target.assetId)throw new Error('La imagen cambió mientras preparabas el recorte.')
     rememberChange()
-    mediaRef.current=mediaRef.current.map(item=>item.id===target.itemId?{...item,...croppedGeometry(item,region),assetId,name:file.name,...(item.kind==='pdf-page'?{pageText:undefined}:{})}:item)
+    mediaRef.current=mediaRef.current.map(item=>item.id===target.itemId?{...item,...croppedGeometry(item,region),assetId,name:file.name,pdfSource:undefined,...(item.kind==='pdf-page'?{pageText:undefined}:{})}:item)
     selectElement({kind:'media',id:target.itemId});redraw();scheduleSave()
     await flushBoardForHistory()
   }
 
+
+  async function mediaImageBlob(item:MediaItem,side=2048):Promise<Blob|undefined>{
+    if(!item.pdfSource)return loadAsset(item.assetId)
+    const scale=side/Math.max(item.width,item.height)
+    return pdfPagesRef.current!.capture(imageAssetCacheKey(item.assetId),item.pageNumber!,Math.max(1,Math.floor(item.width*scale)),Math.max(1,Math.floor(item.height*scale)),()=>loadAsset(item.assetId))
+  }
+
+  async function expandPdfShortcut(id:string){
+    if(nativeBoardMode()||importBusyRef.current||!loadedRef.current)return
+    const shortcut=shapesRef.current.find(item=>item.id===id&&item.visualType==='pdf-shortcut'&&item.pdfReference)
+    if(!shortcut?.pdfReference)return
+    const boardId=getActiveBoardId(),reference=structuredClone(shortcut.pdfReference),controller=new AbortController(),{signal}=controller
+    importControllerRef.current=controller;pdfConversionRef.current={id,boardId,controller};importBusyRef.current=true
+    const current=()=>{
+      signal.throwIfAborted()
+      const shape=shapesRef.current.find(item=>item.id===id&&JSON.stringify(item.pdfReference)===JSON.stringify(reference))
+      if(getActiveBoardId()!==boardId||!shape)throw new DOMException('El acceso cambió o se eliminó.','AbortError')
+      return shape
+    }
+    try{
+      setImportStatus('Cargando PDF…')
+      const blob=await readShortcutPdf(boardId,reference,signal),assetId=createId()
+      current()
+      const pages=await pdfPagesRef.current!.metadata(imageAssetCacheKey(assetId),blob,signal,(page,total)=>setImportStatus(`Preparando PDF: página ${page} de ${total}`))
+      if(!pages.length)throw new Error('El PDF no contiene páginas.')
+      current();await saveAsset(assetId,blob)
+      const source=current(),groupId=source.groupId??createId(),rotation=source.rotation??0
+      let top=0
+      const media=pages.map((page,index)=>{
+        const local={x:0,y:top};top+=page.height+PAGE_GAP
+        const center={x:source.x+local.x+page.width/2,y:source.y+local.y+page.height/2}
+        const dx=center.x-source.x,dy=center.y-source.y
+        const rotated={x:source.x+dx*Math.cos(rotation)-dy*Math.sin(rotation),y:source.y+dx*Math.sin(rotation)+dy*Math.cos(rotation)}
+        return {id:createId(),assetId,kind:'pdf-page' as const,pdfSource:true as const,documentId:assetId,pageNumber:index+1,name:reference.fileName,
+          x:rotated.x-page.width/2,y:rotated.y-page.height/2,width:page.width,height:page.height,rotation,groupId,zIndex:source.zIndex??-200000}
+      })
+      current();rememberChange();pdfConversionRef.current=null
+      shapesRef.current=shapesRef.current.filter(item=>item.id!==id)
+      mediaRef.current.push(...media)
+      materialLibrary.releaseReader(reference.materialId)
+      if(lastPinnedPdfRef.current?.id===id)lastPinnedPdfRef.current=null
+      selectElement({kind:'media',id:media[0].id})
+      setTool('select');redraw();scheduleSave()
+    }catch(error){if(!signal.aborted&&(error as Error).name!=='AbortError')setSelectionError(error instanceof Error?error.message:'No se pudo cargar el PDF. El acceso se conservó.')}
+    finally{
+      if(pdfConversionRef.current?.controller===controller)pdfConversionRef.current=null
+      if(importControllerRef.current===controller)importControllerRef.current=null
+      importBusyRef.current=false;setImportStatus('')
+    }
+  }
 
   async function addPDF(file: File, dropPoint?: Point) {
     const controller = new AbortController()
@@ -4726,7 +4858,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         if(sel.kind==='media'){
           const item=mediaRef.current.find(m=>m.id===sel.id)
           if(!item)continue
-          const blob=await loadAsset(item.assetId)
+          const blob=await mediaImageBlob(item,2048)
           if(!blob)throw new Error('No se pudo descargar la imagen seleccionada.')
           const image=await imageFromBlob(blob)
           ctx.save();ctx.translate(item.x+item.width/2,item.y+item.height/2)
@@ -5022,7 +5154,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     const target=event.target as HTMLElement
     if(target.closest('input,textarea,select,[contenteditable],button,.toolbar,.sheet-inline-editor'))return
     event.preventDefault()
-    if(penHoldRef.current)return
+    if(penHoldRef.current||shortcutHoldRef.current||pdfConversionRef.current)return
     openBoardContextMenu(event.clientX,event.clientY)
   }
   function openBoardContextMenu(clientX:number,clientY:number) {
@@ -5101,6 +5233,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       if (nativeBoardMode() && !((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) return
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&!libraryOpen){e.preventDefault();setBoardSearchOpen(true);return}
       if(e.key==='Escape' && !e.repeat) {
+        if(pdfConversionRef.current){e.preventDefault();pdfConversionRef.current.controller.abort();return}
         finishReviewPlacement()
         if(editingRef.current || imageCrop || studyAssistant || importStatus || recognizing)return
         e.preventDefault()
@@ -5386,7 +5519,14 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           <header><h2>Mis pizarras</h2>
             <button title="Cerrar" onClick={() => setLibraryOpen(false)}>✕</button></header>
           <div className="device-storage-panel" role="status">
-            <p>{deviceNotice || 'Las privadas se guardan en este dispositivo; las compartidas también conservan una copia local.'}</p>
+            <p>{deviceNotice || 'Las pizarras se guardan en la carpeta de Estudio al abrirlas. Las anteriores se recuperan del navegador.'}</p>
+            {!nativeBoardMode()&&!isTopicWorkspace()&&!isLinkGuest()&&<button onClick={()=>void libraryAction(async()=>{
+              const root=await loadWorkspaceHandle()
+              if(root){if(await requestWorkspacePermission(root)!=='granted')throw new Error('Autorizá la carpeta de Estudio para abrir tus pizarras.')}
+              else await pickWorkspaceRootHandle()
+              if(loadedRef.current)await flushBoardForHistory()
+              window.location.reload()
+            })}>Conectar carpeta de Estudio</button>}
             <button disabled={preparingOffline} onClick={()=>void libraryAction(async()=>{
               setPreparingOffline(true)
               try{await flushBoardForHistory();await prepareBoardOffline()}finally{setPreparingOffline(false)}
@@ -5437,7 +5577,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
                   <label className="library-field-label">Elegí un color</label>
                   <label className="library-field-label">Dónde guardar
                     <select aria-label="Dónde guardar la pizarra" value={newBoardStorage} onChange={e=>setNewBoardStorage(e.target.value as 'private'|'shared')}>
-                      <option value="private">Privada en este dispositivo</option>
+                      <option value="private">Carpeta de Estudio · compatible con el navegador</option>
                       <option value="shared" disabled={!canUseServer()}>Compartida en el servidor + copia local</option>
                     </select>
                   </label>
@@ -5471,7 +5611,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
                   </div>
                   {boards.filter(board => (board.folder_id || null) === group.id).map(b => (
                     <div key={b.id} className={`library-board library-draggable ${b.id === getActiveBoardId() ? 'library-board-current' : ''} ${draggingBoardId === b.id ? 'library-dragging' : ''}`} onPointerDown={e => boardDragStart(e, b.id)} onPointerMove={boardDragMove} onPointerUp={boardDragEnd} onPointerCancel={boardDragEnd}>
-                <button className="library-board-name" onClick={() => openBoardUnlessDragged(b.id)}><span draggable={!nativeBoardMode()} title="Arrastrar acceso a esta pizarra" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onDragEnd={()=>setLibraryLinkDragging(false)} onDragStart={event=>{setLibraryLinkDragging(true);event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData(BOARD_LINK_MIME,JSON.stringify({boardId:b.id,name:boardTitle(b.name)}))}}><BoardDot name={b.name}/></span><span>{boardTitle(b.name)}<small className="device-board-label">{b.storage==='private'?'Privada · este dispositivo':'Compartida · copia local al abrir'}</small></span></button>
+                <button className="library-board-name" onClick={() => openBoardUnlessDragged(b.id)}><span draggable={!nativeBoardMode()} title="Arrastrar acceso a esta pizarra" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onDragEnd={()=>setLibraryLinkDragging(false)} onDragStart={event=>{setLibraryLinkDragging(true);event.stopPropagation();event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData(BOARD_LINK_MIME,JSON.stringify({boardId:b.id,name:boardTitle(b.name)}))}}><BoardDot name={b.name}/></span><span>{boardTitle(b.name)}<small className="device-board-label">{b.workspace?'Carpeta de Estudio':b.storage==='private'?'Navegador · se guardará en la carpeta al abrir':'Compartida · copia local al abrir'}</small></span></button>
                 {editingBoardId === b.id ? (
                   <div className="library-inline-editor">
                     <label className="library-field-label">Color del punto</label>
@@ -5795,7 +5935,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       }}/>}
       {imageCrop&&<ImageCropDialog key={imageCrop.assetId} blob={imageCrop.blob} name={imageCrop.name} onApply={applyImageCrop} onClose={()=>setImageCrop(null)}/>}
       {selectionError&&<div className="recognition-overlay"><div className="recognition-dialog" role="dialog" aria-modal="true" aria-label="Imagen o selección de la pizarra"><p role="alert">{selectionError}</p><button onClick={()=>setSelectionError('')}>Cerrar</button></div></div>}
-      {importStatus && <div className="importing">{importStatus}</div>}
+      {importStatus && <div className="importing" role="status">{importStatus}{pdfConversionRef.current&&<button type="button" style={{marginLeft:10}} onClick={()=>pdfConversionRef.current?.controller.abort()}>Cancelar</button>}</div>}
       {tool==='connector'&&<div className="connector-instruction">Arrastrá desde un objeto hasta otro. Después podés editar el recorrido y las puntas.</div>}
       {selectionPicking&&<div className="chatgpt-selection-instruction" role="status">Marcá el área del manuscrito, imagen o PDF que querés enviar.<button onClick={()=>setSelectionPicking(false)}>Cancelar selección</button></div>}
       {!imageCrop&&!studyAssistant&&!libraryOpen&&!openMenu&&groupRef.current.length===1&&groupRef.current[0].kind==='media'&&!selectedAudio&&<TouchButton type="button" className="visual-edit-button" onPress={()=>void openImageCrop()}>Recortar imagen</TouchButton>}

@@ -86,7 +86,7 @@ export async function scanLibraryFiles(root: FileSystemDirectoryHandle): Promise
     try { dir = await root.getDirectoryHandle(name) } catch (error) { if ((error as DOMException).name === 'NotFoundError') continue; throw error }
     await visit(dir, name)
   }
-  output.push(...await readPrivateBoards())
+  output.push(...await readPrivateBoards(output))
   for (const candidate of [...output]) if (candidate.path.endsWith('/explanations.json')) {
     const explanation = JSON.parse(await candidate.blob.text()) as { entries?: { id: string; html?: string }[] }
     for (const entry of explanation.entries || []) {
@@ -98,7 +98,7 @@ export async function scanLibraryFiles(root: FileSystemDirectoryHandle): Promise
   return output.sort((a, b) => a.path.localeCompare(b.path))
 }
 // Open an existing board database only; publishing never creates or migrates it.
-async function readPrivateBoards(): Promise<Candidate[]> {
+async function readPrivateBoards(existing: Candidate[]): Promise<Candidate[]> {
   if (indexedDB.databases && !(await indexedDB.databases()).some(db => db.name === 'pizarra-dispositivo')) return []
   const db = await new Promise<IDBDatabase | null>((resolve, reject) => {
     const request = indexedDB.open('pizarra-dispositivo')
@@ -112,8 +112,13 @@ async function readPrivateBoards(): Promise<Candidate[]> {
     const boards = await readAll<{ id: string; name: string; storage: string; updated_at: string; content: Record<string, unknown>; draft?: Record<string, unknown>; folder_id?: string }>('boards')
     const results: Candidate[] = [], usedAssets = new Set<string>()
     const folders = await readAll<{id: string; name: string}>('folders')
-    const boardIndex: {id: string; name: string; folderId: string | null; path: string}[] = []
-    for (const board of boards.filter(b => b.id.startsWith('local:'))) {
+    const savedIndex = existing.find(file => file.path === 'boards/library.json')
+    const saved = savedIndex ? JSON.parse(await savedIndex.blob.text()) as { folders: {id:string;name:string}[]; boards: {id:string;name:string;folderId:string|null;path:string}[]; deleted?: string[]; deletedFolders?: string[] } : undefined
+    const boardIndex: {id: string; name: string; folderId: string | null; path: string}[] = [...saved?.boards ?? []]
+    const migrated = new Set([...boardIndex.map(board => board.id), ...saved?.deleted ?? []])
+    for (const board of boards.filter(b => b.id.startsWith('local:') && !migrated.has(b.id))) {
+      const moved = await new Promise<unknown>((resolve, reject) => { const q = db.transaction('meta').objectStore('meta').get(`workspace-board:${board.id}`); q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error) })
+      if (moved) continue
       const scene = board.draft || board.content
       const media = (scene.media || []) as { assetId: string }[]
       const assets: Record<string, string> = {}
@@ -129,7 +134,10 @@ async function readPrivateBoards(): Promise<Candidate[]> {
       boardIndex.push({ id: board.id, name: board.name, folderId: board.folder_id || null, path: `boards/${id}.json` })
       results.push({ path: `boards/${id}.json`, blob: new Blob([JSON.stringify({ id: board.id, name: board.name, folderId: board.folder_id, scene, assets })], { type: 'application/vnd.cursado.board+json' }), modified: 0 })
     }
-    results.push({ path: 'boards/library.json', blob: new Blob([JSON.stringify({ version: 1, folders, boards: boardIndex })], {type:'application/json'}), modified:0 })
+    if (results.length || !savedIndex) {
+      if(savedIndex)existing.splice(existing.indexOf(savedIndex),1)
+      results.push({ path: 'boards/library.json', blob: new Blob([JSON.stringify({ version: 1, folders: [...saved?.folders ?? [], ...folders.filter(folder=>!saved?.deletedFolders?.includes(folder.id)&&!saved?.folders.some(other=>other.id===folder.id))], boards: boardIndex })], {type:'application/json'}), modified:0 })
+    }
     return results
   } finally { db.close() }
 }

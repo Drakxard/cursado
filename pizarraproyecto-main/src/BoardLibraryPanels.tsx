@@ -142,6 +142,11 @@ export function useBoardLibrary(boardId: string, pinnedMaterialId?: number) {
     if(!readerFrames.current.has(reference.materialId))setReady(new Set())
     setReader(reference)
   },panels,
+    releaseReader:(materialId:number)=>{
+      if(frames.current.reader?.materialId===materialId)setReader(null)
+      if(frames.current.retained?.materialId===materialId)setRetained(null)
+      setReady(previous=>{const next=new Set(previous);next.delete(materialId);return next})
+    },
     closeReader:()=>{
       if(isLinkGuest()){setReader(null);if(!retained)setReady(new Set());return}
       if(retained?.materialId===reader?.materialId) {setReader(null);document.querySelector<HTMLCanvasElement>('.app canvas')?.focus();return}
