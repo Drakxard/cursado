@@ -1,9 +1,28 @@
-# Exportación SVG de Síntesis
+# Exportación de imágenes de Síntesis
 
-El botón ↓ del editor usa el mismo método de exportación visual que PDF.js:
-renderizado a escala 2 y JPEG de calidad 0.92 incrustado en un SVG sencillo.
-Ambos comparten `canvasSvgImage`, `SVG_RENDER_SCALE` y `buildRasterSvg` de
-`public/pdfjs/web/raster-svg.mjs`.
+El botón ↓ descarga una imagen **PNG**. Si hay una selección dentro del editor,
+exporta solamente ese fragmento; sin selección, exporta todo el apunte. El botón
+conserva la selección al pulsarlo y la captura antes de abrir el diálogo de progreso.
+
+`lib/client/synthesis-image.ts` conserva texto parcial, listas, tablas, imágenes y
+estilos. Las fórmulas KaTeX se copian completas aunque el extremo de la selección
+caiga dentro de una fórmula. La copia se prepara fuera de pantalla, sin modificar
+el documento ni la selección originales, y se elimina al terminar o cancelar.
+También reconoce un nodo o imagen seleccionado y omite el resaltado temporal de
+selección del editor, conservando los resaltados propios del apunte.
+
+El PNG se genera directamente desde las franjas renderizadas, sin envolver JPEGs
+en un SVG descargable. Usa escala 2 para fragmentos normales y reduce la escala
+para documentos grandes: limita el lienzo final a 16 millones de píxeles y 16384
+píxeles por dimensión. Los archivos se llaman `sintesis-seleccion.png` o `sintesis.png`.
+Las dos regresiones de PNG están en `tests/synthesis-image.browser.mjs`, disponibles
+mediante `npm run test:synthesis-image` sin requerir una compilación completa.
+
+## Render compartido y compatibilidad
+
+Se conserva el constructor SVG anterior para integraciones existentes y sus pruebas;
+el botón del editor utiliza exclusivamente la descarga PNG. Los detalles siguientes
+describen ese constructor de compatibilidad y el render por franjas compartido.
 
 `lib/client/synthesis-svg.ts` copia el contenido y los estilos calculados del
 editor, excluye sus controles y prepara imágenes y fuentes como datos locales.
