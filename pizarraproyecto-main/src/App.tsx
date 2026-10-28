@@ -4110,6 +4110,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     const point=toWorld(e.clientX,e.clientY)
     if(nativeBoardMode()||!loadedRef.current||selectionPicking)return
     const hit=hitSelectionAt(point)
+    if(!hit){selectTool('text');startText(point);return}
     if(hit?.kind==='text'){selectElement(hit);startText(point,String(hit.id));return}
     if(hit?.kind==='shape'){
       const visual=shapesRef.current.find(item=>item.id===hit.id)
