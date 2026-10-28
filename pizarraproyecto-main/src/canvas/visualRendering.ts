@@ -4,6 +4,8 @@ import type { Point } from '../storage/database'
 import { matrixCells } from '../study/matrices'
 import { cartesianGrid } from './cartesianResize'
 import { CODE_COLORS, cppTokens } from './cppHighlight'
+import { mathText } from './mathText'
+import { labelFont, labelLines } from './labelLayout'
 
 function wrapped(ctx:CanvasRenderingContext2D,text:string,width:number,limit=10000):string[] {
   const lines:string[]=[]
@@ -31,9 +33,12 @@ export function paintLabel(ctx:CanvasRenderingContext2D,item:ShapeItem,color:str
   if(!item.label)return
   const font=item.labelFontSize??16
   const code=item.symbol==='code'
-  ctx.save();ctx.fillStyle=item.labelColor||color;ctx.font=`${item.labelItalic?'italic ':''}${item.labelBold?'700 ':''}${font}px ${code?'ui-monospace,Consolas,monospace':item.labelFontFamily||'system-ui,sans-serif'}`;ctx.textBaseline='middle';ctx.textAlign=code?'left':item.labelAlign||'center'
+  ctx.save();ctx.fillStyle=item.labelColor||color;ctx.font=code?`${font}px ui-monospace,Consolas,monospace`:labelFont(item);ctx.textBaseline='middle';ctx.textAlign=code?'left':item.labelAlign||'center'
   ctx.beginPath();ctx.rect(item.x+6,item.y+4,Math.max(1,item.width-12),Math.max(1,item.height-8));ctx.clip()
-  const lines=wrapped(ctx,item.labelList?item.label.split('\n').map(line=>`• ${line}`).join('\n'):item.label,Math.max(1,item.width-20))
+  const text=item.labelList?item.label.split('\n').map(line=>`• ${line}`).join('\n'):item.label
+  const math=!code&&!item.labelHref?mathText(text,{fontSize:font,color:item.labelColor||color,width:Math.max(1,item.width-24),fontFamily:item.labelFontFamily,bold:item.labelBold,italic:item.labelItalic,strike:item.labelStrike,align:item.labelAlign||'center'}):null
+  if(math?.image){ctx.drawImage(math.image,item.x+12,item.y+(item.height-math.height)/2,math.width,math.height);ctx.restore();return}
+  const lines=labelLines(ctx,text,Math.max(1,item.width-24))
   lines.forEach((line,i)=>{
     const x=ctx.textAlign==='left'?item.x+12:ctx.textAlign==='right'?item.x+item.width-12:item.x+item.width/2,y=item.y+item.height/2+(i-(lines.length-1)/2)*font*1.25
     ctx.fillText(line,x,y)

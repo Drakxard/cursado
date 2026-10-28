@@ -13,6 +13,7 @@ export type SynthesisSvgProgress = { percent: number; label: string }
 type ExportOptions = {
   onProgress?: (progress: SynthesisSvgProgress) => void
   signal?: AbortSignal
+  background?: string
 }
 
 function checkCancelled(signal?: AbortSignal) {
@@ -49,10 +50,11 @@ async function imageDataUrl(src: string): Promise<string> {
   })
 }
 
-// Like PDF.js, render at 2x and embed JPEGs in a plain, self-contained SVG.
-// HTML is only an intermediate browser render, never part of the downloaded SVG.
-export async function buildSynthesisEditorSvg(source: HTMLElement, options: ExportOptions = {}): Promise<string> {
+// Shared tiled browser render. Consumers encode its pixels as PNG or legacy SVG.
+export async function renderSynthesisEditorTiles(source: HTMLElement, options: ExportOptions,
+  writeTile: (canvas: HTMLCanvasElement, region: { y: number; width: number; height: number; totalHeight: number }) => void): Promise<void> {
   const { signal, onProgress } = options
+  const background = options.background ?? "#fffdf8"
   const progress = (percent: number, label: string) => onProgress?.({ percent, label })
   progress(0, "Preparando apunte…")
   await yieldToBrowser(signal)
@@ -97,7 +99,6 @@ export async function buildSynthesisEditorSvg(source: HTMLElement, options: Expo
   const canvas = document.createElement("canvas")
   const context = canvas.getContext("2d", { alpha: false })
   if (!context) throw new Error("El navegador no pudo crear el lienzo de exportación.")
-  const pages: Array<{ width: number; height: number; image: string }> = []
   try {
     for (let y = 0; y < height; y += tileSize) {
       const tileHeight = Math.min(tileSize, height - y)
@@ -160,6 +161,10 @@ export async function buildSynthesisEditorSvg(source: HTMLElement, options: Expo
             Object.assign(copy.style, { boxSizing: "border-box", width: `${placeholder.width}px`, height: `${placeholder.height}px`, minHeight: "0", maxHeight: "none", visibility: "hidden" })
           } else copyStyle(computed, copy.style)
           copy.style.outline = "none"
+          if (original.classList.contains("selection") || original.classList.contains("ProseMirror-selectednode") || original.matches(".synthesis-local-image.is-selected img")) {
+            copy.style.backgroundColor = "transparent"
+            copy.style.boxShadow = "none"
+          }
         }
         for (const attribute of Array.from(copy.attributes)) {
           if (/^(contenteditable|draggable|tabindex|autofocus|id)$/i.test(attribute.name) || /^on/i.test(attribute.name)) {
@@ -206,7 +211,7 @@ export async function buildSynthesisEditorSvg(source: HTMLElement, options: Expo
       Object.assign(clone.style, {
         boxSizing: "border-box", width: `${source.offsetWidth}px`, maxWidth: "none",
         height: `${height}px`, maxHeight: "none", margin: "0", position: "relative",
-        top: "auto", left: "auto", transform: `translateY(${-y}px)`, overflow: "visible", backgroundColor: "#fffdf8",
+        top: "auto", left: "auto", transform: `translateY(${-y}px)`, overflow: "visible", backgroundColor: background,
       })
       if (pseudoRules.length) {
         const style = document.createElement("style")
@@ -244,17 +249,15 @@ export async function buildSynthesisEditorSvg(source: HTMLElement, options: Expo
         try {
           await image.decode()
         } catch {
-          throw new Error("No se pudo renderizar el contenido de Síntesis para exportarlo como SVG.")
+          throw new Error("No se pudo renderizar el contenido de Síntesis para exportarlo.")
         }
         checkCancelled(signal)
         canvas.width = width * SVG_RENDER_SCALE
         canvas.height = tileHeight * SVG_RENDER_SCALE
-        context.fillStyle = "#fffdf8"
+        context.fillStyle = background
         context.fillRect(0, 0, canvas.width, canvas.height)
         context.drawImage(image, 0, 0, canvas.width, canvas.height)
-        const raster = canvasSvgImage(canvas)
-        if (!raster.startsWith("data:image/jpeg")) throw new Error("No se pudo renderizar el SVG de Síntesis.")
-        pages.push({ width, height: tileHeight, image: raster })
+        writeTile(canvas, { y, width, height: tileHeight, totalHeight: height })
       } finally {
         // Release each decoded SVG document and raster surface before the next
         // strip; otherwise Chrome can retain all intermediate document images.
@@ -265,11 +268,21 @@ export async function buildSynthesisEditorSvg(source: HTMLElement, options: Expo
     }
     progress(98, "Terminando archivo…")
     await yieldToBrowser(signal)
-    return buildRasterSvg(pages, 0)
   } finally {
     canvas.width = 1
     canvas.height = 1
   }
+}
+
+// Retain the old builder for existing integrations; the editor download uses PNG.
+export async function buildSynthesisEditorSvg(source: HTMLElement, options: ExportOptions = {}): Promise<string> {
+  const pages: Array<{ width: number; height: number; image: string }> = []
+  await renderSynthesisEditorTiles(source, options, (canvas, region) => {
+    const raster = canvasSvgImage(canvas)
+    if (!raster.startsWith("data:image/jpeg")) throw new Error("No se pudo renderizar el contenido de Síntesis.")
+    pages.push({ width: region.width, height: region.height, image: raster })
+  })
+  return buildRasterSvg(pages, 0)
 }
 
 export async function exportSynthesisEditorSvg(options: ExportOptions = {}) {

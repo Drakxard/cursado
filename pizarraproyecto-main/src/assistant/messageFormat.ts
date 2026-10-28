@@ -1,5 +1,5 @@
 import katex from 'katex'
-export type MessagePart={kind:'text'|'math'|'code';text:string;display?:boolean}
+export type MessagePart={kind:'text'|'math'|'code';text:string;display?:boolean;raw?:string}
 export function stripVerifierNotes(text:string){
   return text.split(/(```[\s\S]*?```)/g).map((part,i)=>i%2?part:part.replace(/^\s*(?:Verificación aritmética local|Corrección comprobada con calculadora local):[^\n]*(?:\n|$)/gm,'')).join('').trimEnd()
 }
@@ -9,8 +9,8 @@ export function messageParts(text:string):MessagePart[]{
   let start=0
   for(const match of text.matchAll(pattern)){
     if(match.index!>start)parts.push({kind:'text',text:text.slice(start,match.index)})
-    if(match[1]!==undefined)parts.push({kind:'code',text:match[1]})
-    else parts.push({kind:'math',text:(match[2]??match[3]??match[4]??match[5]).trim(),display:match[2]!==undefined||match[3]!==undefined})
+    if(match[1]!==undefined)parts.push({kind:'code',text:match[1],raw:match[0]})
+    else parts.push({kind:'math',text:(match[2]??match[3]??match[4]??match[5]).trim(),display:match[2]!==undefined||match[3]!==undefined,raw:match[0]})
     start=match.index!+match[0].length
   }
   if(start<text.length)parts.push({kind:'text',text:text.slice(start)})
