@@ -51,7 +51,8 @@ Segunda línea`
   await expect.poll(async()=>(await content(page)).texts[0].text).toBe(source+'\nOtra línea')
   await page.keyboard.press('Control+z')
   await expect.poll(async()=>(await content(page)).texts[0].text).toBe(source)
-  await page.getByRole('button',{name:'Editar texto',exact:true}).click()
+  const restoredText=(await content(page)).texts[0],view=(await content(page)).camera
+  await page.mouse.dblclick(restoredText.x*view.zoom+view.x+10,restoredText.y*view.zoom+view.y+10)
   await editor.fill('Confirmado fuera')
   await page.mouse.click(110,220)
   await expect.poll(async()=>(await content(page)).texts[0].text).toBe('Confirmado fuera')
@@ -104,6 +105,8 @@ test('implication tree imports atomically, edits nodes in place and keeps geomet
   },root.id)
   await page.reload()
   await expect.poll(async()=>(await content(page))?.shapes?.length).toBe(25)
+  await expect(page.locator('.toolbar')).toBeVisible()
+  await page.keyboard.press('v')
   const rotated=(await content(page)).shapes.find(item=>item.id===root.id),position=await center(page,rotated)
   await page.mouse.dblclick(position.x,position.y)
   await expect(editor).toHaveValue(String.raw`Sistema $X'=AX$`)
