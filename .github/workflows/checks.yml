@@ -13,6 +13,7 @@ on:
           - all
           - explanations
           - interaction-ui
+          - pizarra-text
 
 permissions:
   contents: read
@@ -23,7 +24,7 @@ concurrency:
 
 jobs:
   worker-package:
-    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' }}
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' }}
     name: Preparar servicio Cloudflare
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -42,7 +43,7 @@ jobs:
           path: ${{ runner.temp }}/cursado-worker/
 
   checks:
-    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' }}
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -107,7 +108,7 @@ jobs:
         run: node --test tests/important-progress.browser.mjs
       - name: Edición directa de notas adhesivas en escritorio y móvil
         if: ${{ !cancelled() }}
-        run: npm run test:browser -- tests/browser/sticky-notes.spec.mjs tests/browser/text-escape.spec.mjs tests/browser/board-links.spec.mjs tests/browser/collaboration.spec.mjs
+        run: npm run test:browser -- tests/browser/sticky-notes.spec.mjs tests/browser/text-escape.spec.mjs tests/browser/clipboard-mindmap.spec.mjs tests/browser/board-links.spec.mjs tests/browser/collaboration.spec.mjs
         working-directory: pizarraproyecto-main
       - name: Guardar capturas y diagnósticos
         if: always()
@@ -121,7 +122,7 @@ jobs:
             ${{ runner.temp }}/cursado-next.log
 
   board-cooperation:
-    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' }}
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' }}
     name: Pizarra, API chat y cooperación semanal
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -182,6 +183,37 @@ jobs:
             test-results/
             ${{ runner.temp }}/cursado-board-cooperation.log
             ${{ runner.temp }}/cooperation-worker.log
+
+  pizarra-text:
+    name: Texto, KaTeX y árboles editables
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.focus == 'pizarra-text' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            pizarraproyecto-main/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: pizarraproyecto-main
+      - run: npx playwright install --with-deps chromium
+        working-directory: pizarraproyecto-main
+      - run: npm run build:pizarra
+      - run: npx vitest run tests/mindmap.test.ts
+        working-directory: pizarraproyecto-main
+      - run: npm run test:browser -- tests/browser/clipboard-mindmap.spec.mjs tests/browser/text-escape.spec.mjs --workers=1
+        working-directory: pizarraproyecto-main
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pizarra-texto-diagnosticos
+          if-no-files-found: ignore
+          path: pizarraproyecto-main/test-results/
 
   explanation-regression:
     name: Regresión puntual de estrella y zoom

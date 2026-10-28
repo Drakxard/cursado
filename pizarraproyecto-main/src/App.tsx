@@ -21,6 +21,8 @@ import { createNote, defaultConnector, findAnchor, hitsConnector, isConnector, m
   pointsBounds, refKey, remapConnector, detachTargets, transformVisual, visualBounds } from './canvas/visualObjects'
 import type { ShapeItem, ShapeKind, Bounds, ObjectRef, TargetGeometry } from './canvas/visualObjects'
 import { paintShape } from './canvas/paintShape'
+import { containsUrl, isMindmap, parseMindmap, mindmapShapes } from './canvas/mindmap'
+import { mathText, measureBoardLabel, withMathImages } from './canvas/mathText'
 import { createReviewMarker, adjacentReviewMarker, savedReviewView } from './canvas/reviewMarkers'
 import StaticTable, { tableChrome, tableFontSize, tableSize, labelColumn, TABLE_ROW_HEADER, TABLE_TITLE_HEIGHT, TABLE_COL_HEADER } from './components/StaticTable'
 import type { SheetItem, SheetCell } from './components/StaticTable'
@@ -832,6 +834,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const inlineNoteRef=useRef<StickyNoteEditorHandle>(null)
   const objectToolbarRef=useRef<ObjectToolbarHandle|null>(null)
   const [shapeTextEditing,setShapeTextEditing]=useState<string|null>(null)
+  const shapeTextEditingRef=useRef<string|null>(null)
+  const [clipboardNotice,setClipboardNotice]=useState('')
   const [tableRevision, refreshTables] = useState(0)
   const [excelNotice, setExcelNotice] = useState('')
   const pdfPagesRef = useRef<PdfPages | null>(null)
@@ -1362,7 +1366,17 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   })
 
 
-  function selectElement(value: Selection | null) {
+  function editShapeText(id:string|null) {
+    shapeTextEditingRef.current=id;setShapeTextEditing(id);redraw()
+  }
+
+  useEffect(()=>{
+    const ready=()=>{redraw();refreshSelection(n=>n+1)}
+    window.addEventListener('board-math-ready',ready)
+    return()=>window.removeEventListener('board-math-ready',ready)
+  },[])
+
+  function selectElement(value: Selection | null,individual=false) {
     const focused=document.activeElement as HTMLElement|null
     const focusedAudio=focused?.closest<HTMLElement>('[data-audio-id]')?.dataset.audioId
     if(focusedAudio&&!(value?.kind==='media'&&value.id===focusedAudio))focused?.blur()
@@ -1370,7 +1384,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     refreshSelection(n=>n+1)
     selectedRef.current = value
     const id=value?groupIdFor(value):undefined
-    groupRef.current=id?everySelection().filter(sel=>groupIdFor(sel)===id):(value?[value]:[])
+    groupRef.current=id&&!individual?everySelection().filter(sel=>groupIdFor(sel)===id):(value?[value]:[])
     setSelection(value)
     redraw()
   }
@@ -1464,14 +1478,17 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     ctx.save()
     const rotation = item.rotation || 0
     if (rotation) {
-      const lines = item.text.split('\n')
-      ctx.font = `${item.fontSize}px system-ui, sans-serif`
-      const width = Math.max(item.fontSize, ...lines.map(line => ctx.measureText(line).width))
-      const height = lines.length * item.fontSize * 1.2
+      const {width,height}=selectionBoundsForText(item)
       const center = {x:item.x + width/2, y:item.y + height/2}
       ctx.translate(center.x, center.y); ctx.rotate(rotation); ctx.translate(-center.x, -center.y)
     }
     const inkColor = !onPaper && isBoardCanvas(ctx) && themeRef.current === 'dark' && /^#(?:000(?:000)?|111(?:111)?|202020|222(?:222)?|333(?:333)?)$/i.test(item.color) ? '#e8edf7' : item.color
+    const math=mathText(item.text,{fontSize:item.fontSize,color:inkColor,lineHeight:1.2})
+    if(math?.image){
+      ctx.drawImage(math.image,item.x,item.y,math.width,math.height);ctx.restore()
+      if(!onPaper)paintOnPaper(ctx,()=>drawText(ctx,item,true))
+      return
+    }
     ctx.font = `${item.fontSize}px system-ui, sans-serif`
     ctx.textBaseline = 'top'
     // Resaltado por subcadena DENTRO del texto, no sobre toda su caja.
@@ -1500,7 +1517,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   }
 
   function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeItem, resolve=resolveObject) {
-    paintShape(ctx,shape,resolve,isBoardCanvas(ctx)?colorVisibleEnOscuro(shape.color):shape.color,isBoardCanvas(ctx)&&themeRef.current==='dark',isBoardCanvas(ctx)?1.35/Math.max(cameraRef.current.zoom,.01):0)
+    const visible=ctx.canvas.isConnected&&isBoardCanvas(ctx)&&shapeTextEditingRef.current===shape.id?{...shape,label:undefined}:shape
+    paintShape(ctx,visible,resolve,isBoardCanvas(ctx)?colorVisibleEnOscuro(shape.color):shape.color,isBoardCanvas(ctx)&&themeRef.current==='dark',isBoardCanvas(ctx)?1.35/Math.max(cameraRef.current.zoom,.01):0)
   }
 
   /** La cámara está en coordenadas de pantalla; no hay que recalcular geometría al desplazarla. */
@@ -1707,9 +1725,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     }
     for(const item of textsRef.current){
       if(editingRef.current?.id===item.id)continue
-      const lines=item.text.split('\n')
-      const longest=Math.max(1,...lines.map(line=>line.length))
-      const textBox={x:item.x,y:item.y,width:Math.max(item.fontSize,longest*item.fontSize*1.1),height:Math.max(item.fontSize,lines.length*item.fontSize*1.35)}
+      const textBox=selectionBoundsForText(item)
       if(rectsIntersect(view,rotatedRect(textBox,item.rotation)))
         renderables.push({z:(item as GroupedItem).zIndex??0,index:renderIndex++,bounds:rotatedRect(textBox,item.rotation),paint:surface=>drawText(surface,item)})
     }
@@ -1907,8 +1923,10 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     return { x, y, width: right - x, height: bottom - y }
   }
 
-  function selectionBoundsForText(item: TextItem): Bounds {
-    const ctx=canvasRef.current?.getContext('2d')
+  function selectionBoundsForText(item: TextItem,context?:CanvasRenderingContext2D|null): Bounds {
+    const math=mathText(item.text,{fontSize:item.fontSize,color:item.color,lineHeight:1.2})
+    if(math)return {x:item.x,y:item.y,width:math.width,height:math.height}
+    const ctx=context??canvasRef.current?.getContext('2d')
     const lines=item.text.split('\n')
     if(ctx)ctx.font=`${item.fontSize}px system-ui, sans-serif`
     return {x:item.x,y:item.y,width:Math.max(item.fontSize,...lines.map(line=>ctx?.measureText(line).width??line.length*item.fontSize*.6)),height:lines.length*item.fontSize*1.2}
@@ -2721,17 +2739,14 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     if (!ctx) return null
     for (let i = textsRef.current.length - 1; i >= 0; i--) {
       const item = textsRef.current[i]
-      ctx.font = `${item.fontSize}px system-ui, sans-serif`
-      const lines = item.text.split('\n')
-      const textWidth = Math.max(item.fontSize, ...lines.map(line => ctx.measureText(line).width))
-      const textHeight = lines.length * item.fontSize * 1.2
-      if (point.x >= item.x && point.x <= item.x + textWidth && point.y >= item.y && point.y <= item.y + textHeight) return item
+      const box=rotatedRect(selectionBoundsForText(item),(item as Rotatable<TextItem>).rotation)
+      if (point.x >= box.x && point.x <= box.x+box.width && point.y >= box.y && point.y <= box.y+box.height) return item
     }
     return null
   }
 
-  function startText(point: Point) {
-    const existing = findText(point)
+  function startText(point: Point,id?:string) {
+    const existing = id?textsRef.current.find(item=>item.id===id):findText(point)
     if (existing) {
       setFontSize(existing.fontSize)
       setColor(existing.color)
@@ -2747,8 +2762,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     if (!current) return
     const index = textsRef.current.findIndex(item => item.id === current.id)
     if (current.value.trim()) {
-      const updated: TextItem = { id: current.id, x: current.x, y: current.y, text: current.value, color: current.color, fontSize: current.fontSize }
       const previous = index >= 0 ? textsRef.current[index] : null
+      const updated: TextItem = { ...previous, id: current.id, x: current.x, y: current.y, text: current.value, color: current.color, fontSize: current.fontSize }
       if (!previous || previous.text !== updated.text || previous.color !== updated.color || previous.fontSize !== updated.fontSize) {
         rememberChange()
         if (index >= 0) textsRef.current[index] = updated
@@ -2831,13 +2846,9 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       }
       return true
     })
-    const ctx = canvasRef.current?.getContext('2d')
     const nextTexts = textsRef.current.filter(item => {
-      const lines = item.text.split('\n')
-      if (ctx) ctx.font = `${item.fontSize}px system-ui, sans-serif`
-      const textWidth = Math.max(item.fontSize, ...(ctx ? lines.map(line => ctx.measureText(line).width) : []))
-      const textHeight = lines.length * item.fontSize * 1.2
-      return !(point.x >= item.x - radius && point.x <= item.x + textWidth + radius && point.y >= item.y - radius && point.y <= item.y + textHeight + radius)
+      const box=rotatedRect(selectionBoundsForText(item),(item as Rotatable<TextItem>).rotation)
+      return !(point.x >= box.x-radius && point.x <= box.x+box.width+radius && point.y >= box.y-radius && point.y <= box.y+box.height+radius)
     })
     const nextShapes = shapesRef.current.filter(shape => !shapeTouchesEraser(shape,point,radius))
     // La goma elimina una tabla completa al tocar cualquiera de sus celdas o su borde.
@@ -3034,10 +3045,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     if (selected.kind === 'text') {
       const item = textsRef.current.find(t => t.id === selected.id)
       if (!item) return null
-      const context = ctx ?? canvasRef.current?.getContext('2d')
-      if (context) context.font = `${item.fontSize}px system-ui, sans-serif`
-      const lines = item.text.split('\n')
-      return rotatedRect({ x: item.x, y: item.y, width: Math.max(item.fontSize, ...lines.map(line => context?.measureText(line).width ?? line.length * item.fontSize * .6)), height: lines.length * item.fontSize * 1.2 },item.rotation)
+      return rotatedRect(selectionBoundsForText(item,ctx),item.rotation)
     }
     const stroke = strokesRef.current[Number(selected.id)]
     if (!stroke?.points.length) return null
@@ -3835,7 +3843,14 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
 
   async function renderBoardRegions(pages:(Bounds&{rotation?:number})[],outputWidth=1240,includePages=false) {
     // Freeze the printable content while media loads; camera and selection never enter it.
-    const data=snapshot(),renderers:{z:number;paint:(ctx:CanvasRenderingContext2D)=>void}[]=[]
+    const data=snapshot()
+    return withMathImages(()=>{
+      const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d')!
+      if(includePages)canvas.className='board-content-canvas'
+      for(const item of data.shapes)drawShape(ctx,item,ref=>resolveObject(ref,data))
+      for(const item of data.texts)drawText(ctx,item,!includePages)
+    },async()=>{
+    const renderers:{z:number;paint:(ctx:CanvasRenderingContext2D)=>void}[]=[]
     const captureZoom=cameraRef.current.zoom,captureTheme=themeRef.current
     const background=includePages&&canvasRef.current?.parentElement?getComputedStyle(canvasRef.current.parentElement).backgroundColor:'#fff'
     const intersects=(bounds:Bounds)=>pages.some(page=>rectsIntersect(rotatedRect(page,page.rotation),bounds))
@@ -3903,6 +3918,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       return canvas.toDataURL('image/png')
     })
     return images
+    })
   }
 
   async function startApiChat() {
@@ -4094,10 +4110,10 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     const point=toWorld(e.clientX,e.clientY)
     if(nativeBoardMode()||!loadedRef.current||selectionPicking)return
     const hit=hitSelectionAt(point)
-    if(hit?.kind==='text'){selectElement(hit);startText(point);return}
+    if(hit?.kind==='text'){selectElement(hit);startText(point,String(hit.id));return}
     if(hit?.kind==='shape'){
       const visual=shapesRef.current.find(item=>item.id===hit.id)
-      if(visual&&!visual.visualType){selectElement(hit);setShapeTextEditing(visual.id);return}
+      if(visual&&!visual.visualType){selectElement(hit,true);editShapeText(visual.id);return}
       if(visual&&(visual.visualType||visual.label!==undefined)){
         if(['pdf-shortcut','board-shortcut','important-countdown'].includes(visual.visualType??''))return
         selectElement(hit);setVisualEditor(visual.symbol==='cartesian'?null:visual.id);return
@@ -4232,13 +4248,53 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     return true
   }
 
+  function insertClipboardText(text:string) {
+    if(!text.trim())return
+    const point=boardCenter(),item:TextItem={id:createId(),x:point.x,y:point.y,text:text.slice(0,100000),color:themeRef.current==='dark'?'#ffffff':'#202020',fontSize:24}
+    rememberChange();textsRef.current.push(item);selectTool('select');selectElement({kind:'text',id:item.id});scheduleSave()
+  }
+
+  function pasteClipboardMindmap(text:string) {
+    if(!isMindmap(text))return false
+    try {
+      const items=mindmapShapes(parseMindmap(text),boardCenter(),createId,value=>measureBoardLabel(value),themeRef.current==='dark'?'#e8edf7':'#334155')
+      rememberChange();shapesRef.current.push(...items);selectTool('select')
+      const bounds=pointsBounds(items.filter(item=>!item.connector).flatMap(item=>[{x:item.x,y:item.y},{x:item.x+item.width,y:item.y+item.height}]))
+      const canvas=canvasRef.current!,width=canvas.clientWidth,height=canvas.clientHeight
+      const zoom=Math.max(.01,Math.min(cameraRef.current.zoom,Math.max(1,width-160)/bounds.width,Math.max(1,height-220)/bounds.height))
+      cameraRef.current={zoom,x:width/2-(bounds.x+bounds.width/2)*zoom,y:height/2-(bounds.y+bounds.height/2)*zoom}
+      setZoomLabel(Math.round(zoom*100))
+      groupRef.current=items.map(item=>({kind:'shape' as const,id:item.id}))
+      selectedRef.current=null;setSelection(null);refreshSelection(n=>n+1);redraw();scheduleSave()
+    }catch(error){
+      insertClipboardText(text)
+      setClipboardNotice(`Se pegó como texto. ${error instanceof Error?error.message:'No se pudo importar el árbol.'}`)
+    }
+    return true
+  }
+
   async function pasteFromBoardMenu() {
     setContextMenu(null)
     // Clipboard API está disponible en HTTPS (Cloudflare) y en localhost.
     // Si el navegador deniega el permiso, se ofrece el campo manual.
     try {
-      const text = await navigator.clipboard.readText()
+      let text='',html=''
+      if(navigator.clipboard.read) {
+        try {
+          for(const item of await navigator.clipboard.read()) {
+            if(item.types.includes('text/plain'))text=await (await item.getType('text/plain')).text()
+            if(item.types.includes('text/html'))html=await (await item.getType('text/html')).text()
+          }
+        }catch { /* Browsers that only expose readText retain their fallback. */ }
+      }
+      if(!text)text=await navigator.clipboard.readText()
+      const dom=html?new DOMParser().parseFromString(html,'text/html'):null
+      if(clipboardRef.current&&dom?.querySelector('[data-cursado-board-copy]')?.getAttribute('data-cursado-board-copy')===clipboardTokenRef.current){pasteSelected();return}
       if (parseYouTubeLink(text)) { insertYouTube(text); return }
+      if(loadedRef.current&&!containsUrl(text)&&!dom?.querySelector('a[href]')&&text.trim()){
+        if(!pasteClipboardMindmap(text))insertClipboardText(text)
+        return
+      }
     } catch { /* permiso no concedido */ }
     if (clipboardRef.current) { pasteSelected(); return }
     setVideoLink('')
@@ -4748,6 +4804,12 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       if(clipboardRef.current&&copiedToken&&copiedToken===clipboardTokenRef.current){
         e.preventDefault();pasteSelected();return
       }
+      // Keep URL, file and HTML-table paste behavior; mindmaps precede TSV parsing.
+      const hasUrls=containsUrl(plain)||!!(html&&new DOMParser().parseFromString(html,'text/html').querySelector('a[href]'))
+      const hasFiles=Array.from(clipboard?.items??[]).some(item=>item.kind==='file')||!!clipboard?.files.length
+      if(!hasUrls&&!hasFiles&&!/<table[\s>]/i.test(html)&&pasteClipboardMindmap(plain)){
+        e.preventDefault();return
+      }
       // Un enlace de YouTube pegado sobre el lienzo se vuelve un reproductor.
       // No afecta el pegado dentro de editores, tablas ni formularios.
       if (parseYouTubeLink(plain)) {
@@ -4793,10 +4855,13 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         e.preventDefault()
         const dom=new DOMParser().parseFromString(html,'text/html')
         dom.querySelectorAll('script,style,meta,[data-metadata]').forEach(node=>node.remove())
-        const text=(plain.trim()?plain:dom.body.innerText||dom.body.textContent||'').slice(0,100000).trim()
+        const source=(plain.trim()?plain:dom.body.innerText||dom.body.textContent||'').slice(0,100000)
+        const text=hasUrls?source.trim():source
         if(text){
-          const point=boardCenter(),item:TextItem={id:createId(),x:point.x,y:point.y,text,color:theme==='dark'?'#ffffff':'#202020',fontSize:24}
-          rememberChange();textsRef.current=[...textsRef.current,item];selectElement({kind:'text',id:item.id});redraw();scheduleSave()
+          if(hasUrls){
+            const point=boardCenter(),item:TextItem={id:createId(),x:point.x,y:point.y,text,color:theme==='dark'?'#ffffff':'#202020',fontSize:24}
+            rememberChange();textsRef.current=[...textsRef.current,item];selectElement({kind:'text',id:item.id});redraw();scheduleSave()
+          }else insertClipboardText(text)
         }else if(/figmeta|data-buffer|figma/i.test(html))setSelectionError('Este contenido de Figma usa un formato privado. En Figma elegí Copiar como SVG o PNG; el texto también se puede copiar desde su editor.')
       } else if (clipboardRef.current) {
         e.preventDefault();pasteSelected()
@@ -5333,17 +5398,18 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           const media=selected.kind==='media'?mediaRef.current.find(item=>item.id===selected.id):null
           return <SelectionActions key={String(selected.id)} layoutRef={objectToolbarRef} bounds={()=>{const box=selectionBounds(selected),canvas=canvasRef.current,camera=cameraRef.current;if(!box||!canvas)return null;return {x:box.x*camera.zoom+camera.x,y:box.y*camera.zoom+camera.y,width:box.width*camera.zoom,height:box.height*camera.zoom,viewportWidth:canvas.clientWidth,viewportHeight:canvas.clientHeight}}}>
             {media&&media.kind!=='audio'&&<button onClick={()=>void openImageCrop()}>Recortar</button>}
-            {text&&<><button onClick={()=>startText({x:text.x,y:text.y})}>Editar texto</button><input aria-label="Tama?o del texto" type="number" min="8" max="144" value={text.fontSize} style={{width:58}} onChange={e=>{rememberChange();text.fontSize=Math.max(8,Math.min(144,Number(e.target.value)));refreshSelection(n=>n+1);redraw();scheduleSave()}}/><input aria-label="Color del texto" type="color" value={/^#[0-9a-f]{6}$/i.test(text.color)?text.color:'#202020'} onChange={e=>{rememberChange();text.color=e.target.value;refreshSelection(n=>n+1);redraw();scheduleSave()}}/></>}
+            {text&&<><button onClick={()=>startText({x:text.x,y:text.y},text.id)}>Editar texto</button><input aria-label="Tama?o del texto" type="number" min="8" max="144" value={text.fontSize} style={{width:58}} onChange={e=>{rememberChange();text.fontSize=Math.max(8,Math.min(144,Number(e.target.value)));refreshSelection(n=>n+1);redraw();scheduleSave()}}/><input aria-label="Color del texto" type="color" value={/^#[0-9a-f]{6}$/i.test(text.color)?text.color:'#202020'} onChange={e=>{rememberChange();text.color=e.target.value;refreshSelection(n=>n+1);redraw();scheduleSave()}}/></>}
             <button aria-label="Traer al frente" onClick={()=>reorderSelected(true)}>Al frente</button><button aria-label="Enviar al fondo" onClick={()=>reorderSelected(false)}>Al fondo</button>
           </SelectionActions>
         }
         const item=selected?.kind==='shape'&&groupRef.current.length===1?shapesRef.current.find(shape=>shape.id===selected.id):null
         if(!item||item.visualType||navigationBusy||nativeBoardMode())return null
-        return <AdvancedObjectToolbar key={item.id} item={item} layoutRef={objectToolbarRef} editing={shapeTextEditing===item.id} onEdit={()=>setShapeTextEditing(item.id)} onEndEdit={()=>setShapeTextEditing(null)} patch={patch=>{const current=shapesRef.current.find(shape=>shape.id===item.id);if(current)applyVisualEdit(current,{...current,...patch})}} bounds={()=>{
+        return <AdvancedObjectToolbar key={item.id} item={item} layoutRef={objectToolbarRef} editing={shapeTextEditing===item.id} onEdit={()=>editShapeText(item.id)} onEndEdit={()=>{if(shapeTextEditingRef.current===item.id)editShapeText(null)}} patch={patch=>{const current=shapesRef.current.find(shape=>shape.id===item.id);if(current)applyVisualEdit(current,{...current,...patch})}} bounds={()=>{
           const current=shapesRef.current.find(shape=>shape.id===item.id),canvas=canvasRef.current
           if(!current||!canvas)return null
           const camera=cameraRef.current,box=rotatedRect(current,current.rotation)
-          return {x:box.x*camera.zoom+camera.x,y:box.y*camera.zoom+camera.y,width:box.width*camera.zoom,height:box.height*camera.zoom,viewportWidth:canvas.clientWidth,viewportHeight:canvas.clientHeight}
+          return {x:box.x*camera.zoom+camera.x,y:box.y*camera.zoom+camera.y,width:box.width*camera.zoom,height:box.height*camera.zoom,viewportWidth:canvas.clientWidth,viewportHeight:canvas.clientHeight,
+            editor:{x:current.x*camera.zoom+camera.x,y:current.y*camera.zoom+camera.y,width:current.width*camera.zoom,height:current.height*camera.zoom}}
         }}/>
       })()}
       {liveBoardId && liveUsers.some(user=>user.id!==liveSelf) && (linkActive || !privateBoard(liveBoardId) || (isTopicWorkspace() && liveUsers.length > 0)) && <aside className="live-presence" aria-label="Usuarios activos en esta pizarra">
@@ -5979,6 +6045,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
           }} onApply={applyVisualEdit} onClose={()=>setVisualEditor(null)}/>
         return item?.code?<CodeWorkspace key={item.id} item={item} onApply={applyVisualEdit} onClose={()=>setVisualEditor(null)}/>:item&&item.symbol!=='cartesian'?<VisualObjectInspector key={item.id} item={materializeConnector(item,resolveObject)} onApply={applyVisualEdit} onClose={()=>setVisualEditor(null)}/>:null
       })()}
+      {clipboardNotice&&<div role="status" className="clipboard-notice">{clipboardNotice}<button type="button" aria-label="Cerrar aviso de pegado" onClick={()=>setClipboardNotice('')}>×</button></div>}
       <div className="zoom-controls">
         <button aria-label="Alejar" onClick={() => changeZoom(2 / 3, window.innerWidth / 2, window.innerHeight / 2)}>−</button>
         <span>{zoomLabel}%</span>
