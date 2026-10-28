@@ -6,14 +6,14 @@ import { plantumlLabelRows } from '../src/canvas/plantumlLabel'
 it.each([
   {name:'complete implication tree',source:mindmapExample,nodes:13},
   {name:'fenced source',source:'```plantuml\n'+mindmapExample+'\n```',nodes:13},
+  {name:'URL inside a mindmap',source:'@startmindmap\n* A https://example.com\n@endmindmap',nodes:1},
   {name:'formula source is preserved for image generation',source:String.raw`@startmindmap
 * $X'=A(t)X+F(t)$
 ** <latex>\frac{1}{2}</latex>
 @endmindmap`,nodes:2},
   ...['@startmindmap\n* A','@startmindmap\n* A\n*** B\n@endmindmap','@startmindmap\n* A\n* B\n@endmindmap',
     '@startmindmap\nleft side\n* A\n@endmindmap','@startmindmap\n@endmindmap'].map(source=>({name:source,source,nodes:0})),
-  ...['https://example.com',String.raw`Texto $x$ https://example.com`,
-    '@startmindmap\n* A https://example.com\n@endmindmap'].map(source=>({name:'URL: '+source,source,nodes:-1})),
+  ...['https://example.com',String.raw`Texto $x$ https://example.com`].map(source=>({name:'URL: '+source,source,nodes:-1})),
 ])('$name',({source,nodes})=>{
   if(nodes<0){expect(containsUrl(source)).toBe(true);expect(isMindmap(source)).toBe(false);return}
   expect(isMindmap(source)).toBe(true)
@@ -24,6 +24,16 @@ it.each([
   visit(tree)
   expect(labels).toHaveLength(nodes)
   expect(labels).toEqual(source.split('\n').filter(line=>/^\*+ /.test(line)).map(line=>line.replace(/^\*+ /,'')))
+})
+
+it.each([
+  '  @STARTMINDMAP  \r\n\t*\tRaíz\r\n\t**\u00a0Hijo\r\n  @ENDMINDMAP  ',
+  'Antes\n```PlantUML\n@startmindmap\n* Raíz\n** Hijo\n@endmindmap\n```\nDespués https://example.com',
+  '\uFEFF@start\u200Bmindmap\r* Raíz\r** Hijo\r@endmindmap\u2060',
+  '@startmindmap\u2028* Raíz\u2029** Hijo\u2028@endmindmap',
+])('recognizes clipboard formatting on the first attempt: %s',source=>{
+  expect(isMindmap(source)).toBe(true)
+  expect(parseMindmap(source)).toEqual({text:'Raíz',children:[{text:'Hijo',children:[]}]})
 })
 
 it('separates text and every math expression into distinct image rows',()=>{

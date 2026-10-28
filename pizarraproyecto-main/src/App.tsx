@@ -22,6 +22,7 @@ import { createNote, defaultConnector, findAnchor, hitsConnector, isConnector, m
 import type { ShapeItem, ShapeKind, Bounds, ObjectRef, TargetGeometry } from './canvas/visualObjects'
 import { paintShape } from './canvas/paintShape'
 import { containsUrl, isMindmap, parseMindmap } from './canvas/mindmap'
+import { wheelCamera } from './canvas/wheelCamera'
 import { mathText, withMathImages } from './canvas/mathText'
 import { createReviewMarker, adjacentReviewMarker, savedReviewView } from './canvas/reviewMarkers'
 import StaticTable, { tableChrome, tableFontSize, tableSize, labelColumn, TABLE_ROW_HEADER, TABLE_TITLE_HEIGHT, TABLE_COL_HEADER } from './components/StaticTable'
@@ -886,6 +887,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
   const [treePanel,setTreePanel]=useState<{initial?:string}|null>(null)
   const [,refreshSelection]=useState(0)
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 })
+  const cameraFrameRef = useRef<number|null>(null)
   const cursorCanvasRef = useRef<HTMLCanvasElement>(null)
   const followRef = useRef<string | null>(null)
   const [following, setFollowing] = useState<string | null>(null)
@@ -2270,9 +2272,9 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     if (dirtyRef.current) throw new Error('Hay cambios sin guardar. Resolvé el problema de guardado antes de crear o restaurar una versión.')
   }
 
-  function scheduleSave() {
+  function scheduleSave(cameraOnly=false) {
     editRevisionRef.current++
-    setBoardSearchRevision(value=>value+1)
+    if(!cameraOnly)setBoardSearchRevision(value=>value+1)
 
     if (nativeBoardMode()) return
 
@@ -2284,7 +2286,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null
       void persistBoard()
-    }, isTopicWorkspace() ? (topicPeersRef.current ? 80 : 1800) : privateBoard() ? 400 : 80)
+    }, cameraOnly ? 300 : isTopicWorkspace() ? (topicPeersRef.current ? 80 : 1800) : privateBoard() ? 400 : 80)
   }
 
   useEffect(()=>beforeHome(async()=>{
@@ -2385,6 +2387,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     return () => {
       cancelled = true
       if (firstPaint !== undefined) cancelAnimationFrame(firstPaint)
+      if(cameraFrameRef.current!==null){cancelAnimationFrame(cameraFrameRef.current);cameraFrameRef.current=null}
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       if (viewportFrameRef.current !== null) {
         cancelAnimationFrame(viewportFrameRef.current)
@@ -3420,9 +3423,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
         cam.x = current.center.x - (previous.center.x - cam.x) * ratio
         cam.y = current.center.y - (previous.center.y - cam.y) * ratio
         cam.zoom = nextZoom
-        setZoomLabel(Math.round(nextZoom * 100))
-        redraw()
-        scheduleSave()
+        requestCameraRedraw()
       }
       touchGestureRef.current = current
       return
@@ -3453,8 +3454,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       cameraRef.current.x += e.clientX - prev.x
       cameraRef.current.y += e.clientY - prev.y
       lastPointerRef.current = { x: e.clientX, y: e.clientY }
-      redraw()
-      scheduleSave()
+      requestCameraRedraw()
       return
     }
     const point = toWorld(e.clientX, e.clientY)
@@ -3662,6 +3662,22 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     }
   },[])
 
+  function paintCamera() {
+    if(!loadedRef.current||isBoardNavigating())return
+    setZoomLabel(Math.round(cameraRef.current.zoom*100))
+    redraw()
+    scheduleSave(true)
+  }
+
+  function requestCameraRedraw() {
+    if(cameraFrameRef.current!==null)return
+    const camera=cameraRef.current
+    cameraFrameRef.current=requestAnimationFrame(()=>{
+      cameraFrameRef.current=null
+      if(cameraRef.current===camera)paintCamera()
+    })
+  }
+
   function changeZoom(factor: number, px: number, py: number) {
     finishPendingPen()
     if (!loadedRef.current) return
@@ -3671,34 +3687,34 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     cam.x = px - ((px - cam.x) * next) / cam.zoom
     cam.y = py - ((py - cam.y) * next) / cam.zoom
     cam.zoom = next
-    setZoomLabel(Math.round(next * 100))
-    redraw()
-    scheduleSave()
+    requestCameraRedraw()
   }
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+    const motion=wheelCamera(()=>cameraRef.current,()=>{
+      if(!loadedRef.current||isBoardNavigating()){motion.cancel();return}
+      paintCamera()
+    })
     function onWheel(e: WheelEvent) {
       if (!(e.target instanceof Element) || !e.target.closest('canvas,.board-video-layer,.board-graph-layer,.sheet-static-layer,.sheet-inline-anchor')) return
       if(e.target.closest('input,textarea,select,[contenteditable="true"]')) return
       e.preventDefault()
+      if(!loadedRef.current||isBoardNavigating())return
       finishPendingPen()
       e.stopPropagation()
       stopFollowing()
       const rect = canvas!.getBoundingClientRect()
       const scale = e.deltaMode===1 ? 16 : e.deltaMode===2 ? rect.height : 1
-      if(e.ctrlKey) changeZoom(Math.exp(-e.deltaY * scale * 0.004), e.clientX - rect.left, e.clientY - rect.top)
-      else {
-        cameraRef.current.x-=e.deltaX*scale
-        cameraRef.current.y-=e.deltaY*scale
-        redraw();scheduleSave()
-      }
+      if(e.ctrlKey||e.metaKey)motion.zoom(e.deltaY*scale,e.clientX-rect.left,e.clientY-rect.top)
+      else motion.pan(e.deltaX*scale,e.deltaY*scale)
     }
     const onMove = (e:PointerEvent) => sendCursorPosition(e.clientX,e.clientY)
     const onControl=(e:KeyboardEvent)=>setControlNavigation(e.ctrlKey||e.metaKey)
     const clearControl=()=>setControlNavigation(false)
     const onAction = (e:Event) => {
+      motion.cancel()
       if(e.target instanceof Element && e.target.closest('.live-presence')) return
       stopFollowing()
     }
@@ -3718,6 +3734,7 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     document.addEventListener('keydown',onControl,true);document.addEventListener('keyup',onControl,true)
     window.addEventListener('blur',clearControl)
     return () => {
+      motion.cancel()
       clearInterval(heartbeat)
       document.removeEventListener('wheel',onWheel,true)
       document.removeEventListener('pointermove',onMove,true)
@@ -4298,6 +4315,8 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       if(!text)text=await navigator.clipboard.readText()
       const dom=html?new DOMParser().parseFromString(html,'text/html'):null
       if(clipboardRef.current&&dom?.querySelector('[data-cursado-board-copy]')?.getAttribute('data-cursado-board-copy')===clipboardTokenRef.current){pasteSelected();return}
+      const source=text.trim()?text:dom?.body.innerText||dom?.body.textContent||''
+      if(loadedRef.current&&pasteClipboardMindmap(source))return
       if (parseYouTubeLink(text)) { insertYouTube(text); return }
       if(loadedRef.current&&!containsUrl(text)&&!dom?.querySelector('a[href]')&&text.trim()){
         if(!pasteClipboardMindmap(text))insertClipboardText(text)
@@ -4809,15 +4828,16 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
       const clipboard=e.clipboardData
       const html=clipboard?.getData('text/html')??''
       const plain=clipboard?.getData('text/plain')??''
-      const copiedToken=html?new DOMParser().parseFromString(html,'text/html').querySelector('[data-cursado-board-copy]')?.getAttribute('data-cursado-board-copy'):null
+      const clipboardDom=html?new DOMParser().parseFromString(html,'text/html'):null
+      const copiedToken=clipboardDom?.querySelector('[data-cursado-board-copy]')?.getAttribute('data-cursado-board-copy')
       // Our note may itself contain a URL, tabs or SVG. Paste the object first.
       if(clipboardRef.current&&copiedToken&&copiedToken===clipboardTokenRef.current){
         e.preventDefault();pasteSelected();return
       }
-      // Keep URL, file and HTML-table paste behavior; mindmaps precede TSV parsing.
-      const hasUrls=containsUrl(plain)||!!(html&&new DOMParser().parseFromString(html,'text/html').querySelector('a[href]'))
-      const hasFiles=Array.from(clipboard?.items??[]).some(item=>item.kind==='file')||!!clipboard?.files.length
-      if(!hasUrls&&!hasFiles&&!/<table[\s>]/i.test(html)&&pasteClipboardMindmap(plain)){
+      // Explicit mindmap markers take priority over rich HTML, links and TSV.
+      const hasUrls=containsUrl(plain)||!!clipboardDom?.querySelector('a[href]')
+      const mindmapSource=plain.trim()?plain:clipboardDom?.body.innerText||clipboardDom?.body.textContent||''
+      if(pasteClipboardMindmap(mindmapSource)){
         e.preventDefault();return
       }
       // Un enlace de YouTube pegado sobre el lienzo se vuelve un reproductor.

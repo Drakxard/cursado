@@ -1,19 +1,21 @@
-// A URL anywhere in the clipboard preserves the previous paste pipeline.
+// URLs outside an explicit mindmap keep the usual paste pipeline.
 export const containsUrl = (text:string) => /\b(?:[a-z][a-z\d+.-]*:\/\/|mailto:|www\.)\S+/i.test(text)
-export const isMindmap = (text:string) => !containsUrl(text) && /@startmindmap\b/i.test(text)
+const normalizeMindmap = (text:string) => text.replace(/[\u200B-\u200D\u2060\uFEFF]/g,'').replace(/\r\n?|[\u2028\u2029]/g,'\n')
+export const isMindmap = (text:string) => /@startmindmap\b/i.test(normalizeMindmap(text))
 export type MindmapNode = { text:string; children:MindmapNode[] }
 
 export function parseMindmap(source:string):MindmapNode {
   if(source.length>100000)throw new Error('El árbol admite hasta 100000 caracteres.')
-  const text=source.trim().replace(/^```(?:plantuml|puml)?\s*\n([\s\S]*?)\n```$/i,'$1').trim()
-  const lines=text.split(/\r?\n/)
-  if(lines.shift()?.trim()!=='@startmindmap'||lines.pop()?.trim()!=='@endmindmap')
+  // Clipboard sources may include Markdown fences, surrounding prose and invisible spaces.
+  const block=/@startmindmap\b([\s\S]*?)@endmindmap\b/i.exec(normalizeMindmap(source))
+  if(!block)
     throw new Error('El árbol debe comenzar con @startmindmap y terminar con @endmindmap.')
+  const lines=block[1].split('\n')
   const stack:MindmapNode[]=[]
   let root:MindmapNode|undefined,count=0
   for(const line of lines) {
     if(!line.trim())continue
-    const match=/^\s*(\*+) (.+)$/.exec(line)
+    const match=/^\s*(\*+)[^\S\n]+(.+)$/.exec(line)
     if(!match)throw new Error('Solo se admite la jerarquía por asteriscos: * raíz, ** hijo, *** nieto.')
     const depth=match[1].length,label=match[2].trim()
     if(!label||label.length>2000||++count>127||depth>24)throw new Error('El árbol admite 127 nodos, 24 niveles y 2000 caracteres por nodo.')

@@ -151,10 +151,30 @@ test('PlantUML PNG includes KaTeX formulas on their own rows',async({page})=>{
   await writeFile('test-results/plantuml-katex.png',Buffer.from(bytes))
 })
 
+for(const method of ['keyboard','menu'])test(`mindmap markers override clipboard formatting on first ${method} paste`,async({page})=>{
+  await openLocal(page)
+  const source='Aquí está el mapa:\r\n```plantuml\r\n  @START\u200BMINDMAP\r\n\t*\tRaíz https://example.com\r\n\t**\u00a0Hijo\r\n  @ENDMINDMAP\r\n```\r\nFin'
+  await page.evaluate(async source=>{
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/plain':new Blob([source],{type:'text/plain'}),
+      'text/html':new Blob(['<table><tr><td><a href="https://example.com">Código copiado</a></td></tr></table>'],{type:'text/html'}),
+    })])
+  },source)
+  if(method==='keyboard'){
+    await page.locator('canvas[tabindex]').focus()
+    await page.keyboard.press('Control+v')
+  }else{
+    await page.mouse.click(120,240,{button:'right'})
+    await page.getByRole('menuitem',{name:/^Pegar/}).click()
+  }
+  await expect.poll(async()=>(await content(page)).media?.length,{timeout:30000}).toBe(1)
+  expect((await content(page)).texts??[]).toHaveLength(0)
+  expect((await content(page)).tables??[]).toHaveLength(0)
+})
+
 for(const [name,source,video] of [
   ['YouTube','https://youtu.be/dQw4w9WgXcQ',true],
   ['URL with math',String.raw`Texto $x^2$ https://example.com`,false],
-  ['URL in mindmap','@startmindmap\n* Raíz https://example.com\n** $x^2$\n@endmindmap',false],
 ])test(`URL keeps previous paste behavior: ${name}`,async({page})=>{
   await openLocal(page);await paste(page,source)
   if(video)await expect.poll(async()=>(await content(page)).videos?.length).toBe(1)
