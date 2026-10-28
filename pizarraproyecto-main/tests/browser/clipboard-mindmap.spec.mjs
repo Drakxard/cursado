@@ -3,8 +3,9 @@ import { mindmapExample } from '../fixtures/mindmap.mjs'
 
 async function content(page) {
   return page.evaluate(async()=>{
+    const active=localStorage.getItem('pizarra_activa');if(!active)return null
     const db=await new Promise(resolve=>{const r=indexedDB.open('pizarra-dispositivo',1);r.onsuccess=()=>resolve(r.result)})
-    const board=await new Promise(resolve=>{const r=db.transaction('boards').objectStore('boards').get(localStorage.getItem('pizarra_activa'));r.onsuccess=()=>resolve(r.result)})
+    const board=await new Promise(resolve=>{const r=db.transaction('boards').objectStore('boards').get(active);r.onsuccess=()=>resolve(r.result)})
     db.close();return board?.draft??board?.content
   })
 }
@@ -43,7 +44,7 @@ Segunda línea`
   await page.getByRole('button',{name:'Editar texto',exact:true}).click()
   const editor=page.locator('textarea.text-editor')
   await expect(editor).toHaveValue(source)
-  await editor.press('End');await editor.press('Enter');await editor.pressSequentially('Otra línea')
+  await editor.press('Control+End');await editor.press('Enter');await editor.pressSequentially('Otra línea')
   await expect(editor).toBeVisible()
   await editor.press('Escape')
   await expect(editor).toHaveCount(0)
@@ -83,7 +84,7 @@ test('implication tree imports atomically, edits nodes in place and keeps geomet
   await expect(editor).toBeVisible()
   expect(await page.evaluate(label=>window.boardPaint.text.some(text=>label.includes(text)&&text.length>8),root.label)).toBe(false)
   await page.screenshot({path:'test-results/figura-edicion-sin-superposicion.png'})
-  await editor.fill('Raíz editable');await editor.press('End');await editor.press('Enter');await editor.pressSequentially('Implicaciones')
+  await editor.fill('Raíz editable');await editor.press('Control+End');await editor.press('Enter');await editor.pressSequentially('Implicaciones')
   await expect(editor).toBeVisible();await editor.press('Escape')
   await expect.poll(async()=>(await content(page)).shapes.find(item=>item.id===root.id)?.label).toBe('Raíz editable\nImplicaciones')
   await page.mouse.dblclick(point.x,point.y)
