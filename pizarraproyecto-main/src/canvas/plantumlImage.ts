@@ -1,0 +1,79 @@
+import engineUrl from '@plantuml/core/plantuml.js?url'
+import vizUrl from '@plantuml/core/viz-global.js?url'
+import type { MindmapNode } from './mindmap'
+import { rasterPlantumlLabels } from './plantumlLabel'
+
+type Engine = { renderToString:(lines:string[],success:(svg:string)=>void,error:(message:string)=>void)=>void }
+let engine:Promise<Engine>|undefined
+let queue:Promise<unknown>=Promise.resolve()
+
+function loadEngine() {
+  return engine??=new Promise<void>((resolve,reject)=>{
+    const script=document.createElement('script')
+    const timer=setTimeout(()=>{script.remove();reject(new Error('PlantUML tardó demasiado en cargar.'))},30000)
+    script.src=vizUrl
+    script.onload=()=>{clearTimeout(timer);resolve()}
+    script.onerror=()=>{clearTimeout(timer);script.remove();reject(new Error('No se pudo cargar PlantUML.'))}
+    document.head.append(script)
+  }).then(()=>import(/* @vite-ignore */ engineUrl) as Promise<Engine>).catch(error=>{engine=undefined;throw error})
+}
+
+/** PlantUML lays out measured labels; KaTeX and text are baked into one PNG. */
+export function plantumlImage(root:MindmapNode):Promise<Blob> {
+  const job=queue.catch(()=>{}).then(async()=>{
+    const renderer=await loadEngine()
+    const entries:{text:string;depth:number}[]=[]
+    function visit(node:MindmapNode,depth:number) {
+      entries.push({text:node.text,depth})
+      node.children.forEach(child=>visit(child,depth+1))
+    }
+    visit(root,0)
+    const labels=await rasterPlantumlLabels(entries.map(entry=>entry.text))
+    let image:HTMLImageElement|undefined,url:string|undefined,canvas:HTMLCanvasElement|undefined
+    try {
+      // Only placeholder boxes reach PlantUML. Original text cannot inject directives.
+      const lines=['@startmindmap','<style>','mindmapDiagram {','node {','FontName monospace','FontSize 17','Padding 12','Margin 12','RoundCorner 12','BackgroundColor #f5f5f5','LineColor #555555','}','}','</style>']
+      entries.forEach((entry,index)=>{
+        const label=labels[index]
+        // The pinned engine measures monospace M at 9.347 px and rows at 20 px.
+        const row='M'.repeat(Math.ceil(label.width/9.34))
+        lines.push(`${'*'.repeat(entry.depth+1)} ${Array.from({length:Math.ceil(label.height/20)},()=>row).join('\\n')}`)
+      })
+      lines.push('@endmindmap')
+      const svg=await new Promise<string>((resolve,reject)=>{
+        const timer=setTimeout(()=>reject(new Error('PlantUML tardó demasiado en distribuir el mapa.')),30000)
+        renderer.renderToString(lines,value=>{clearTimeout(timer);resolve(value)},message=>{clearTimeout(timer);reject(new Error(message))})
+      })
+      const doc=new DOMParser().parseFromString(svg,'image/svg+xml')
+      const boxes=Array.from(doc.querySelectorAll('rect[rx]'),rect=>({x:Number(rect.getAttribute('x')),y:Number(rect.getAttribute('y')),width:Number(rect.getAttribute('width')),height:Number(rect.getAttribute('height'))}))
+      if(doc.querySelector('parsererror')||doc.documentElement.localName!=='svg'||boxes.length!==labels.length||boxes.some(box=>!Object.values(box).every(Number.isFinite)))
+        throw new Error('PlantUML no devolvió una imagen válida.')
+      doc.querySelectorAll('text').forEach(node=>node.remove())
+      const width=Number(doc.documentElement.getAttribute('width')),height=Number(doc.documentElement.getAttribute('height'))
+      if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)throw new Error('El mapa no tiene dimensiones válidas.')
+      url=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(doc)],{type:'image/svg+xml'}))
+      image=new Image()
+      image.src=url
+      await image.decode()
+      const scale=Math.min(2,4096/Math.max(width,height),Math.sqrt(16000000/(width*height)))
+      canvas=document.createElement('canvas')
+      canvas.width=Math.max(1,Math.ceil(width*scale));canvas.height=Math.max(1,Math.ceil(height*scale))
+      const ctx=canvas.getContext('2d')
+      if(!ctx)throw new Error('No se pudo preparar la imagen del mapa.')
+      ctx.scale(scale,scale);ctx.fillStyle='white';ctx.fillRect(0,0,width,height);ctx.drawImage(image,0,0,width,height)
+      labels.forEach((label,index)=>{
+        const box=boxes[index]
+        if(box.width<label.width+23||box.height<label.height+23)throw new Error('Una etiqueta no cabe en el mapa generado.')
+        ctx.drawImage(label.canvas,box.x+(box.width-label.width)/2,box.y+(box.height-label.height)/2,label.width,label.height)
+      })
+      return await new Promise<Blob>((resolve,reject)=>canvas!.toBlob(blob=>blob?resolve(blob):reject(new Error('No se pudo generar el PNG del mapa.')),'image/png'))
+    }finally {
+      if(url)URL.revokeObjectURL(url)
+      if(image)image.src=''
+      if(canvas)canvas.width=canvas.height=0
+      for(const label of labels)label.canvas.width=label.canvas.height=0
+    }
+  })
+  queue=job
+  return job
+}

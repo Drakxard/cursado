@@ -1,11 +1,12 @@
 import { expect, it } from 'vitest'
-import { containsUrl, isMindmap, mindmapShapes, parseMindmap } from '../src/canvas/mindmap'
+import { containsUrl, isMindmap, parseMindmap } from '../src/canvas/mindmap'
 import { mindmapExample } from './fixtures/mindmap.mjs'
+import { plantumlLabelRows } from '../src/canvas/plantumlLabel'
 
 it.each([
   {name:'complete implication tree',source:mindmapExample,nodes:13},
   {name:'fenced source',source:'```plantuml\n'+mindmapExample+'\n```',nodes:13},
-  {name:'formulas remain editable',source:String.raw`@startmindmap
+  {name:'formula source is preserved for image generation',source:String.raw`@startmindmap
 * $X'=A(t)X+F(t)$
 ** <latex>\frac{1}{2}</latex>
 @endmindmap`,nodes:2},
@@ -18,15 +19,24 @@ it.each([
   expect(isMindmap(source)).toBe(true)
   if(!nodes){expect(()=>parseMindmap(source)).toThrow();return}
   const tree=parseMindmap(source)
-  let index=0
-  const shapes=mindmapShapes(tree,{x:500,y:400},()=>`node-${++index}`,text=>({width:Math.min(336,text.length*9),height:Math.ceil(text.length*9/336)*22}))
-  const labels=shapes.filter(item=>!item.connector),edges=shapes.filter(item=>item.connector)
-  expect(labels).toHaveLength(nodes);expect(edges).toHaveLength(nodes-1)
-  expect(labels.map(item=>item.label)).toEqual(source.split('\n').filter(line=>/^\*+ /.test(line)).map(line=>line.replace(/^\*+ /,'')))
-  for(const edge of edges){
-    const parent=labels.find(item=>item.id===edge.connector!.from!.object.id)!,child=labels.find(item=>item.id===edge.connector!.to!.object.id)!
-    expect(child.x).toBeGreaterThan(parent.x+parent.width)
-  }
-  for(const a of labels)for(const b of labels.filter(b=>a.id!==b.id&&a.x===b.x))
-    expect(a.y+a.height<=b.y||b.y+b.height<=a.y).toBe(true)
+  const labels:string[]=[]
+  function visit(node:typeof tree){labels.push(node.text);node.children.forEach(visit)}
+  visit(tree)
+  expect(labels).toHaveLength(nodes)
+  expect(labels).toEqual(source.split('\n').filter(line=>/^\*+ /.test(line)).map(line=>line.replace(/^\*+ /,'')))
+})
+
+it('separates text and every math expression into distinct image rows',()=>{
+  const rows=plantumlLabelRows(String.raw`Sistema $X'=AX$ con solución \(X=Ke^{\lambda t}\).`)
+  expect(rows.map(({kind,text})=>({kind,text}))).toEqual([
+    {kind:'text',text:'Sistema'},{kind:'math',text:"X'=AX"},{kind:'text',text:'con solución'},
+    {kind:'math',text:String.raw`X=Ke^{\lambda t}`},{kind:'text',text:'.'},
+  ])
+})
+
+it('accepts display and PlantUML latex delimiters, preserving invalid formula source',()=>{
+  const rows=plantumlLabelRows(String.raw`$$\frac{1}{2}$$ <latex>\lambda=\alpha+i\beta</latex> \[x^2\] $\invalid{a}$`)
+  expect(rows.map(row=>row.kind)).toEqual(['math','math','math','math'])
+  expect(rows.map(row=>row.text)).toEqual([String.raw`\frac{1}{2}`,String.raw`\lambda=\alpha+i\beta`,'x^2',String.raw`\invalid{a}`])
+  expect(rows.at(-1)?.raw).toBe(String.raw`$\invalid{a}$`)
 })

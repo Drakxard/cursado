@@ -21,8 +21,8 @@ import { createNote, defaultConnector, findAnchor, hitsConnector, isConnector, m
   pointsBounds, refKey, remapConnector, detachTargets, transformVisual, visualBounds } from './canvas/visualObjects'
 import type { ShapeItem, ShapeKind, Bounds, ObjectRef, TargetGeometry } from './canvas/visualObjects'
 import { paintShape } from './canvas/paintShape'
-import { containsUrl, isMindmap, parseMindmap, mindmapShapes } from './canvas/mindmap'
-import { mathText, measureBoardLabel, withMathImages } from './canvas/mathText'
+import { containsUrl, isMindmap, parseMindmap } from './canvas/mindmap'
+import { mathText, withMathImages } from './canvas/mathText'
 import { createReviewMarker, adjacentReviewMarker, savedReviewView } from './canvas/reviewMarkers'
 import StaticTable, { tableChrome, tableFontSize, tableSize, labelColumn, TABLE_ROW_HEADER, TABLE_TITLE_HEIGHT, TABLE_COL_HEADER } from './components/StaticTable'
 import type { SheetItem, SheetCell } from './components/StaticTable'
@@ -4257,21 +4257,28 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
 
   function pasteClipboardMindmap(text:string) {
     if(!isMindmap(text))return false
+    void importClipboardMindmap(text)
+    return true
+  }
+
+  async function importClipboardMindmap(text:string) {
+    const boardId=getActiveBoardId()
+    importBusyRef.current=true
+    setClipboardNotice('Generando imagen con PlantUML…')
     try {
-      const items=mindmapShapes(parseMindmap(text),boardCenter(),createId,value=>measureBoardLabel(value),themeRef.current==='dark'?'#e8edf7':'#334155')
-      rememberChange();shapesRef.current.push(...items);selectTool('select')
-      const bounds=pointsBounds(items.filter(item=>!item.connector).flatMap(item=>[{x:item.x,y:item.y},{x:item.x+item.width,y:item.y+item.height}]))
-      const canvas=canvasRef.current!,width=canvas.clientWidth,height=canvas.clientHeight
-      const zoom=Math.max(.01,Math.min(cameraRef.current.zoom,Math.max(1,width-160)/bounds.width,Math.max(1,height-220)/bounds.height))
-      cameraRef.current={zoom,x:width/2-(bounds.x+bounds.width/2)*zoom,y:height/2-(bounds.y+bounds.height/2)*zoom}
-      setZoomLabel(Math.round(zoom*100))
-      groupRef.current=items.map(item=>({kind:'shape' as const,id:item.id}))
-      selectedRef.current=null;setSelection(null);refreshSelection(n=>n+1);redraw();scheduleSave()
+      const tree=parseMindmap(text)
+      const {plantumlImage}=await import('./canvas/plantumlImage')
+      const png=await plantumlImage(tree)
+      if(!loadedRef.current||isBoardNavigating()||getActiveBoardId()!==boardId)return
+      await addImage(new File([png],'Mapa PlantUML.png',{type:'image/png'}),undefined,boardId)
+      setClipboardNotice('')
     }catch(error){
+      if(!loadedRef.current||isBoardNavigating()||getActiveBoardId()!==boardId)return
       insertClipboardText(text)
       setClipboardNotice(`Se pegó como texto. ${error instanceof Error?error.message:'No se pudo importar el árbol.'}`)
+    }finally{
+      importBusyRef.current=false
     }
-    return true
   }
 
   async function pasteFromBoardMenu() {
@@ -4462,13 +4469,15 @@ function BoardCanvas({navigationBusy=false}:{navigationBusy?:boolean}) {
     } finally { canvas.width = canvas.height = 0; image.src = '' }
   }
 
-  async function addImage(file: File, dropPoint?: Point) {
+  async function addImage(file: File, dropPoint?: Point, expectedBoardId?:string) {
     // Se rasteriza SVG en el navegador antes de almacenarlo: el backend actual
     // admite PNG, JPEG y WebP, y así no ejecutamos código SVG desde la biblioteca.
     const blob = isSvgFile(file) ? await svgToPng(file) : file.slice(0, file.size, imageMime(file))
     const image = await imageDimensions(blob)
+    if(expectedBoardId&&(!loadedRef.current||isBoardNavigating()||getActiveBoardId()!==expectedBoardId))return
     const assetId = createId()
     await saveAsset(assetId, blob)
+    if(expectedBoardId&&(!loadedRef.current||isBoardNavigating()||getActiveBoardId()!==expectedBoardId))return
     const scale = Math.min(1, 750 / image.width)
     const w = image.width * scale
     const h = image.height * scale

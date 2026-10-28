@@ -1,12 +1,17 @@
 import { test, expect } from '@playwright/test'
 import { mindmapExample } from '../fixtures/mindmap.mjs'
+import { writeFile } from 'node:fs/promises'
 
 async function content(page) {
   return page.evaluate(async()=>{
     const active=localStorage.getItem('pizarra_activa');if(!active)return null
     const db=await new Promise(resolve=>{const r=indexedDB.open('pizarra-dispositivo',1);r.onsuccess=()=>resolve(r.result)})
     const board=await new Promise(resolve=>{const r=db.transaction('boards').objectStore('boards').get(active);r.onsuccess=()=>resolve(r.result)})
-    db.close();return board?.draft??board?.content
+    db.close()
+    const data=board?.draft??board?.content
+    // Windows Clipboard adds CRLF; textarea editing normalizes it back to LF.
+    for(const item of data?.texts??[])item.text=item.text.replace(/\r\n/g,'\n')
+    return data
   })
 }
 async function openLocal(page) {
@@ -66,57 +71,84 @@ Segunda línea`
   await expect.poll(async()=>(await content(page)).tables?.length).toBe(1)
 })
 
-test('implication tree imports atomically, edits nodes in place and keeps geometric toolbar, rotation and reload',async({page})=>{
+test('PlantUML paste creates one local image, supports undo, move and reload',async({page})=>{
+  const engineRequests=[]
+  page.on('request',request=>{if(/plantuml.*\.js|viz-global.*\.js/.test(request.url()))engineRequests.push(request.url())})
   await openLocal(page)
+  expect(engineRequests).toHaveLength(0)
   await paste(page,mindmapExample)
-  await expect.poll(async()=>(await content(page)).shapes?.length).toBe(25)
-  await page.keyboard.press('Control+z')
-  await expect.poll(async()=>(await content(page)).shapes?.length).toBe(0)
-  await page.keyboard.press('Control+y')
-  await expect.poll(async()=>(await content(page)).shapes?.length).toBe(25)
-  const root=(await content(page)).shapes.find(item=>item.label?.startsWith('Sistema Lineal'))
-  const point=await center(page,root)
-  await page.mouse.dblclick(point.x,point.y)
-  const editor=page.getByRole('textbox',{name:'Texto de la figura',exact:true})
-  await expect(editor).toHaveValue(root.label)
-  await expect(page.getByRole('toolbar',{name:'Propiedades de la figura'})).toBeVisible()
-  await page.evaluate(()=>{window.boardPaint.text=[]})
-  await page.setViewportSize({width:1380,height:900})
-  await expect(editor).toBeVisible()
-  expect(await page.evaluate(label=>window.boardPaint.text.some(text=>label.includes(text)&&text.length>8),root.label)).toBe(false)
-  await page.screenshot({path:'test-results/figura-edicion-sin-superposicion.png'})
-  await editor.fill('Raíz editable');await editor.press('Control+End');await editor.press('Enter');await editor.pressSequentially('Implicaciones')
-  await expect(editor).toBeVisible();await editor.press('Escape')
-  await expect.poll(async()=>(await content(page)).shapes.find(item=>item.id===root.id)?.label).toBe('Raíz editable\nImplicaciones')
-  await page.mouse.dblclick(point.x,point.y)
-  await expect(editor).toBeVisible()
-  await editor.fill(String.raw`Sistema $X'=AX$`)
-  await page.mouse.click(100,200)
-  await expect.poll(()=>page.evaluate(()=>window.boardPaint.math),{timeout:20000}).toBeGreaterThan(0)
-  await expect.poll(async()=>(await content(page)).shapes.find(item=>item.id===root.id)?.label).toBe(String.raw`Sistema $X'=AX$`)
-  // Existing persisted figures use the same editor; exercise a rotated shape at a different zoom.
-  await page.evaluate(async id=>{
+  await expect.poll(async()=>(await content(page)).media?.length,{timeout:30000}).toBe(1)
+  expect((await content(page)).shapes??[]).toHaveLength(0)
+  expect((await content(page)).texts??[]).toHaveLength(0)
+  expect(engineRequests.length).toBeGreaterThan(0)
+  expect(engineRequests.every(url=>new URL(url).origin===new URL(page.url()).origin)).toBe(true)
+  const image=(await content(page)).media[0]
+  expect(image.kind).toBe('image')
+  expect(image.name).toContain('PlantUML')
+  const asset=await page.evaluate(async id=>{
     const db=await new Promise(resolve=>{const r=indexedDB.open('pizarra-dispositivo',1);r.onsuccess=()=>resolve(r.result)})
-    await new Promise(resolve=>{
-      const tx=db.transaction('boards','readwrite'),store=tx.objectStore('boards'),r=store.get(localStorage.getItem('pizarra_activa'))
-      r.onsuccess=()=>{const board=r.result,data=board.draft??board.content,node=data.shapes.find(item=>item.id===id);node.rotation=.3;data.camera={zoom:.8,x:400-node.x*.8,y:300-node.y*.8};store.put(board)}
-      tx.oncomplete=resolve
-    });db.close()
-  },root.id)
+    const record=await new Promise(resolve=>{const r=db.transaction('assets').objectStore('assets').get(`device:${id}`);r.onsuccess=()=>resolve(r.result)})
+    db.close();return {type:record.type,size:record.size}
+  },image.assetId)
+  expect(asset.type).toBe('image/png')
+  expect(asset.size).toBeGreaterThan(1000)
+  await page.keyboard.press('Escape')
+  await page.screenshot({path:'test-results/plantuml-imagen.png'})
+  await page.keyboard.press('Control+z')
+  await expect.poll(async()=>(await content(page)).media?.length).toBe(0)
+  await page.keyboard.press('Control+y')
+  await expect.poll(async()=>(await content(page)).media?.length).toBe(1)
+  const point=await center(page,image)
+  await page.mouse.move(point.x,point.y)
+  await page.mouse.down();await page.mouse.move(point.x+50,point.y+35,{steps:8});await page.mouse.up()
+  await expect.poll(async()=>(await content(page)).media[0].x).not.toBe(image.x)
+  const before=(await content(page)).media
   await page.reload()
-  await expect.poll(async()=>(await content(page))?.shapes?.length).toBe(25)
-  await expect(page.locator('.toolbar')).toBeVisible()
-  await page.keyboard.press('v')
-  const rotated=(await content(page)).shapes.find(item=>item.id===root.id),position=await center(page,rotated)
-  await page.mouse.dblclick(position.x,position.y)
-  await expect(editor).toHaveValue(String.raw`Sistema $X'=AX$`)
-  await expect(editor).toHaveCSS('transform',/matrix/)
-  await page.screenshot({path:'test-results/figura-editor-rotacion-zoom.png'})
-  await editor.press('Escape')
-  await paste(page,'@startmindmap\n* A\n*** Nivel inválido\n@endmindmap')
-  await expect(page.getByRole('status')).toContainText('Se pegó como texto')
-  await expect.poll(async()=>(await content(page)).shapes.length).toBe(25)
+  await expect.poll(async()=>(await content(page))?.media).toEqual(before)
+  await paste(page,'@startmindmap\n* A\n*** Nivel incorrecto\n@endmindmap')
+  await expect(page.getByRole('status')).toContainText('Se peg')
   await expect.poll(async()=>(await content(page)).texts?.length).toBe(1)
+  expect((await content(page)).media).toHaveLength(1)
+  expect((await content(page)).shapes??[]).toHaveLength(0)
+})
+
+test('PlantUML PNG includes KaTeX formulas on their own rows',async({page})=>{
+  await openLocal(page)
+  await page.evaluate(()=>{
+    window.plantumlRows=[]
+    new MutationObserver(records=>{
+      for(const record of records)for(const node of record.addedNodes){
+        if(!(node instanceof HTMLElement)||!node.dataset.plantumlLabel)return
+        window.plantumlRows.push(Array.from(node.children,row=>({
+          kind:row.dataset.plantumlRow,math:!!row.querySelector('.katex-display'),
+          top:row.getBoundingClientRect().top,bottom:row.getBoundingClientRect().bottom,
+        })))
+      }
+    }).observe(document.body,{childList:true})
+  })
+  await paste(page,String.raw`@startmindmap
+* Sistema homogéneo $X'=AX$ y su solución
+** Propuesta: <latex>X(t)=Ke^{\lambda t}</latex>
+** Fracción \(\frac{1}{2}\) y matriz $$\begin{pmatrix}1&2\\0&3\end{pmatrix}$$
+** Fórmula inválida $\invalid{a}$
+@endmindmap`)
+  await expect.poll(async()=>(await content(page)).media?.length,{timeout:30000}).toBe(1)
+  const rows=await page.evaluate(()=>window.plantumlRows)
+  expect(rows).toHaveLength(4)
+  expect(rows[0].map(row=>row.kind)).toEqual(['text','math','text'])
+  expect(rows.flat().filter(row=>row.math)).toHaveLength(4)
+  for(const label of rows)for(let i=1;i<label.length;i++)expect(label[i].top).toBeGreaterThanOrEqual(label[i-1].bottom)
+  expect((await content(page)).shapes??[]).toHaveLength(0)
+  expect((await content(page)).texts??[]).toHaveLength(0)
+  const bytes=await page.evaluate(async()=>{
+    const db=await new Promise(resolve=>{const r=indexedDB.open('pizarra-dispositivo',1);r.onsuccess=()=>resolve(r.result)})
+    const id=localStorage.getItem('pizarra_activa')
+    const board=await new Promise(resolve=>{const r=db.transaction('boards').objectStore('boards').get(id);r.onsuccess=()=>resolve(r.result)})
+    const image=(board.draft??board.content).media[0]
+    const blob=await new Promise(resolve=>{const r=db.transaction('assets').objectStore('assets').get(`device:${image.assetId}`);r.onsuccess=()=>resolve(r.result)})
+    db.close();return Array.from(new Uint8Array(await blob.arrayBuffer()))
+  })
+  await writeFile('test-results/plantuml-katex.png',Buffer.from(bytes))
 })
 
 for(const [name,source,video] of [

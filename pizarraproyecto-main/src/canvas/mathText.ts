@@ -60,13 +60,6 @@ export function mathText(text:string,style:TextStyle):Entry|null {
   })
   return entry
 }
-export function measureBoardLabel(text:string,fontSize=17,width=336) {
-  const node=element(text,{fontSize,color:'#202020',width},hasMath(text)),height=node.getBoundingClientRect().height
-  node.style.width='max-content'
-  const natural=node.getBoundingClientRect().width
-  node.remove()
-  return {width:Math.min(width,natural),height}
-}
 export async function withMathImages<T>(prepare:()=>void,render:()=>Promise<T>):Promise<T> {
   pins++
   try {await document.fonts.ready;prepare();await queue;return await render()}
