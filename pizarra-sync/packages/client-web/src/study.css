@@ -11,5 +11,9 @@
 .study-sheet td{border:1px solid #cbd5e1;padding:5px 8px;min-width:70px}
 .study-sheet caption{padding:5px;background:#e2e8f0;text-align:left}
 
-.komu-text[data-study="youtube"]{display:flex;flex-direction:column;padding:0!important;pointer-events:auto}
-.komu-text[data-study="youtube"] .board-video-toolbar{flex-wrap:wrap}
+.komu-text[data-study="youtube"]{padding:0!important;pointer-events:none}
+.study-video-body{transform:scale(var(--study-scale,1));transform-origin:top left;pointer-events:none}
+.study-video-content{display:flex;flex-direction:column;width:100%;height:100%}
+/* The header passes gestures through to the engine's selection/drag handling. */
+.study-video-drag{flex-shrink:0;padding:7px 10px;background:#e2e8f0;color:#334155;font:12px system-ui;cursor:move}
+.study-video-content .board-video-toolbar,.study-video-content .board-video-screen,.study-video-content .board-video-inline-error{pointer-events:auto}

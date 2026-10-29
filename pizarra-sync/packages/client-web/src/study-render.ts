@@ -22,17 +22,27 @@ export function paintStudy(el: HTMLElement, obj: TextObject): boolean {
   el.style.borderRadius = '10px'
   if (study.kind === 'youtube' && /^[\w-]{11}$/.test(study.videoId)) {
     let root = videoRoots.get(el)
-    if (!root) { el.replaceChildren(); root = createRoot(el); videoRoots.set(el, root) }
+    if (!root) {
+      const body = document.createElement('div')
+      body.className = 'study-video-body'
+      el.replaceChildren(body)
+      root = createRoot(body); videoRoots.set(el, root)
+    }
+    const body = el.firstElementChild as HTMLElement
+    body.style.width = `${obj.width || 560}px`
+    body.style.height = `${obj.height || 360}px`
     const emit = (detail: Record<string, unknown>) => document.dispatchEvent(new CustomEvent('study-video', { detail: { id: obj.id, ...detail } }))
     const noop = () => {}
-    root.render(createElement(SyncedYouTubePlayer, {
+    root.render(createElement('div', { className: 'study-video-content' },
+      createElement('div', { className: 'study-video-drag', title: 'Arrastrar el video' }, 'Video · Arrastrar para mover'),
+      createElement(SyncedYouTubePlayer, {
       item: { id: obj.id, videoId: study.videoId, x: obj.x, y: obj.y, width: obj.width || 560, height: obj.height || 360, start: study.start || 0, ...(study.end !== undefined ? { end: study.end } : {}) },
       signal: study.signal, connected: true, interactionTool: 'pan',
       onBroadcast: (_id, action, position) => emit({ action, position }),
       onRange: (_id, start, end) => emit({ start, end }), onPointer: noop,
       onInkPointerDown: noop, onInkPointerMove: noop, onInkPointerUp: noop, onInkPointerCancel: noop,
       onSelectPointerDown: noop, onSelectPointerMove: noop, onSelectPointerUp: noop,
-    }))
+    })))
     return true
   }
   disposeStudy(el)
