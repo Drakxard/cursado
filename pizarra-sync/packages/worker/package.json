@@ -12,6 +12,7 @@
     "build": "wrangler deploy --dry-run --outdir dist"
   },
   "dependencies": {
+    "@aws-crypto/sha256-js": "5.2.0",
     "@komuboard/shared": "workspace:*",
     "partyserver": "^0.5.8",
     "y-partyserver": "^2.2.0",

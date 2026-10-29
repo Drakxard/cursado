@@ -34,7 +34,7 @@
     "cloudflare:check": "npx --yes wrangler@4.151.0 deploy --dry-run --config cloudflare/wrangler.jsonc",
     "cloudflare:deploy": "npx --yes wrangler@4.151.0 deploy --config cloudflare/wrangler.jsonc",
     "build:study-board": "node scripts/build-study-board.mjs",
-    "test:study-board": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/study-board-migration.test.mts tests/study-upload.test.mts && node scripts/test-study-board.mjs"
+    "test:study-board": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/study-board-migration.test.mts tests/study-upload.test.mts tests/study-board-pdf.test.mts && node scripts/test-study-board.mjs"
   },
   "dependencies": {
     "@ai-sdk/azure": "^4.0.100",

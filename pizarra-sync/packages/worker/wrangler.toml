@@ -26,6 +26,14 @@ new_sqlite_classes = ["RoomDirectory"]
 binding = "UPLOADS"
 bucket_name = "pizarra-komuboard-assets"
 
+[[r2_buckets]]
+binding = "COOP_FILES"
+bucket_name = "estudiodiario"
+
+[[services]]
+binding = "COOP_SERVICE"
+service = "cursado-realtime"
+
 [observability]
 enabled = true
 

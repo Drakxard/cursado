@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ComponentProps } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { AuthSession } from '@/lib/authz'
 import ImportantProgressView from './important-progress-view'
@@ -9,6 +9,9 @@ import { EmbeddedWorkspaceProvider } from './local-workspace-provider'
 import { PracticeViewerClient } from '@/app/practice/viewer/practice-viewer-client'
 import { boardPdfReference, type BoardPdfReference } from '@/lib/board-library-contract'
 import { getLocalMaterialById } from '@/lib/local-workspace-data'
+import { getSubjectById } from '@/lib/subjects'
+import { downloadStudyPdf } from '@/lib/study-board-pdf'
+import { readFile } from '@/lib/client/cooperation-files'
 import { setReadyWorkspaceHandle, loadWorkspaceHandle, queryWorkspacePermission, pickWorkspaceRootHandle, loadServicesFile, setReadyInscreenConfigToken, setReadyDriveConfigToken } from '@/lib/local-workspace-client'
 import { isLocalStorageMode } from '@/lib/storage-mode'
 
@@ -21,6 +24,8 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
   const [reference,setReference] = useState<BoardPdfReference | null>(null)
   const [error,setError] = useState('')
   const [resolved,setResolved] = useState(false)
+  const [material,setMaterial] = useState<ComponentProps<typeof PracticeViewerClient>['material']>()
+  const [download,setDownload] = useState<number | null>(null)
   const viewerHost = useRef<HTMLDivElement>(null)
   const pendingReadingPosition = useRef<string | null>(null)
   const readerVisible = useRef(true)
@@ -95,25 +100,34 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
   useEffect(()=>{
     if(!reader || !initialized || !reference || (isLocalStorageMode() && !root)) return
     let current = true
+    const controller = new AbortController()
     setResolved(false)
     void (async()=>{
       if(isLocalStorageMode()) {
         setReadyWorkspaceHandle(root!)
-        const material = await getLocalMaterialById(reference.materialId)
-        if(!material || material.subject_id!==reference.subjectId || material.drive_file_id!==reference.workspaceFileId)
-          throw new Error('El material no está en esta carpeta. Conectá la carpeta original o recuperá el archivo.')
+        const material = await getLocalMaterialById(reference.materialId, reference.subjectId)
+        if(!material || material.subject_id!==reference.subjectId || material.drive_file_id!==reference.workspaceFileId || !material.drive_file_id || !await readFile(root!,material.drive_file_id.slice(12))) {
+          const workspaceFileId = await downloadStudyPdf(root!,reference,value=>{if(current)setDownload(value)},controller.signal)
+          if(current) setMaterial({id:parseInt(reference.sharedPdf!.hash.slice(0,12),16) || 1,subjectId:`shared-board:${reference.sharedPdf!.roomId}`,subjectName:'Pizarras compartidas',sessionDate:'',weekNumber:1,weekdayIndex:0,materialType:'theory',fileName:reference.fileName,workspaceFileId,sourceRevision:reference.sharedPdf!.hash})
+        } else if(current) setMaterial({
+          id: material.id, subjectId: material.subject_id,
+          subjectName: getSubjectById(material.subject_id)?.name.replace('\n', ' ') || material.subject_id,
+          sessionDate: material.session_date, weekNumber: material.week_number, weekdayIndex: material.weekday_index,
+          materialType: material.material_type, fileName: material.file_name, workspaceFileId: material.drive_file_id,
+          sourceRevision: `${material.drive_file_id}:${material.updated_at}`,
+        })
       }
       if(current) setResolved(true)
     })().catch(error=>{if(current)setError(error.message)})
-    return ()=>{current=false}
+    return ()=>{current=false;controller.abort()}
   },[reader,initialized,reference,root])
   if(error) return <main style={{padding:24}}><p role="alert">{error}</p>{isLocalStorageMode()&&!root&&<button onClick={()=>{
     void pickWorkspaceRootHandle().then(handle=>{setReadyWorkspaceHandle(handle);setProvidedRoot(handle);setError('')}).catch(error=>setError(error.message))
   }}>Conectar carpeta</button>}{reader&&<button onClick={()=>send('board-library:reader-closed')}>Volver a la pizarra</button>}</main>
-  if(!initialized || (isLocalStorageMode() && !root)) return <p role="status">Conectando la biblioteca…</p>
+  if(!initialized || (isLocalStorageMode() && !root)) return reader ? <main aria-busy="true" aria-label="Abriendo PDF" /> : <p role="status">Conectando la biblioteca…</p>
   const content = calendar ? <ImportantProgressView active onBack={()=>send('board-library:calendar-closed')} initialCalendarTaskId={params.get('taskId')??undefined} /> : reader ? <div ref={viewerHost} style={{height:'100dvh'}}>{resolved && reference
-    ? <PracticeViewerClient materialId={reference.materialId} mode="inline" boardReader onRequestClose={()=>send('board-library:reader-closed')} />
-    : <p role="status">Buscando el PDF…</p>}</div>
+    ? <PracticeViewerClient material={material} materialId={reference.materialId} mode="inline" boardReader onRequestClose={()=>send('board-library:reader-closed')} />
+    : download !== null ? <div role="status" style={{padding:24}}><p>Descargando {reference?.fileName}: {download}%</p><progress value={download} max={100} style={{width:'min(360px, 100%)'}} /></div> : <div aria-busy="true" aria-label="Abriendo PDF" />}</div>
     : <SubjectWheelLoader authSession={authSession} boardLibrary />
   return root ? <EmbeddedWorkspaceProvider rootHandle={root}>{content}</EmbeddedWorkspaceProvider> : content
 }

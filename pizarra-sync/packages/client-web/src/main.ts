@@ -198,7 +198,7 @@ const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("#app root missing");
 
 app.innerHTML = `
-  <komu-topbar id="topbar" room="${room}"></komu-topbar>
+  <komu-topbar id="topbar" room="${room.startsWith('study-') ? '' : room}"></komu-topbar>
 
   <main class="canvas" id="board" data-grid="${gridMode}"></main>
 
@@ -220,8 +220,9 @@ app.innerHTML = `
   <komu-zoombar></komu-zoombar>
 
 
-  <komu-drawer room="${room}"></komu-drawer>
+  <komu-drawer room="${room.startsWith('study-') ? '' : room}"></komu-drawer>
 `;
+if(room.startsWith('study-')) for(const element of app.querySelectorAll('komu-topbar, komu-drawer')) element.setAttribute('room',initialUrl.searchParams.get('studyTitle') || 'Pizarra compartida');
 
 // --------------------------------------------------------------------------
 // Canvas.
@@ -1167,7 +1168,7 @@ async function renameRoom(title: string): Promise<void> {
   }
 }
 function paintRoomName(): void {
-  const name = roomMetadata.get("title") || roomMetadata.get("studyName") || room;
+  const name = roomMetadata.get("title") || roomMetadata.get("studyName") || initialUrl.searchParams.get('studyTitle') || (room.startsWith('study-') ? 'Pizarra compartida' : room);
   if (topbar && !topbar.contains(document.activeElement)) topbar.room = name;
   if (drawer) drawer.room = name;
   document.title = `Komuboard — ${name}`;
@@ -1184,6 +1185,11 @@ function paintRoomName(): void {
   }
 }
 roomMetadata.observe(paintRoomName);
+const openSharedStudy = () => {
+  if(import.meta.env.BASE_URL === '/study-board/' && !initialUrl.searchParams.has('topicBoard') && room.startsWith('study-') && roomMetadata.get('studyName')) location.replace(`/estudio/pizarra?room=${encodeURIComponent(room)}&name=${encodeURIComponent(roomMetadata.get('title') || roomMetadata.get('studyName')!)}`);
+};
+roomMetadata.observe(openSharedStudy);
+openSharedStudy();
 topbar?.addEventListener("room-rename", (e) => {
   void renameRoom((e as CustomEvent<string>).detail);
 });
@@ -1367,7 +1373,7 @@ document.addEventListener("click", (e) => {
 let shareDialog: ReturnType<typeof createShareDialog> | null = null;
 let shareUrl = "";
 function openShare(): void {
-  const url = initialUrl.searchParams.has("topicBoard") ? `${location.origin}${import.meta.env.BASE_URL}index.html?room=${encodeURIComponent(room)}` : window.location.href;
+  const url = room.startsWith('study-') ? `${location.origin}/estudio/pizarra?room=${encodeURIComponent(room)}&name=${encodeURIComponent(roomMetadata.get('title') || roomMetadata.get('studyName') || initialUrl.searchParams.get('studyTitle') || 'Pizarra compartida')}` : window.location.href;
   if (!shareDialog || shareUrl !== url) {
     shareDialog?.close();
     shareDialog?.remove();

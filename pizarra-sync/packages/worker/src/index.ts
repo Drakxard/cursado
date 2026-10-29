@@ -2,6 +2,7 @@ import { routePartykitRequest } from "partyserver";
 import { MAX_UPLOAD_BYTES, UPLOAD_IMAGE_EXT } from "@komuboard/shared";
 import { Board } from "./board";
 import { sniffImage } from "./image-sniff";
+import { studyPdf } from './study-pdf';
 import { keysToSweep, sweepIsSafe, type R2ObjectInfo } from "./reap-assets";
 
 // The Durable Object class must be exported from the Worker entry module.
@@ -14,6 +15,8 @@ export interface Env {
   Main: DurableObjectNamespace<Board>;
   /** R2 bucket for uploaded images (bytes; the Yjs doc only holds the key). */
   UPLOADS: R2Bucket;
+  COOP_FILES?: R2Bucket;
+  COOP_SERVICE?: Fetcher;
   /** Per-IP upload rate limiter (Cloudflare ratelimit binding). Optional: absent in local dev. */
   UPLOAD_RL?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   /** Per-IP room-join (WS connect) rate limiter — bounds room-id enumeration. Optional in dev. */
@@ -187,6 +190,7 @@ export default {
     }
 
     // Image upload + serve (before the PartyServer WS routing).
+    if (url.pathname.startsWith('/study-pdf/')) return studyPdf(request, env);
     if (url.pathname === "/upload") return handleUpload(request, env);
     if (url.pathname.startsWith("/img/")) {
       let key: string;

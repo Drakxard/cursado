@@ -1390,6 +1390,7 @@ export class TextLayer {
     height?: number,
   ): void {
     const cam = this.opts.camera();
+    if (el.dataset.study) el.style.setProperty('--study-scale', String(cam.scale));
     el.style.left = `${x * cam.scale + cam.x}px`;
     el.style.top = `${y * cam.scale + cam.y}px`;
     el.style.fontSize = `${fontSize * cam.scale}px`;

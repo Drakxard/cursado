@@ -5,6 +5,7 @@ export type BoardPdfReference = {
   fileName: string
   workspaceFileId: string | null
   sharedFileId?: string
+  sharedPdf?: { roomId: string; hash: string; size: number }
 }
 export function boardPdfReference(value: unknown): BoardPdfReference | null {
   if (!value || typeof value !== 'object') return null
@@ -16,7 +17,8 @@ export function boardPdfReference(value: unknown): BoardPdfReference | null {
       v.workspaceFileId.startsWith('workspace://') && v.workspaceFileId.length <= 2000 &&
       !/[\\\x00-\x1f]/.test(v.workspaceFileId) && !v.workspaceFileId.slice(12).split('/').some(p=>!p || p==='.' || p==='..')))) return null
   if(v.sharedFileId!==undefined && !/^[a-zA-Z0-9_-]{1,200}$/.test(v.sharedFileId))return null
-  return { materialId:v.materialId, subjectId:v.subjectId, fileName:v.fileName, workspaceFileId:v.workspaceFileId, ...(v.sharedFileId?{sharedFileId:v.sharedFileId}:{}) }
+  if(v.sharedPdf && (!/^study-[a-f0-9-]{36}$/.test(v.sharedPdf.roomId) || !/^[a-f0-9]{64}$/.test(v.sharedPdf.hash) || !Number.isSafeInteger(v.sharedPdf.size) || v.sharedPdf.size < 1 || v.sharedPdf.size > 100*1024*1024)) return null
+  return { materialId:v.materialId, subjectId:v.subjectId, fileName:v.fileName, workspaceFileId:v.workspaceFileId, ...(v.sharedFileId?{sharedFileId:v.sharedFileId}:{}), ...(v.sharedPdf ? {sharedPdf:{roomId:v.sharedPdf.roomId,hash:v.sharedPdf.hash,size:v.sharedPdf.size}} : {}) }
 }
 export function parseBoardPdfDrag(value: string): BoardPdfReference | null {
   try { return boardPdfReference(JSON.parse(value)) } catch { return null }

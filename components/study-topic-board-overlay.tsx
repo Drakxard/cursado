@@ -6,13 +6,17 @@ import { boardPdfReference, type BoardPdfReference, type BoardLinkReference } fr
 import { openStudyBoard, saveStudyBoard, confirmStudyMigration } from '@/lib/study-board-workspace'
 import { migrationNeedsReview, migrationErrorSummary, migrationTypeLabel, studyCard, type MigrationReport, type StudyAttachment } from '@/lib/study-board-migration'
 import { readImportantTasks, importantTaskProgress, importantCountdownStyle } from '@/lib/important-tasks'
+import { publishStudyPdf } from '@/lib/study-board-pdf'
 
 export type StudyTopicBoardProps = {
   boardId: string; name: string; rootHandle: FileSystemDirectoryHandle; onClose: () => void
   pdfReferences?: BoardPdfReference[]; cooperationSubjectId?: string; cooperationWeekNumber?: number; backLabel?: string
+  sharedRoomId?: string
 }
 type Destination = Pick<StudyTopicBoardProps, 'boardId' | 'name' | 'pdfReferences' | 'cooperationSubjectId' | 'cooperationWeekNumber'>
 type Pin = { id: string; reference: BoardPdfReference }
+const pdfKey = (reference: BoardPdfReference) => reference.sharedPdf?.hash || `${reference.subjectId}:${reference.materialId}:${reference.workspaceFileId}`
+const localPdfKey = (reference: BoardPdfReference) => JSON.stringify([reference.subjectId,reference.materialId,reference.workspaceFileId])
 
 export function StudyTopicBoardOverlay(props: StudyTopicBoardProps) {
   const [stack, setStack] = useState<Destination[]>([{ boardId: props.boardId, name: props.name, pdfReferences: props.pdfReferences, cooperationSubjectId: props.cooperationSubjectId, cooperationWeekNumber: props.cooperationWeekNumber }])
@@ -23,7 +27,7 @@ export function StudyTopicBoardOverlay(props: StudyTopicBoardProps) {
     onNavigate={value => setStack(current => [...current, value])} onCancel={props.onClose} />
 }
 
-function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, onNavigate, onCancel, backLabel = 'Volver a Estudio' }: StudyTopicBoardProps & { onNavigate: (value: Destination) => void; onCancel: () => void }) {
+function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoomId, onClose, onNavigate, onCancel, backLabel = 'Volver a Estudio' }: StudyTopicBoardProps & { onNavigate: (value: Destination) => void; onCancel: () => void }) {
   const [session] = useState(() => crypto.randomUUID())
   const frame = useRef<HTMLIFrameElement>(null), library = useRef<HTMLIFrameElement>(null), readerFrame = useRef<HTMLIFrameElement>(null)
   const [initial, setInitial] = useState<Awaited<ReturnType<typeof openStudyBoard>> | null>(null)
@@ -32,9 +36,12 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
   const [pins, setPins] = useState<Pin[]>([]), [reader, setReader] = useState<BoardPdfReference | null>(null), [readerVisible, setReaderVisible] = useState(false)
   const [review, setReview] = useState<MigrationReport | null>(null), [attachment, setAttachment] = useState<{ id: string; study: StudyAttachment } | null>(null)
   const [closing, setClosing] = useState(false)
-  const files = useRef<HTMLInputElement>(null), saveQueue = useRef<Promise<unknown>>(Promise.resolve()), positions = useRef(new Map<number, string>())
+  const files = useRef<HTMLInputElement>(null), saveQueue = useRef<Promise<unknown>>(Promise.resolve()), positions = useRef(new Map<string, string>())
   const saveError = useRef<unknown>(null)
   const pendingClose = useRef<(() => void) | null>(null)
+  const publishing = useRef(new Set<string>())
+  const localPdfs = useRef(new Set<string>())
+  const mounted = useRef(true)
   const live = useRef({ initial, pins, reader, readerVisible, review, attachment })
   live.current = { initial, pins, reader, readerVisible, review, attachment }
   const send = (type: string, data: Record<string, unknown> = {}) => frame.current?.contentWindow?.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin)
@@ -43,12 +50,12 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
     saveQueue.current = result.then(value => { saveError.current = null; return value }, reason => { saveError.current = reason; setError(String(reason)) })
     return result
   }
-  const initialize = () => { const value = live.current.initial; if (value) send('init', { ...value.record, name, snapshot: value.snapshot, pdfReferences }) }
+  const initialize = () => { const value = live.current.initial; if (value) send('init', { ...value.record, name, snapshot: value.snapshot, pdfReferences, shared:!!sharedRoomId }) }
   const focusBoard = () => frame.current?.focus()
   const closeReader = () => {
     live.current.readerVisible = false
     setReaderVisible(false)
-    if (!live.current.pins.some(pin => pin.reference.materialId === live.current.reader?.materialId)) setReader(null)
+    if (!live.current.reader || !live.current.pins.some(pin => pdfKey(pin.reference) === pdfKey(live.current.reader!))) setReader(null)
     focusBoard()
   }
   const openReader = (value: BoardPdfReference) => { live.current.reader = value; live.current.readerVisible = true; setReader(value); setReaderVisible(true); setMenu(false) }
@@ -70,9 +77,16 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
   }
   useEffect(() => {
     let active = true
-    void openStudyBoard(rootHandle, boardId).then(value => { if (active) { live.current.initial = value; setInitial(value) } }).catch(reason => { if (active) setError(String(reason)) })
-    return () => { active = false }
-  }, [rootHandle, boardId])
+    mounted.current = true
+    void openStudyBoard(rootHandle, boardId, sharedRoomId).then(value => { if (active) {
+      for(const key of value.record.localPdfReferences || []) localPdfs.current.add(key)
+      for(const raw of [...(pdfReferences || []),...(value.snapshot?.content.shapes || []).filter((shape:any)=>shape.visualType === 'pdf-shortcut').map((shape:any)=>shape.pdfReference)]) {
+        const reference = boardPdfReference(raw); if(reference) localPdfs.current.add(localPdfKey(reference))
+      }
+      live.current.initial = value; setInitial(value)
+    } }).catch(reason => { if (active) setError(String(reason)) })
+    return () => { active = false; mounted.current = false }
+  }, [rootHandle, boardId, sharedRoomId])
   useEffect(() => { if (initial) initialize() }, [initial])
   useEffect(() => {
     const previousOverflow = document.body.style.overflow, previousFocus = document.activeElement as HTMLElement | null
@@ -81,10 +95,28 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
       const data = event.data
       if (event.origin !== location.origin || data?.session !== session || data?.boardId !== boardId) return
       if (event.source === frame.current?.contentWindow) {
+        if(data.type === 'study-board:publish-pdf') {
+          const reference = boardPdfReference(data.reference)
+          if(reference) {
+            localPdfs.current.add(localPdfKey(reference))
+            void save(()=>saveStudyBoard(rootHandle,boardId,{localPdfReferences:[...localPdfs.current]})).catch(()=>{})
+          }
+        }
+        if (data.type === 'study-board:pdfs') {
+          const roomId = live.current.initial?.record.roomId
+          if(roomId) for(const item of data.pdfs || []) {
+            const reference = boardPdfReference(item.reference)
+            if(!reference || !localPdfs.current.has(localPdfKey(reference)) || reference.sharedPdf?.roomId === roomId || publishing.current.has(item.id)) continue
+            publishing.current.add(item.id)
+            void publishStudyPdf(rootHandle,roomId,reference).then(sharedPdf=>{
+              if(sharedPdf && mounted.current) send('pdf-published',{id:item.id,reference,sharedPdf})
+            }).catch(reason=>{if(mounted.current)setError(String(reason))}).finally(()=>publishing.current.delete(item.id))
+          }
+        }
         if (data.type === 'study-board:request-init') initialize()
         if (data.type === 'study-board:ready') {
           setReady(true); setError(''); const report = data.report as MigrationReport | undefined, current = live.current.initial
-          if (report && current && current.record.status !== 'accepted' && migrationNeedsReview(report, current.approved)) setReview(report)
+          if (!sharedRoomId && report && current && current.record.status !== 'accepted' && migrationNeedsReview(report, current.approved)) setReview(report)
           else if (report && current?.record.status !== 'accepted') void save(() => saveStudyBoard(rootHandle, boardId, { status: 'accepted', report })).catch(() => {})
           focusBoard(); void refreshTasks()
         }
@@ -96,10 +128,11 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
         if (data.type === 'study-board:pins') {
           const valid = (data.pins || []).flatMap((pin: any) => { const reference = boardPdfReference(pin.reference); return reference && typeof pin.id === 'string' ? [{ id: pin.id, reference }] : [] })
           live.current.pins = valid; setPins(valid)
-          if (!live.current.readerVisible && live.current.reader && !valid.some((pin: Pin) => pin.reference.materialId === live.current.reader!.materialId)) setReader(null)
+          if (!live.current.readerVisible && live.current.reader && !valid.some((pin: Pin) => pdfKey(pin.reference) === pdfKey(live.current.reader!))) setReader(null)
         }
         if (data.type === 'study-board:pin' && typeof data.id === 'string') send('pin', { id: data.id })
         if (data.type === 'study-board:toggle-pdf') togglePdf()
+        if (data.type === 'study-board:open-pinned') { const pin = live.current.pins.at(-1); if (pin) openReader(pin.reference) }
         if (data.type === 'study-board:menu') setMenu(value => !value)
         if (data.type === 'study-board:files') send('import-files', { files: data.files })
         if (data.type === 'study-board:changed') void refreshTasks()
@@ -115,10 +148,10 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
       const isReader = event.source === readerFrame.current?.contentWindow, isLibrary = event.source === library.current?.contentWindow
       if (!isReader && !isLibrary) return
       if (data.type === 'board-library:ready') {
-        event.source?.postMessage({ type: 'board-library:init', session, boardId, rootHandle, reference: isReader ? live.current.reader : null, readerVisible: live.current.readerVisible, readingPosition: isReader ? positions.current.get(live.current.reader!.materialId) : undefined }, { targetOrigin: location.origin })
+        event.source?.postMessage({ type: 'board-library:init', session, boardId, rootHandle, reference: isReader ? live.current.reader : null, readerVisible: live.current.readerVisible, readingPosition: isReader ? positions.current.get(pdfKey(live.current.reader!)) : undefined }, { targetOrigin: location.origin })
       }
       if (isReader && data.type === 'board-library:reading-position' && typeof data.hash === 'string' && data.hash.length <= 512 && live.current.reader) {
-        positions.current.set(live.current.reader.materialId, data.hash)
+        positions.current.set(pdfKey(live.current.reader), data.hash)
         if (positions.current.size > 50) positions.current.delete(positions.current.keys().next().value!)
       }
       if (isReader && data.type === 'board-library:reader-closed') closeReader()
@@ -142,7 +175,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
     if (readerVisible) readerFrame.current?.focus()
   }, [readerVisible, reader, session, boardId])
   useEffect(() => {
-    if (!readerVisible && reader && !pins.some(pin => pin.reference.materialId === reader.materialId)) setReader(null)
+    if (!readerVisible && reader && !pins.some(pin => pdfKey(pin.reference) === pdfKey(reader))) setReader(null)
   }, [pins, readerVisible, reader])
   async function accept() {
     if (!review) return
@@ -170,7 +203,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
   return <div role="dialog" aria-modal="true" aria-label={`Pizarra de ${name}`} className="fixed inset-0 z-[150] bg-white text-slate-900">
     <div className="flex h-full">
       <div className="relative min-w-0" style={{ width: split ? '50%' : '100%', height: '100%' }}>
-        {initial && <iframe ref={frame} title={`Pizarra de ${name}`} src={`/study-board/index.html?topicBoard=${encodeURIComponent(boardId)}&room=${encodeURIComponent(initial.record.roomId)}&session=${session}`} className="h-full w-full border-0" onLoad={initialize} />}
+        {initial && <iframe ref={frame} title={`Pizarra de ${name}`} src={`/study-board/index.html?topicBoard=${encodeURIComponent(boardId)}&room=${encodeURIComponent(initial.record.roomId)}&session=${session}&studyTitle=${encodeURIComponent(name)}`} className="h-full w-full border-0" onLoad={initialize} />}
         {!ready && !error && !status && <p role="status" className="absolute bottom-4 left-4 rounded bg-white p-3">Abriendo pizarra…</p>}
       </div>
       {split && <aside className="relative h-full w-1/2 border-l bg-background text-foreground">
@@ -179,7 +212,6 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
       </aside>}
     </div>
     {!readerVisible && <button aria-label={backLabel} title={backLabel} disabled={closing} onClick={() => close()} className="absolute left-3 top-3 z-20 h-10 w-10 rounded-xl border bg-white shadow">{closing ? '…' : '←'}</button>}
-    {!!pins.length && !readerVisible && <nav aria-label="PDF fijado" className="absolute right-4 bottom-4 z-20 flex gap-2">{pins.slice(-1).map(pin => <button key={pin.id} title={`${pin.reference.fileName} · <`} onClick={() => openReader(pin.reference)} className="rounded border bg-white px-3 py-2 shadow">📌 {pin.reference.fileName}</button>)}</nav>}
     {menu && <div className="absolute bottom-16 left-16 z-30 flex flex-col gap-1 rounded-xl border bg-white p-2 shadow-lg">
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { files.current?.click(); setMenu(false) }}>Agregar material</button>
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { setUrlInput(true); setMenu(false) }}>Link YouTube</button>
@@ -188,7 +220,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
     {urlInput && <form onSubmit={addVideo} className="absolute bottom-16 left-16 z-30 flex max-w-[85vw] gap-1 rounded-lg border bg-white p-2 shadow"><input autoFocus type="url" aria-label="Link YouTube" placeholder="Link de YouTube" value={url} onChange={event => setUrl(event.target.value)} className="min-w-0 rounded border px-2" /><button type="submit">Agregar</button><button type="button" aria-label="Cerrar enlace" onClick={() => setUrlInput(false)}>×</button></form>}
     <input ref={files} hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.svg,.xlsx,.xlsm,.csv" onChange={event => { const selected = [...(event.target.files || [])]; event.target.value = ''; send('import-files', { files: selected }) }} />
     {reader && <div aria-hidden={!readerVisible} inert={!readerVisible} role={readerVisible ? 'dialog' : undefined} aria-modal={readerVisible || undefined} aria-label={`Leer ${reader.fileName}`} className="absolute inset-0 z-40 bg-white" style={{ visibility: readerVisible ? 'visible' : 'hidden', pointerEvents: readerVisible ? 'auto' : 'none' }}>
-      <iframe key={reader.materialId} ref={readerFrame} title="Lector de PDF de la pizarra" className="h-full w-full border-0" src={`/biblioteca/pizarra?mode=reader&session=${session}&boardId=${encodeURIComponent(boardId)}&materialId=${reader.materialId}`} />
+      <iframe key={pdfKey(reader)} ref={readerFrame} title="Lector de PDF de la pizarra" className="h-full w-full border-0" src={`/biblioteca/pizarra?mode=reader&session=${session}&boardId=${encodeURIComponent(boardId)}&materialId=${reader.materialId}`} />
     </div>}
     {attachment && !['important', 'pdf', 'board', 'youtube'].includes(attachment.study.kind) && <StudyAttachmentEditor value={attachment} onClose={() => setAttachment(null)} onSave={table => { send('update-table', { id: attachment.id, table }); setAttachment(null) }} />}
     {review && !readerVisible && !error && <div role="status" className="absolute bottom-3 left-3 z-30 max-w-sm rounded-xl border bg-white p-3 text-sm shadow-lg">

@@ -48,6 +48,11 @@ también se señalan propiedades que no se pueden reproducir exactamente.
 El PDF fijado retiene un único visor durante la sesión. `<` alterna su visibilidad
 y `Esc` sale del lector. Desfijarlo oculto, reemplazarlo o salir de la pizarra libera
 el visor. El lector y sus anotaciones usan los componentes existentes de Estudio.
+La chincheta de la barra lateral abre el PDF con un clic; mantenerla presionada
+lleva a su acceso en la pizarra. El acceso permite desfijarlo y fijar otro lo reemplaza.
+Los accesos mantienen sus proporciones al hacer zoom. El lector reutiliza una única
+consulta a los metadatos de la materia y abre PDF.js con la ruta local conocida,
+sin pantallas intermedias de búsqueda.
 La biblioteca comparte el mismo `SubjectWheelLoader` del inicio de Estudio y abre
 la mitad de la pantalla. Los contadores consultan las tareas originales al abrir,
 recuperar el foco y cada cinco segundos.
@@ -59,7 +64,19 @@ Antes de usar la integración publicada, desplegar el Worker de
 `https://cursado.vercel.app` y el desarrollo local en el puerto 3000. Conservar los
 nombres de los Durable Objects y el bucket R2. Publicar Cursado después.
 Los enlaces de salas siguen siendo el mecanismo de acceso de Pizarra Sync;
-no proporcionan acceso a los PDF ni a las tareas de otra carpeta local.
+Los accesos PDF publicados incluyen una referencia al archivo en R2 para quienes
+tienen el enlace de esa sala. Se reutilizan los objetos de esferas cooperativas
+tras validar la sesión y pertenencia del publicador, sin copiar sus bytes. Otros
+PDF se publican por hash en el bucket existente del Worker, con un límite de 100 MB
+y verificación completa de integridad antes de habilitar la descarga.
+
+El enlace compartido abre `/estudio/pizarra` con la misma sala Yjs y la carpeta que
+autorizó la persona. Los PDF se descargan solamente al abrirlos, con progreso de
+0 a 100, y quedan en `pizarrasCompartidas/<hash>.pdf`. Un marcador escrito al terminar
+permite reabrir sin descarga y conservar anotaciones locales. Las descargas incompletas
+no se dan por válidas; dos aperturas coordinan el guardado. Si una esfera cooperativa
+ya contiene el archivo local correcto, el lector lo reutiliza directamente.
+Las tareas continúan siendo referencias a la carpeta original.
 
 `npm run test:study-board` ejecuta las pruebas de migración y levanta los servicios
 locales para la prueba de navegador si no están abiertos. Solo detiene los procesos

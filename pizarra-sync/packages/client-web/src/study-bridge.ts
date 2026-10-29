@@ -49,10 +49,22 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (object.study) map.set('study', object.study)
     if (object.legacyOriginal) map.set('legacyOriginal', object.legacyOriginal)
   }
-  const emitPins = () => send('pins', { pins: [...objectsMap(doc).values()].flatMap(map => {
+  let pinnedPdfId: string | undefined
+  const emitPins = () => {
+    const pins = [...objectsMap(doc).values()].flatMap(map => {
     const study = map.get('study') as any
     return study?.kind === 'pdf' && study.pinned ? [{ id: map.get('id'), reference: study.reference }] : []
-  }) })
+    })
+    const pin = pins.at(-1)
+    pinnedPdfId = typeof pin?.id === 'string' ? pin.id : undefined
+    pinButton.disabled = !pin
+    pinButton.title = pin ? `${pin.reference.fileName} · Clic para abrir; mantener presionado para ir al acceso · <` : 'Fijá un PDF desde su acceso'
+    send('pins', { pins })
+    send('pdfs',{pdfs:[...objectsMap(doc).values()].flatMap(map=>{
+      const study = map.get('study') as any
+      return study?.kind === 'pdf' ? [{id:map.get('id'),reference:study.reference}] : []
+    })})
+  }
   const uploaded = new Map<string, Promise<string>>()
   let imageIndex = 0, imageCount = 0, uploadFailure: UploadError | null = null
   async function uploadLegacy(item: any, data?: string) {
@@ -115,7 +127,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
         seed.destroy()
         if (data.snapshot.content.camera) canvas.restoreStudyView(data.snapshot.content.camera)
       } else report = previous ?? data.report
-      if (!data.snapshot && !marker.get('complete')) {
+      if (!data.shared && !data.snapshot && !marker.get('complete')) {
         report = { version: STUDY_CONVERTER_VERSION, types: [], partial: [], errors: [], count: 0 }
         doc.transact(() => { marker.set('report', report!); marker.set('complete', true) }, 'study-migration')
       }
@@ -136,6 +148,10 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   window.addEventListener('message', event => {
     if (event.origin !== location.origin || event.source !== parent || event.data?.session !== session || event.data?.boardId !== boardId) return
     const data = event.data
+    if(data.type === 'study-board:pdf-published') {
+      const map = objectsMap(doc).get(data.id), study = map?.get('study') as any
+      if(study?.kind === 'pdf' && study.reference.materialId === data.reference?.materialId && study.reference.workspaceFileId === data.reference?.workspaceFileId) map!.set('study',{...study,reference:{...study.reference,sharedPdf:data.sharedPdf}})
+    }
     if (data.type === 'study-board:init') {
       if (provider.synced) void initialize(data)
       else { const sync = (synced: boolean) => { if (synced) { provider.off('sync', sync); void initialize(data) } }; provider.on('sync', sync) }
@@ -202,12 +218,26 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (!pdf && !link && !important && !transfer.files.length) return
     event.preventDefault(); event.stopImmediatePropagation()
     const rect = board.getBoundingClientRect(), view = canvas.worldViewport(), x = view.x + (event.clientX - rect.left) / rect.width * view.width, y = view.y + (event.clientY - rect.top) / rect.height * view.height
-    if (pdf) doc.transact(() => insert(studyCard(crypto.randomUUID(), pdf.fileName, { kind: 'pdf', reference: pdf }, x, y)))
+    if (pdf) { send('publish-pdf',{reference:pdf}); doc.transact(() => insert(studyCard(crypto.randomUUID(), pdf.fileName, { kind: 'pdf', reference: pdf }, x, y))) }
     if (link) doc.transact(() => insert(studyCard(crypto.randomUUID(), link.name, { kind: 'board', reference: link }, x, y)))
     if (important) doc.transact(() => insert(studyCard(crypto.randomUUID(), 'Importante', { kind: 'important', taskId: important.taskId }, x, y)))
     if (transfer.files.length) send('files', { files: [...transfer.files] })
   }, true)
+  const pinButton = document.createElement('button'); pinButton.type = 'button'; pinButton.className = 'tool'; pinButton.disabled = true
+  pinButton.setAttribute('aria-label', 'PDF fijado'); pinButton.title = 'Fijá un PDF desde su acceso'
+  pinButton.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-4 2-2 5-2 2-6-6 2-2 5-2Z"/><path d="m10 14-7 7"/></svg>'
+  let hold: ReturnType<typeof setTimeout> | undefined, held = false
+  const clearHold = () => { if (hold) clearTimeout(hold); hold = undefined }
+  pinButton.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return
+    held = false; clearHold(); pinButton.setPointerCapture(event.pointerId)
+    hold = setTimeout(() => { held = true; if (pinnedPdfId) canvas.selectById(pinnedPdfId) }, 550)
+  })
+  pinButton.addEventListener('pointerup', clearHold)
+  pinButton.addEventListener('pointercancel', () => { clearHold(); held = true })
+  window.addEventListener('blur', clearHold)
+  pinButton.onclick = () => { if (!held) send('open-pinned'); held = false }
   const plus = document.createElement('button'); plus.type = 'button'; plus.className = 'tool study-plus'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Agregar a la pizarra'); plus.onclick = () => send('menu')
-  document.querySelector('komu-tool-dock')?.append(plus)
+  document.querySelector('komu-tool-dock')?.append(pinButton, plus)
   send('request-init')
 }

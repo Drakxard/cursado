@@ -19,7 +19,7 @@ async function service(url, entry, cwd, args) {
 try {
   await service('http://127.0.0.1:8787/health', 'pizarra-sync/packages/worker/node_modules/wrangler/bin/wrangler.js', 'pizarra-sync/packages/worker', ['dev'])
   await service('http://127.0.0.1:5173', 'pizarra-sync/packages/client-web/node_modules/vite/bin/vite.js', 'pizarra-sync/packages/client-web', [])
-  const test = spawn(process.execPath, ['--test', 'tests/study-board.browser.mjs'], { cwd: root, stdio: 'inherit', windowsHide: true })
+  const test = spawn(process.execPath, ['--test', ...process.argv.slice(2), 'tests/study-board.browser.mjs'], { cwd: root, stdio: 'inherit', windowsHide: true })
   process.exitCode = await new Promise(resolve => test.on('exit', code => resolve(code ?? 1)))
 } finally {
   for (const child of children.reverse()) {

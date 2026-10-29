@@ -2858,8 +2858,8 @@ async function listKnownLocalSubjectIds() {
   return Array.from(new Set([...SUBJECTS.map((subject) => subject.id), ...materialSubjectIds, ...entrySubjectIds]))
 }
 
-async function findMaterialById(materialId: number): Promise<SubjectDayMaterial | null> {
-  const subjectIds = await listKnownLocalSubjectIds()
+async function findMaterialById(materialId: number, subjectId?: string): Promise<SubjectDayMaterial | null> {
+  const subjectIds = subjectId ? [subjectId] : await listKnownLocalSubjectIds()
   for (const subjectId of subjectIds) {
     const weekNumbers = await listWeekNumbersForManifestKind(MATERIALS_DIR, subjectId)
     for (const weekNumber of weekNumbers) {
@@ -3872,8 +3872,8 @@ export async function getWorkspaceCronogramaObjectUrl() {
   return createObjectUrlForWorkspaceFile(cronograma.driveFileId)
 }
 
-export async function getLocalMaterialById(materialId: number) {
-  return findMaterialById(materialId)
+export async function getLocalMaterialById(materialId: number, subjectId?: string) {
+  return findMaterialById(materialId, subjectId)
 }
 
 export async function getLocalEntryById(entryId: number) {
