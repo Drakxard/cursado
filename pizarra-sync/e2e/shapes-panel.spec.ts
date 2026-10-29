@@ -80,7 +80,7 @@ test("More shapes → search → pick → the menu's More row reflects it → ta
   await expect(tiles.first()).toHaveClass(/\bon\b/);
   await expect(panel).toBeVisible(); // desktop: the panel stays open after a pick
 
-  await page.keyboard.press("Escape"); // closes the panel, not the tool
+  await panel.locator('.sp-close').click(); // close the panel while keeping the chosen tool
   await expect(panel).toBeHidden();
   await expect(menu).toBeVisible();
   const more = menu.locator(".sm-more");

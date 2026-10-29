@@ -84,15 +84,10 @@ export class CoShapePanel extends HTMLElement {
     });
     this.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      e.stopPropagation(); // the panel owns its Esc (main.ts's handler would also cancel the tool)
-      if (this.#query && e.target === this.#search) {
-        // first Esc in a non-empty search clears it (native search-field behaviour), second closes
-        this.#query = "";
-        if (this.#search) this.#search.value = "";
-        this.render();
-        return;
-      }
+      e.preventDefault();
+      e.stopPropagation();
       this.close();
+      this.dispatchEvent(new CustomEvent('shape-cancel', { bubbles: true }));
     });
     this.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;

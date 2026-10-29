@@ -439,13 +439,13 @@ export class BoardCanvas {
         this.reattachTransformer();
         this.updateConnectorChrome(); // a connector is selected in the text layer now (ADR-0009 P3)
       },
-      onCommitted: (keepTool) => {
-        // Finishing a box placed with the text/sticky/shapes tool reverts to select (one-shot).
+      onCommitted: (keepTool, cancelTool) => {
+        // Text/stickies are one-shot; shapes remain armed until explicitly cancelled.
         // Suppressed when the commit was triggered by an explicit tool switch, or by focus moving into
         // a tool picker (keepTool) — e.g. picking a new shape/connector from the still-open shape menu;
         // reverting there would hide the menu before the pick lands. Either way: don't fight the user.
         if (this.suppressAutoSelect || keepTool) return;
-        if (this.tool === "text" || this.tool === "sticky" || this.tool === "shapes")
+        if (this.tool === "text" || this.tool === "sticky" || (this.tool === "shapes" && cancelTool))
           this.opts.requestTool?.("select");
       },
       onShapesMoved: () => {
@@ -524,6 +524,12 @@ export class BoardCanvas {
     if (tool !== "sticky" && tool !== "shapes") this.textLayer.hideStickyGhost(); // ghost rides the place tools
     if (tool !== "stamp") this.hideStampGhost();
     if (tool !== "shapes") {
+      if (this.drawingConnector) {
+        this.drawingConnector = null;
+        this.textLayer.removeInkDraft('local-conn');
+        this.textLayer.setSnapTarget(null);
+        this.broadcastConnectorEdit(null);
+      }
       // Leaving the shapes tool drops connector-draw mode (so other shapes stop showing their dots).
       this.currentConnector = null;
       this.textLayer.setConnectorMode(false);
@@ -1295,19 +1301,7 @@ export class BoardCanvas {
             id: d.id,
             authorId: String(this.opts.awareness.clientID),
           });
-          if (!d.from.shapeId && !to.shapeId) {
-            // Both ends landed free → this is a standalone line/arrow, not wired into the diagram, so
-            // treat it like a placed object: select it and drop to the select tool so its edit bar +
-            // endpoint handles are immediately usable. A connector bound to ANY shape instead stays in
-            // draw mode for rapid diagramming (the observeDeep above already created its group, so the
-            // selection chrome can attach). publishSelection goes out after the addConnector commit.
-            // ADR-0009 P3: select the new connector in the text layer (unified path). selectText →
-            // onSelectionChange → reattachTransformer (notify + publish) + updateConnectorChrome (handles/bar).
-            this.textLayer.selectText(d.id);
-            this.opts.requestTool?.("select");
-          } else {
-            this.opts.onPlaced?.(); // bound → collapse the mobile sheet, keep the connector tool active
-          }
+          this.opts.onPlaced?.(); // every connector keeps the chosen shape tool active
         }
       }
       // Always clear the live-draw preview that updateDrawPreview() streamed to peers. Without this the

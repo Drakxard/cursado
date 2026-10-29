@@ -236,7 +236,7 @@ const canvas = new BoardCanvas({
   user,
   // Persist + restore this room's camera (pan/zoom) across reloads (see the auto-fit block below).
   viewKey: `komuboard-view-${room}`,
-  // Revert to select after a text/sticky box is placed + finished (drives the dock highlight too).
+  // Update the dock when text/sticky editing ends or a shape is explicitly cancelled.
   requestTool: (tool) => selectTool(tool),
   // After drawing / placing a sticky / placing a shape, collapse the mobile mini-sheet to reclaim
   // canvas space (desktop has no collapse — the sheets are floating panels).
@@ -827,6 +827,11 @@ function openShapePanel(): void {
   app?.classList.remove("sheet-open");
 }
 app?.addEventListener("shape-more", openShapePanel);
+app?.addEventListener('shape-cancel', () => {
+  shapePanelEl?.close();
+  if (currentTool === 'shapes') selectTool('select');
+  canvas.clearSelection();
+});
 app?.addEventListener("shape-panel-close", () => {
   // Focus was inside the now-hidden panel (or fell to <body>) → hand it back to the menu's More row
   // so a keyboard user lands where they opened the panel from.
@@ -989,8 +994,7 @@ window.addEventListener("keydown", (e) => {
       return;
     }
     if (shapePanelEl?.isOpen) {
-      shapePanelEl.close(); // dismiss the shapes library — the tool + its menu stay
-      return;
+      shapePanelEl.close(); // close the library and cancel the active tool below
     }
     if (drawBarEl?.popoverOpen) {
       drawBarEl.closePopover(); // dismiss the style/colour/width popover — don't yank the whole tool

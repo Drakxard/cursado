@@ -104,7 +104,7 @@ export interface TextLayerOptions {
    *  `keepTool` is true when the commit was triggered by focus moving into a tool picker (the shape
    *  menu / place bars): the box still bakes, but the tool must NOT revert to select (the user is
    *  picking what to draw next). */
-  onCommitted?: (keepTool?: boolean) => void;
+  onCommitted?: (keepTool?: boolean, cancelTool?: boolean) => void;
   /** Fired each frame a shape's geometry changes visually (local drag/resize, peer glide) so the
    *  canvas can re-route connectors bound to it live (not just on the doc commit). */
   onShapesMoved?: () => void;
@@ -2004,7 +2004,7 @@ export class TextLayer {
       // Esc or ⌘/Ctrl+Enter commits.
       if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
         e.preventDefault();
-        this.commit();
+        this.commit(false, e.key === "Escape");
         return;
       }
       // In a bulleted box, a plain Enter continues the list — start the new line with a bullet.
@@ -4528,7 +4528,7 @@ export class TextLayer {
   }
 
   /** Serialize the editor to runs and write it back to the doc (or discard/delete if empty). */
-  commit(keepTool = false): void {
+  commit(keepTool = false, cancelTool = false): void {
     const e = this.edit;
     if (!e) return;
     this.edit = null;
@@ -4599,7 +4599,7 @@ export class TextLayer {
     this.updateResizeChrome(); // edit ended → restore handles if the box is still selected
     this.refreshSelectionChrome();
     // The doc observer fires render(), which (re)paints / removes the display element.
-    this.opts.onCommitted?.(keepTool); // let the canvas revert the text/sticky tool to select
+    this.opts.onCommitted?.(keepTool, cancelTool);
   }
 
   destroy(): void {
