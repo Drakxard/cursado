@@ -1,0 +1,43 @@
+name = "pizarra-komuboard"
+account_id = "fef492aba6adae6da6ccf02ec237eb7f"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+send_metrics = false
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "Main"
+class_name = "Board"
+
+[[durable_objects.bindings]]
+name = "Directory"
+class_name = "RoomDirectory"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Board"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RoomDirectory"]
+
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "pizarra-komuboard-assets"
+
+[observability]
+enabled = true
+
+# No expiry alarms, KV index or scheduled deletions: boards and images are retained.
+[[unsafe.bindings]]
+name = "UPLOAD_RL"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }
+
+[[unsafe.bindings]]
+name = "JOIN_RL"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 60, period = 10 }

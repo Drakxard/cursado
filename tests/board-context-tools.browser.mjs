@@ -7,7 +7,7 @@ import { chromium, expect } from '@playwright/test'
 
 test('existing board shortcuts, contextual figure editing and external clipboard preserve content', { timeout: 60000 }, async t => {
   const parent = await build({ stdin: { resolveDir: process.cwd(), loader:'tsx', contents:`
-    import {createRoot} from 'react-dom/client';import {TopicBoardOverlay} from './components/topic-board-overlay';
+    import {createRoot} from 'react-dom/client';import {TopicBoardOverlay} from './tests/helpers/legacy-topic-board-overlay';
     const root=await navigator.storage.getDirectory(),directory=await(await root.getDirectoryHandle('progreso',{create:true})).getDirectoryHandle('pizarras',{create:true});
     const content={camera:{x:0,y:0,zoom:1},strokes:[],texts:[],shapes:[],tables:[],graphs:[],media:[],videos:[]};
     for(const [id,shapes] of [['source',[{id:'shortcut',kind:'rounded',visualType:'board-shortcut',boardReference:{boardId:'study-existing',name:'Theory'},label:'Theory',x:100,y:200,width:220,height:60,color:'#2563eb',strokeWidth:1}]],['study-existing',[{id:'figure',kind:'rectangle',x:100,y:230,width:380,height:240,color:'#ff9900',strokeWidth:3}]]]){

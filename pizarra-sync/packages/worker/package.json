@@ -1,0 +1,25 @@
+{
+  "name": "@komuboard/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker + Durable Object (PartyServer). One DO per room; M0 hibernation echo.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "wrangler deploy --dry-run --outdir dist"
+  },
+  "dependencies": {
+    "@komuboard/shared": "workspace:*",
+    "partyserver": "^0.5.8",
+    "y-partyserver": "^2.2.0",
+    "yjs": "^13.6.31"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.40.0"
+  }
+}

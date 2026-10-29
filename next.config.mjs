@@ -23,6 +23,7 @@ const nextConfig = {
         { source: '/pizarra/api/:path*', destination: backend ? `${backend}/api/:path*` : '/api/pizarra-unavailable' },
         { source: '/pizarra/recognize/:path*', destination: backend ? `${backend}/recognize/:path*` : '/api/pizarra-unavailable' },
         { source: '/pizarra', destination: '/pizarra/index.html' },
+        { source: '/study-board', destination: '/study-board/index.html' },
       ],
       afterFiles: [],
       fallback: [{ source: '/pizarra/:path*', destination: '/pizarra/index.html' }],

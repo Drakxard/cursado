@@ -1,0 +1,55 @@
+{
+  "framework": null,
+  "installCommand": "npx --yes pnpm@9.15.0 install --frozen-lockfile",
+  "buildCommand": "VITE_WORKER_HOST=pizarra-komuboard.dariorafael2005.workers.dev npx --yes pnpm@9.15.0 --filter @komuboard/client-web build",
+  "outputDirectory": "packages/client-web/dist",
+  "env": {
+    "VITE_WORKER_HOST": "pizarra-komuboard.dariorafael2005.workers.dev"
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://pizarra-komuboard.dariorafael2005.workers.dev wss://pizarra-komuboard.dariorafael2005.workers.dev https://cdn.aframe.io data: blob:; worker-src 'self' blob:; child-src 'self' blob:; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; upgrade-insecure-requests"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "xr-spatial-tracking=(self), camera=(), microphone=(), geolocation=(), gyroscope=(self), accelerometer=(self), magnetometer=(self)"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/((?!assets/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

@@ -39,6 +39,7 @@
   "exclude": [
     "node_modules",
     "native-web/board.jsx",
-    "pizarraproyecto-main"
+    "pizarraproyecto-main",
+    "pizarra-sync"
   ]
 }

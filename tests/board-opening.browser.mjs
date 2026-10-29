@@ -7,7 +7,7 @@ import { chromium, expect } from '@playwright/test'
 
 const parentBundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   import {createRoot} from 'react-dom/client';
-  import {TopicBoardOverlay} from './components/topic-board-overlay';
+  import {TopicBoardOverlay} from './tests/helpers/legacy-topic-board-overlay';
   const root=await navigator.storage.getDirectory();
   const directory=await(await root.getDirectoryHandle('progreso',{create:true})).getDirectoryHandle('pizarras',{create:true});
   // Use the same file name/format as topic workspaces.

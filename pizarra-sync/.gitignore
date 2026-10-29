@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.output/
+*.tsbuildinfo
+
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Test / tooling artifacts
+.playwright-mcp/
+playwright-report/
+test-results/
+coverage/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+.claude/
+
+# Root-level PNGs are scratch (dropped reference screenshots + verification
+# captures); canonical images live in mockups/img/ and docs/.
+/*.png
+
+# Noto emoji SVGs — fetched offline via scripts/fetch-emoji.sh (not committed)
+packages/client-web/public/emoji/
+
+# Planning artifacts (design docs + UI mockups) — kept locally, not committed to the repo.
+/docs/
+/mockups/
+.env
+.vercel/
+audit.playwright.config.ts
+
+.vercel
+.env*
+!.env.example

@@ -1,17 +1,18 @@
 # cursado
 
-En las pizarras, **+ → Biblioteca → Abrir mitad y mitad** muestra Estudio a la
-derecha. Arrastrar sus PDF al lienzo crea accesos con el nombre sin `.pdf`, sin
-copiar archivos ni convertir páginas en imágenes. Un clic abre el lector a
-pantalla completa; arrastrar mueve el acceso. Escape vuelve a la misma pizarra
-y conserva la materia abierta. Otro Escape cierra la biblioteca dividida.
-**+ → PDF** conserva la importación de páginas al lienzo.
+Estudio usa **Pizarra Sync**, con sus herramientas y sincronizaci?n existentes.
+El ?ltimo bot?n **+** permite agregar material, un enlace de YouTube o abrir
+**Biblioteca** directamente a mitad de pantalla con el mismo inicio de Estudio.
+Los PDF fijados se alternan con **<** y se cierran con **Esc**; se retiene como
+m?ximo un lector durante la sesi?n.
 
-Las pizarras de **Importantes → Temas** se cierran con la flecha **←** de la
-esquina, después de guardar. Escape cancela primero las ediciones o ventanas
-abiertas y, en el lienzo sin selección, activa **Seleccionar**. No cierra la
-pizarra de Temas. Los accesos se guardan junto a las figuras y requieren acceso
-a su material original; eliminar un acceso no elimina el PDF.
+Las pizarras anteriores de Estudio se migran al abrirlas, conservando sus archivos
+originales. La confirmaci?n aparece abajo a la izquierda y recuerda los tipos de
+elemento ya validados. Cancelar conserva el borrador para revisarlo despu?s.
+[Integraci?n, migraci?n y publicaci?n](docs/estudio-pizarra-sync.md).
+
+La pizarra independiente de **/pizarra**, accesible desde el inicio, conserva su
+motor y sus funciones anteriores.
 
 La biblioteca personal para InScreen permite publicar materiales y pizarras
 privadas en R2 y leerlos sin conexión desde Android. Ejecuta los componentes
@@ -21,7 +22,8 @@ web. [Configuración, uso y APK](docs/biblioteca-inscreen.md).
 Comunidad de estudiantes, intentando estudiar
 
 Este repositorio integra el organizador de estudio (Next.js, en la raíz) y la
-pizarra colaborativa (Vite, en `pizarraproyecto-main`). La pantalla `/` permite
+pizarra independiente (Vite, en `pizarraproyecto-main`) y Pizarra Sync para Estudio
+(en `pizarra-sync`). La pantalla `/` permite
 abrir `/estudio` o `/pizarra/`. **Ctrl+Q** guarda los cambios pendientes y vuelve
 al inicio sin cerrar la sesión. Si el guardado falla, la aplicación permanece
 abierta y muestra el error.

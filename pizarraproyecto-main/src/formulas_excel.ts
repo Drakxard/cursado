@@ -19,7 +19,7 @@ const elementwise=(left:Value,right:Value,op:(a:number,b:number)=>number):Value=
     const b=Array.isArray(right)?right:[right]
     if(a.length!==b.length&&a.length!==1&&b.length!==1)throw new Error('Dimensiones diferentes')
     return Array.from({length:Math.max(a.length,b.length)},(_,i)=>
-      elementwise(a[a.length===1?0:i],b[b.length===1?0:i],op))
+      elementwise(a[a.length===1?0:i]!,b[b.length===1?0:i]!,op))
   }
   return op(numeric(left),numeric(right))
 }
@@ -29,7 +29,7 @@ const colToIndex=(col:string):number=>[...col.toUpperCase()].reduce((a,c)=>a*26+
 const getRef=(text:string):{row:number;col:number}|null=>{
   const m=/^\$?([A-Z]{1,3})\$?(\d+)$/i.exec(text)
   if(!m)return null
-  return {row:Number(m[2])-1,col:colToIndex(m[1])}
+  return {row:Number(m[2])-1,col:colToIndex(m[1]!)}
 }
 const numberRe=/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
 const tokenRe=/\s*("(?:[^"]|"")*"|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|\$?[A-Z]{1,3}\$?\d+|[A-Z_ÁÉÍÓÚÜÑ][A-Z_0-9ÁÉÍÓÚÜÑ.]*|<=|>=|<>|[-+*\/^(),;:=<>])\s*/iy
@@ -64,7 +64,7 @@ export function createFormulaEvaluator(rows:CellWithFormula[][]) {
       tokenRe.lastIndex=position
       const match=tokenRe.exec(formula)
       if(!match||match.index!==position)throw new Error('Fórmula no admitida')
-      tokens.push(match[1]);position=tokenRe.lastIndex
+      tokens.push(match[1]!);position=tokenRe.lastIndex
       if(tokens.length>500)throw new Error('Expresión extensa')
     }
     let i=0

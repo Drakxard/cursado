@@ -2,7 +2,9 @@
 /public/pizarra/
 /public/library-reader/
 /public/native-web/
+/public/study-board/
 /pizarraproyecto-main/dist/
+/pizarra-sync/packages/*/dist/
 
 # Keep local configuration, runtime state and verification artifacts off uploads.
 .dev.vars

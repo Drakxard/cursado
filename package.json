@@ -8,8 +8,8 @@
     "test:treap-demo": "npm run build:treap-demo && node --test tests/treap-demo.test.mjs tests/treap-demo.browser.mjs tests/treap-generation.test.mjs",
     "build:native-web": "node scripts/build-native-web.mjs",
     "build:pdf-explanation-ui": "node scripts/build-pdf-explanation-ui.mjs",
-    "predev": "npm run build:pizarra && npm run build:pdf-explanation-ui",
-    "prebuild": "npm run build:pizarra && npm run build:pdf-explanation-ui && npm run build:native-web",
+    "predev": "npm run build:study-board && npm run build:pizarra && npm run build:pdf-explanation-ui",
+    "prebuild": "npm run build:study-board && npm run build:pizarra && npm run build:pdf-explanation-ui && npm run build:native-web",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -32,7 +32,9 @@
     "test:integration": "node --test tests/cursado.browser.mjs tests/board-library.browser.mjs tests/cooperation-weeks.browser.mjs tests/board-opening.browser.mjs tests/board-context-tools.browser.mjs tests/board-workspace.browser.mjs tests/board-pdf-expand.browser.mjs tests/pdf-pencil.browser.mjs",
     "test:services": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/services.browser.mjs",
     "cloudflare:check": "npx --yes wrangler@4.151.0 deploy --dry-run --config cloudflare/wrangler.jsonc",
-    "cloudflare:deploy": "npx --yes wrangler@4.151.0 deploy --config cloudflare/wrangler.jsonc"
+    "cloudflare:deploy": "npx --yes wrangler@4.151.0 deploy --config cloudflare/wrangler.jsonc",
+    "build:study-board": "node scripts/build-study-board.mjs",
+    "test:study-board": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/study-board-migration.test.mts && node scripts/test-study-board.mjs"
   },
   "dependencies": {
     "@ai-sdk/azure": "^4.0.100",

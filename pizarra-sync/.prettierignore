@@ -1,0 +1,7 @@
+pnpm-lock.yaml
+dist/
+**/dist/
+docs/index.html
+mockups/
+node_modules/
+packages/client-web/src/emoji-data.json

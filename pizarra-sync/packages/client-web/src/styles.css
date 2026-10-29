@@ -1,0 +1,4648 @@
+:root {
+  --accent: #3b6ff6;
+  --accent-ink: #ffffff;
+  --ink: #0e1116;
+  --muted: #586172;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --paper: #f6f7f9;
+  --border: #e4e7ec;
+  --grid: #d2d8e2;
+  --good: #16a34a;
+  --bad: #dc2626;
+  --radius: 14px;
+  --shadow: 0 6px 20px rgba(16, 17, 22, 0.1), 0 2px 6px rgba(16, 17, 22, 0.06);
+  --dur: 200ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  color-scheme: light;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}
+:root[data-theme="dark"] {
+  --accent: #5b8def;
+  --accent-ink: #0b1020;
+  --ink: #e6e9ef;
+  --muted: #9aa4b2;
+  --surface: #171a21;
+  --surface-2: #1e222b;
+  --paper: #0e1116;
+  --border: #262b34;
+  --grid: #2b333e;
+  --good: #22c55e;
+  --bad: #f87171;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+#app {
+  position: relative;
+  height: 100vh; /* fallback for browsers without dvh */
+  /* DYNAMIC viewport height: 100vh is the LARGE viewport (address bar hidden), so with the URL bar
+     showing (the default on e.g. Pixel 8 Pro) #app overshoots the visible area and its bottom-anchored
+     tool dock lands below the fold behind the bar — overflow:hidden then clips it away entirely. 100dvh
+     tracks the currently-visible height, keeping the bottom dock on-screen at every device height. */
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: 1fr;
+  background: var(--paper);
+  color: var(--ink);
+  overflow: hidden;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+/* Visually hidden but reachable by screen readers + keyboard (the a11y semantic mirror + live
+   announcer, ui/board-a11y.ts). The clip/clip-path pair keeps it out of the visual + layout flow
+   while leaving its text in the accessibility tree. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- top bar ---------- */
+.topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(56px + env(safe-area-inset-top, 0px));
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: env(safe-area-inset-top, 0px) 14px 0;
+  background: transparent;
+  border: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+.topbar > :not(.spacer) {
+  pointer-events: auto;
+}
+.room-pill {
+  min-width: 0;
+  max-width: 35vw;
+}
+.room-pill strong[contenteditable] {
+  cursor: text;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.room-pill strong[contenteditable]:focus {
+  outline: 2px solid var(--accent);
+  border-radius: 3px;
+}
+.brand {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.logo {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13px;
+}
+/* Brand mark image (the hamburger-menu heads) — the Komuboard logo, sized to sit beside the wordmark. */
+.brand-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  flex: none;
+}
+/* Dark mode: the logo has its own dark elements that blend into the dark menu surface — sit it on a
+   light rounded chip (app-icon style) so the whole mark always reads. */
+:root[data-theme="dark"] .brand-logo {
+  background: #fff;
+  border-radius: 10px;
+}
+.room {
+  color: var(--muted);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.room strong {
+  color: var(--ink);
+}
+.spacer {
+  flex: 1;
+}
+/* On-screen undo/redo cluster — hidden on desktop (keyboard), shown on the touch layout (see below). */
+.tb-history {
+  display: none;
+  gap: 6px;
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background var(--dur) var(--ease);
+}
+.dot[data-state="connected"] {
+  background: var(--good);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 22%, transparent);
+}
+.dot[data-state="disconnected"] {
+  background: var(--bad);
+}
+/* ── Share: the topbar "Share" button + the "Share this board" dialog ─────────────────────────── */
+.btn-share {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.btn-share:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+.btn-share .ico {
+  width: 17px;
+  height: 17px;
+}
+/* ── First-run identity nudge — dismissible "set your name" card (see ui/identity-nudge.ts) ─────── */
+.identity-nudge {
+  position: fixed;
+  top: 64px;
+  right: 14px;
+  z-index: 40;
+  width: 290px;
+  max-width: calc(100vw - 28px);
+  padding: 13px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px -12px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition:
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+.identity-nudge.in {
+  opacity: 1;
+  transform: none;
+}
+.identity-nudge.leaving {
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+}
+.identity-nudge-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-right: 16px; /* clear the × in the corner */
+}
+.identity-nudge-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.identity-nudge-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+.identity-nudge-hint {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.identity-nudge-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 11px;
+}
+.identity-nudge-edit {
+  height: 30px;
+  padding: 0 13px;
+  font:
+    600 12px Inter,
+    system-ui,
+    sans-serif;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.identity-nudge-edit:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+.identity-nudge-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.identity-nudge-close:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+@media (prefers-reduced-motion: reduce) {
+  .identity-nudge {
+    transition: none;
+  }
+}
+/* ── Reconnection banner — top-center "Reconnecting…" / "Back online" pill (see ui/connection-banner.ts) ── */
+.conn-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 16px;
+  font:
+    600 13px Inter,
+    system-ui,
+    sans-serif;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 10px 26px -12px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-6px);
+  transition:
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
+    visibility var(--dur);
+}
+.conn-banner.in {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+.conn-banner[data-mode="online"] {
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 40%, var(--border));
+}
+.conn-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-top-color: var(--accent);
+  animation: conn-spin 0.7s linear infinite;
+}
+@keyframes conn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.conn-check {
+  color: var(--good);
+  font-weight: 800;
+}
+@media (prefers-reduced-motion: reduce) {
+  .conn-banner {
+    transform: translateX(-50%);
+    transition:
+      opacity var(--dur) var(--ease),
+      visibility var(--dur);
+  }
+  .conn-banner.in {
+    transform: translateX(-50%);
+  }
+  .conn-spinner {
+    animation: none;
+  }
+}
+/* ── Join toasts — bottom-center "<name> joined" stack (see ui/join-toast.ts) ─────────────────────── */
+.join-toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  z-index: 44;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.join-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 15px;
+  font:
+    500 13px Inter,
+    system-ui,
+    sans-serif;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 8px 22px -10px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+.join-toast.in {
+  opacity: 1;
+  transform: none;
+}
+.join-toast b {
+  font-weight: 700;
+}
+.join-toast-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .join-toast {
+    transform: none;
+    transition: opacity var(--dur) var(--ease);
+  }
+}
+/* ── Mobile selection action bar — a mini-sheet (like draw/sticky/shape) holding the icon row (see
+   ui/selection-bar.ts). The shared .mini-sheet rules add the position/slide/collapse; here it's the
+   surface + button row. Desktop hides it (keyboard + transform chrome handle this there). ── */
+.selection-actions {
+  display: none;
+}
+/* Touch layout: narrow phones OR any coarse-pointer device (tablets — no keyboard for the shortcuts). */
+@media (max-width: 640px), (pointer: coarse) {
+  .selection-actions {
+    display: flex; /* override the base; .mini-sheet makes it a flush, sliding column */
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom: 0; /* flush with the dock below */
+  }
+  .sa-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+  .sa-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 42px;
+    height: 44px;
+    color: var(--ink);
+    background: transparent;
+    border: 0;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  .sa-btn:active {
+    background: var(--surface-2);
+  }
+  .sa-ico {
+    width: 20px;
+    height: 20px;
+  }
+  .sa-danger {
+    color: var(--bad);
+  }
+  /* Insert launcher sheet — five labelled options, opened by the dock + on phones (ui/insert-sheet.ts).
+     A mini-sheet like the selection bar, so it slides up flush out of the dock. */
+  .insert-sheet {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom: 0; /* flush with the dock below */
+  }
+  .insert-row {
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .insert-btn {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    gap: 5px;
+    padding: 9px 2px;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    border-radius: 12px;
+    cursor: pointer;
+    font:
+      500 11px Inter,
+      system-ui,
+      sans-serif;
+  }
+  .insert-btn:active {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+  .insert-ico {
+    width: 24px;
+    height: 24px;
+  }
+  .insert-label {
+    line-height: 1;
+  }
+  /* The dock merges with the selection sheet while it's out — parallels #app.sheet-open for the tool
+     sheets, but keyed off the sheet itself so no extra JS state is needed. */
+  #app:has(.selection-actions.mini-sheet:not(.hidden)) .dock {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top-color: transparent;
+    box-shadow: 0 14px 20px -8px rgba(16, 17, 22, 0.22);
+  }
+  #app:has(.selection-actions.mini-sheet.collapsed) .dock {
+    border-top-color: var(--border);
+  }
+}
+/* ── "Connection refused" dialog (room full / rate limited) — see ui/refused-dialog.ts ─────────────── */
+.refused-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+  text-align: center;
+}
+.refused-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.refused-sub {
+  margin: 0;
+  max-width: 22rem;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.refused-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.share-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.share-qr {
+  width: 172px;
+  height: 172px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.share-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.share-cap {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.share-url-row {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+}
+.share-url {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.share-copy {
+  flex: none;
+  height: 36px;
+  padding: 0 14px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.share-copy.ok {
+  background: #3db46b;
+}
+.share-helper {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.share-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.share-native,
+.share-done {
+  height: 34px;
+  padding: 0 14px;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.share-native {
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.share-done {
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+}
+.iconbtn {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.iconbtn:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+/* the brand wordmark now lives at the top of the hamburger dropdown; the bar shows just the
+   menu button in its place (on every breakpoint). */
+.brand .logo,
+.brand-name {
+  display: none;
+}
+
+/* ---------- hamburger dropdown (desktop) — branding + the shared grid/theme controls ---------- */
+.app-menu {
+  position: fixed;
+  z-index: 80;
+  width: 300px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.app-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 15px;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  border-bottom: 1px solid var(--border);
+}
+.app-menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 15px;
+}
+/* a clickable menu action (e.g. "Edit profile") — full-width row + edge-to-edge hover */
+.app-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: auto;
+  margin: 0 -15px; /* cancel the body's side padding → hover spans the full menu width */
+  padding: 9px 15px; /* content stays aligned with the head + settings rows (15px) */
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.app-menu-item:hover {
+  background: var(--surface-2);
+}
+.app-menu-item-ic {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+}
+/* The user's own avatar shown in the "Edit profile" row (app menu + mobile drawer) — a small
+   circle with their photo, or colour + initials (painted by paintAvatar). Replaces the generic
+   user glyph so the menu reflects who you are. */
+.menu-avatar {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--av, var(--accent));
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+}
+/* The "Edit profile" row's right-side identity preview: the user's name beside their avatar. */
+.profile-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.profile-name {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.app-menu-sep {
+  height: 1px;
+  margin: 0 -15px; /* edge-to-edge divider between the action(s) and the settings */
+  background: var(--border);
+}
+
+/* ---------- floating "?" help button (desktop) → keyboard shortcuts ---------- */
+.help-btn {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.help-btn:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+/* id re-asserts ONLY `position` to beat the global `[data-tip] { position: relative }` — keeping
+   `display` at class specificity so the mobile `.help-btn { display: none }` hide still wins. */
+#help-btn {
+  position: absolute;
+}
+
+/* ---------- canvas ---------- */
+/* Infinite grid. ViewportController.syncGrid() feeds the level-of-detail (LOD) numbers in
+   as custom properties: --grid-fine / --grid-coarse (the two tier spacings), --grid-fade
+   (the fine tier's opacity), and --gx-/--gy- (per-tier background positions, offset by half
+   a tile so a line/dot lands on the world origin). The LOD keeps the on-screen spacing near
+   GRID_TARGET_PX so the grid never collapses to a solid fill when zoomed out; the fine tier
+   crossfades against the solid coarse tier so steps are seamless. Drawn in screen space
+   (constant line/dot size), matching how Figma (lines) / FigJam (dots) do it.
+   --grid-dot = dot radius, --grid-line = half line thickness. */
+.canvas {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  /* Kill the mobile browser chrome that fights node selection: the long-press callout/context
+     menu and accidental text selection of rendered nodes. The active editor re-enables text
+     selection for itself (.komu-text-editor { user-select: text }). */
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+
+  /* ---- DOTS ---- */
+  /* Fallback (no relative-color syntax): single tier — still LOD-sized, just no crossfade. */
+  background-image: radial-gradient(
+    var(--grid) var(--grid-dot, 1.6px),
+    transparent var(--grid-dot, 1.6px)
+  );
+  background-size: var(--grid-fine, 24px) var(--grid-fine, 24px);
+  background-position: var(--gx-fine, 0px) var(--gy-fine, 0px);
+  /* Enhanced: fine (fading) + coarse (solid). */
+  background-image:
+    radial-gradient(
+      rgb(from var(--grid) r g b / var(--grid-fade, 1)) var(--grid-dot, 1.6px),
+      transparent var(--grid-dot, 1.6px)
+    ),
+    radial-gradient(var(--grid) var(--grid-dot, 1.6px), transparent var(--grid-dot, 1.6px));
+  background-size:
+    var(--grid-fine, 24px) var(--grid-fine, 24px),
+    var(--grid-coarse, 48px) var(--grid-coarse, 48px);
+  background-position:
+    var(--gx-fine, 0px) var(--gy-fine, 0px),
+    var(--gx-coarse, 0px) var(--gy-coarse, 0px);
+}
+
+/* ---- LINES (Figma-style) ---- two tiers of centered 1px lines (H + V) that crossfade. */
+.canvas[data-grid="lines"] {
+  /* Fallback (no relative-color syntax): single tier of crisp lines, no crossfade. */
+  background-image:
+    linear-gradient(
+      to bottom,
+      transparent calc(50% - var(--grid-line, 0.5px)),
+      var(--grid) calc(50% - var(--grid-line, 0.5px)) calc(50% + var(--grid-line, 0.5px)),
+      transparent calc(50% + var(--grid-line, 0.5px))
+    ),
+    linear-gradient(
+      to right,
+      transparent calc(50% - var(--grid-line, 0.5px)),
+      var(--grid) calc(50% - var(--grid-line, 0.5px)) calc(50% + var(--grid-line, 0.5px)),
+      transparent calc(50% + var(--grid-line, 0.5px))
+    );
+  background-size:
+    var(--grid-fine, 24px) var(--grid-fine, 24px),
+    var(--grid-fine, 24px) var(--grid-fine, 24px);
+  background-position:
+    0px var(--gy-fine, 0px),
+    var(--gx-fine, 0px) 0px;
+  /* Enhanced: fine H + fine V (fading) over coarse H + coarse V (solid). */
+  background-image:
+    linear-gradient(
+      to bottom,
+      transparent calc(50% - var(--grid-line, 0.5px)),
+      rgb(from var(--grid) r g b / var(--grid-fade, 1)) calc(50% - var(--grid-line, 0.5px))
+        calc(50% + var(--grid-line, 0.5px)),
+      transparent calc(50% + var(--grid-line, 0.5px))
+    ),
+    linear-gradient(
+      to right,
+      transparent calc(50% - var(--grid-line, 0.5px)),
+      rgb(from var(--grid) r g b / var(--grid-fade, 1)) calc(50% - var(--grid-line, 0.5px))
+        calc(50% + var(--grid-line, 0.5px)),
+      transparent calc(50% + var(--grid-line, 0.5px))
+    ),
+    linear-gradient(
+      to bottom,
+      transparent calc(50% - var(--grid-line, 0.5px)),
+      var(--grid) calc(50% - var(--grid-line, 0.5px)) calc(50% + var(--grid-line, 0.5px)),
+      transparent calc(50% + var(--grid-line, 0.5px))
+    ),
+    linear-gradient(
+      to right,
+      transparent calc(50% - var(--grid-line, 0.5px)),
+      var(--grid) calc(50% - var(--grid-line, 0.5px)) calc(50% + var(--grid-line, 0.5px)),
+      transparent calc(50% + var(--grid-line, 0.5px))
+    );
+  background-size:
+    var(--grid-fine, 24px) var(--grid-fine, 24px),
+    var(--grid-fine, 24px) var(--grid-fine, 24px),
+    var(--grid-coarse, 48px) var(--grid-coarse, 48px),
+    var(--grid-coarse, 48px) var(--grid-coarse, 48px);
+  background-position:
+    0px var(--gy-fine, 0px),
+    var(--gx-fine, 0px) 0px,
+    0px var(--gy-coarse, 0px),
+    var(--gx-coarse, 0px) 0px;
+}
+
+/* settings dialog rows (gear → Settings) */
+.set-row {
+  display: grid;
+  grid-template-columns: 1fr 168px; /* label | a fixed-width control column shared by every row */
+  align-items: center;
+  gap: 16px;
+}
+.set-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* Language picker — reuses .set-row/.set-label so it lines up with Grid + Theme; the <select> is
+   styled (custom caret, tokens) to match the rest of the menu instead of the raw OS control. */
+.komu-lang-picker {
+  display: block;
+}
+.lang-select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 30px 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background-color: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%23586172" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+.lang-select:hover {
+  border-color: var(--accent);
+}
+.lang-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* the grid seg fills the control column; the narrower theme switch sits centered in it
+   so both rows' controls line up instead of the switch floating at the right edge */
+.set-row .theme-switch {
+  justify-self: center;
+}
+
+/* two-way theme switch (sun ↔ moon) — used in the Settings dialog + the drawer.
+   role="switch"; data-theme (set by syncSettingsControls) drives the knob + highlight. */
+.theme-switch {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  width: 64px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.theme-switch-ic {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--muted);
+  transition: color var(--dur) var(--ease);
+}
+.theme-switch-ic .ico {
+  width: 15px;
+  height: 15px;
+}
+.theme-switch-knob {
+  position: absolute;
+  z-index: 0;
+  top: 3px;
+  left: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transition: transform var(--dur) var(--ease);
+}
+.theme-switch[data-theme="dark"] .theme-switch-knob {
+  transform: translateX(32px);
+}
+/* highlight whichever icon the knob sits under */
+.theme-switch[data-theme="light"] .sun,
+.theme-switch[data-theme="dark"] .moon {
+  color: var(--ink);
+}
+
+/* ---------- floating tool dock (left) ---------- */
+.dock {
+  position: absolute;
+  left: 16px;
+  top: calc(56px + (100vh - 56px) / 2);
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+.tool {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.tool:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.tool.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.tool.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.tool.disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
+/* The mobile "Insert" (+) launcher is phone-only — hidden on the desktop rail + the tablet bar, where
+   the five insert tools show inline. A phone media query (below) re-shows it + hides those five. */
+.tool[data-tool="insert"] {
+  display: none;
+}
+/* The + launcher's "open / standing in for an active insert tool" state is a subtle fill, not the blue
+   selected-tool accent — so it doesn't read as the active canvas tool. */
+.tool[data-tool="insert"].active {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.ico {
+  width: 21px;
+  height: 21px;
+}
+
+/* The mobile draw sheet lives in a clip wrapper; on desktop it's a passthrough (display:contents)
+   so the floating draw bar positions against #app. (It becomes a real clip box on mobile.) */
+.sheet-wrap {
+  display: contents;
+}
+.swatches {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sw {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--sw);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.sw.on {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.seg {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface-2);
+  border-radius: 9px;
+}
+.seg-opt {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.seg-opt.on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ---------- hint ---------- */
+.hint-chip {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 25;
+  pointer-events: none;
+  max-width: calc(100% - 32px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12.5px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hint-chip b {
+  color: var(--ink);
+}
+
+/* ---------- presence avatar row ---------- */
+.avatar-presence-row {
+  display: flex;
+  align-items: center;
+  padding-left: 7px;
+  position: relative; /* containing block for avatars popped out of flow while leaving */
+}
+.avatar-presence-row .avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  margin-left: -7px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--av, var(--accent));
+  border: 2px solid var(--surface);
+  cursor: default;
+  position: relative;
+  overflow: hidden;
+}
+.avatar-presence-row .avatar:first-child {
+  margin-left: 0;
+}
+.avatar-presence-row .avatar.self {
+  /* A subtle accent ring marks "you". No z-index lift (you stack normally) — so the avatar to
+     your right, painting after yours in DOM order, covers the ring's right edge. That overlap
+     bite is sibling paint order, not something we can undo without a gap or putting you last. */
+  cursor: pointer;
+  overflow: visible;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+.avatar-presence-row .avatar.more {
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  z-index: 4; /* the "+N" chip stacks above everyone, including the user's own avatar (z-index 3) */
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.avatar-presence-row .avatar.more:hover {
+  background: var(--border);
+  color: var(--ink);
+}
+.avatar-presence-row .avatar.more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* "+N" overflow → a scrollable popover listing the collaborators beyond the visible cap */
+.presence-overflow {
+  position: fixed;
+  z-index: 80;
+  width: 224px;
+  max-height: min(60vh, 340px);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.po-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.po-item:hover {
+  background: var(--surface-2);
+}
+.po-av {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--av, var(--accent));
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+}
+.po-name {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- zoom / fullscreen widget ---------- */
+.zoombar {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.zb {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 8px;
+  display: inline-grid;
+  place-items: center;
+}
+.zb:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.zb.pct {
+  min-width: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  cursor: text;
+  border-radius: 8px;
+  transition:
+    background var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+/* clear "you're editing" affordance: filled chip + accent ring around the field */
+.zb.pct:focus-within {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  color: var(--accent);
+}
+.zb.pct input {
+  width: 34px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: center;
+  padding: 0;
+  outline: none;
+  caret-color: var(--accent); /* visible, blinking caret while typing */
+}
+.zb.pct input:focus {
+  color: var(--accent);
+}
+.zb.pct input::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--ink);
+}
+.zb-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+.ico-sm {
+  width: 17px;
+  height: 17px;
+}
+
+/* Mobile overrides live at the very end of this file, after every base rule,
+   so the @media block always wins on source order. */
+
+/* ---------- room pill ---------- */
+.room-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.room-pill strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* avatar-presence-row join/leave motion is driven imperatively by <komu-avatar-presence-row> via Motion
+   (spring enter-from-right + fade, fade/shrink exit, FLIP-reflow of neighbours).
+   It honours prefers-reduced-motion in JS, so no CSS transition is needed here. */
+
+/* ---------- keyboard hints + shortcuts modal ---------- */
+.kbd {
+  font:
+    600 11px ui-monospace,
+    "SF Mono",
+    Menlo,
+    monospace;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 1px 6px;
+  color: var(--ink);
+}
+.hidden {
+  display: none !important;
+}
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--ink) 28%, transparent);
+  backdrop-filter: blur(2px);
+}
+.modal {
+  width: 340px;
+  max-width: calc(100% - 32px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--border);
+}
+.modal-x {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.modal-x:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.modal-x:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.modal-body {
+  padding: 6px 16px 14px;
+}
+.kbd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 0;
+  font-size: 13px;
+  color: var(--ink);
+  border-bottom: 1px solid var(--surface-2);
+}
+.kbd-row:last-child {
+  border-bottom: none;
+}
+/* "Found an issue? Submit" → GitHub issues. Full-width block that stretches to the dialog body
+   (flex column, align-items:stretch) so it fills the width on both phone and desktop. */
+.help-report {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background 120ms var(--ease),
+    border-color 120ms var(--ease);
+}
+.help-report svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.help-report:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+  border-color: var(--accent);
+}
+.help-report:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Secondary "View source on GitHub" link — muted, subordinate to the issues button; tucked
+   just beneath it (negative margin pulls it up against the body's 16px flex gap). */
+.help-repo-link {
+  margin-top: -6px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.help-repo-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.help-repo-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Subsection heading inside the Help dialog (e.g. "Keyboard shortcuts"). */
+.help-subhead {
+  margin: 4px 0 -4px; /* pull the following list up a touch against the body's 16px gap */
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---------- profile dialog (native <dialog>, fully custom + animated) ---------- */
+.dialog {
+  border: none;
+  padding: 0;
+  width: 360px;
+  max-width: calc(100% - 32px);
+  max-height: min(82dvh, 720px); /* never exceed the viewport; long bodies scroll (.dialog-body) */
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(10px) scale(0.97);
+  /* Column layout lives on the BASE rule, not on [open]. On close the `open` attribute
+     is removed immediately while `display: flex` lingers for the exit transition (see
+     `display … allow-discrete` below) — any layout property scoped to [open] would snap
+     back to its initial value for those 180ms. flex-direction reverting to `row` re-laid
+     the head/body/foot side by side inside the fixed width, which read as the content
+     visibly compressing as the dialog faded out. Harmless here while display is none. */
+  flex-direction: column;
+  transition:
+    opacity 180ms var(--ease),
+    transform 180ms var(--ease),
+    overlay 180ms var(--ease) allow-discrete,
+    display 180ms var(--ease) allow-discrete;
+}
+.dialog[open] {
+  opacity: 1;
+  transform: none;
+  display: flex; /* with flex-direction:column above: head/foot stay put while .dialog-body scrolls */
+}
+@starting-style {
+  .dialog[open] {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+}
+.dialog::backdrop {
+  background: color-mix(in srgb, #0b0e13 45%, transparent);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  transition:
+    opacity 180ms var(--ease),
+    overlay 180ms var(--ease) allow-discrete,
+    display 180ms var(--ease) allow-discrete;
+}
+.dialog[open]::backdrop {
+  opacity: 1;
+}
+@starting-style {
+  .dialog[open]::backdrop {
+    opacity: 0;
+  }
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  font-weight: 700;
+  font-size: 15px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto; /* fixed header — never shrinks/scrolls */
+}
+.dialog-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1 1 auto; /* takes the remaining height… */
+  min-height: 0; /* …and may shrink within the flex column so overflow-y can scroll */
+  overflow-y: auto; /* scroll long content (e.g. the keyboard-shortcuts list) */
+}
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto; /* fixed footer — never shrinks/scrolls */
+}
+.avatar-edit {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.avatar-preview {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 20px;
+  background: var(--av, var(--accent));
+  background-size: cover;
+  background-position: center;
+  flex: none;
+}
+.avatar-edit-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.field input[type="text"] {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  outline: none;
+}
+.field input[type="text"]:focus {
+  border-color: var(--accent);
+}
+.btn-soft {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-soft:hover {
+  background: var(--surface-2);
+}
+.btn-link {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.btn-link:hover {
+  color: var(--bad);
+}
+.btn-ghost {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-ghost:hover {
+  background: var(--surface-2);
+}
+.btn-primary {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.avatar.has-photo {
+  background-size: cover;
+  background-position: center;
+  color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
+
+/* ---------- custom rainbow swatch — opens the colour picker ---------- */
+.sw-custom {
+  background: conic-gradient(
+    from 90deg,
+    #ff5a5a,
+    #ffb24d,
+    #ffe24d,
+    #6fe08a,
+    #4dd2ff,
+    #4d7bff,
+    #b072ff,
+    #ff5ec4,
+    #ff5a5a
+  ) !important;
+  border: 2px solid var(--surface) !important;
+}
+/* Hover/focus tooltip — a single dark pill rendered in <body> at the very top of
+   the stacking order (see tooltip.ts), so it's ALWAYS painted above every chrome layer no
+   matter which stacking context the hovered element lives in. (A ::after pseudo-pill was
+   trapped in each host's context — a top-bar pill could be covered by a side panel.) Any
+   element with [data-tip] opts in; tooltip.ts prefers the pill above the element, auto-flips
+   it below at the top edge, and clamps it to the viewport so it never clips. Matches the dock's
+   .tool-tip pill so every tooltip in the app reads the same. */
+[data-tip] {
+  position: relative; /* harmless containing block for any ::after rings (e.g. swatches); the pill itself is .komu-tip */
+}
+.komu-tip {
+  position: fixed;
+  z-index: 2147483000; /* above every chrome layer, incl. body-level popovers like the colour picker (z 80) */
+  /* It's a [popover] (top layer, above modal dialogs) — reset the UA popover box so our own
+     fixed top/left positioning, borderless pill, and overflowing tail all survive. */
+  inset: auto;
+  margin: 0;
+  border: 0;
+  overflow: visible;
+  display: none;
+  background: #1e1e1e;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 9px;
+  border-radius: 8px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.komu-tip.show {
+  display: block;
+}
+.komu-tip::after {
+  content: "";
+  position: absolute;
+  border: 5px solid transparent;
+}
+.komu-tip:not(.below):not(.side)::after {
+  /* pill above the element → tail at the bottom, pointing down */
+  top: 100%;
+  left: var(--tail-x, 50%);
+  transform: translateX(-50%);
+  border-top-color: #1e1e1e;
+}
+.komu-tip.below::after {
+  /* pill below the element → tail at the top, pointing up */
+  bottom: 100%;
+  left: var(--tail-x, 50%);
+  transform: translateX(-50%);
+  border-bottom-color: #1e1e1e;
+}
+.komu-tip.side::after {
+  /* pill beside the element (vertical toolbars) → tail centred vertically */
+  top: var(--tail-y, 50%);
+  transform: translateY(-50%);
+}
+.komu-tip.side:not(.side-left)::after {
+  /* to the right of the element → tail on the pill's left, pointing left */
+  right: 100%;
+  border-right-color: #1e1e1e;
+}
+.komu-tip.side.side-left::after {
+  /* flipped to the left of the element → tail on the pill's right, pointing right */
+  left: 100%;
+  border-left-color: #1e1e1e;
+}
+
+/* ---------- custom color picker ---------- */
+.color-picker {
+  position: fixed;
+  z-index: 80;
+  width: 232px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  user-select: none;
+}
+.cp-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-eyedropper {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.cp-eyedropper:hover {
+  background: var(--surface);
+}
+.cp-hex {
+  flex: 1;
+  min-width: 0;
+  font:
+    600 13px ui-monospace,
+    "SF Mono",
+    Menlo,
+    monospace;
+  text-transform: uppercase;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.cp-hex:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.cp-hue {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+.cp-sv {
+  position: relative;
+  height: 150px;
+  border-radius: 10px;
+  cursor: crosshair;
+  background:
+    linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, var(--cp-hue, #f00));
+}
+.cp-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 1px 3px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Shortcut chip inside a hover tooltip pill (dock shortcuts, zoom in/out hints) — legible on the dark pill. */
+.komu-tip .kbd {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+/* profile colour swatches mirror the pen palette (circular + gap selection ring) */
+#profile-color-field .swatches {
+  gap: 10px;
+}
+#profile-color-field .sw {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+#profile-color-field .sw.on {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+
+/* ---------- hamburger (mobile only) ---------- */
+.nav-btn {
+  display: inline-grid; /* the hamburger shows on every breakpoint (desktop → dropdown, mobile → drawer) */
+}
+
+/* ---------- draw bottom-sheet grab handle (mobile only) ---------- */
+.sheet-handle {
+  display: none;
+  position: relative;
+  height: 30px;
+  cursor: pointer;
+  outline: none; /* focusable (tabindex -1, for the editor-blur keepTool path) but decorative */
+  touch-action: none; /* dragging the handle drives the sheet, never scrolls it */
+}
+.sheet-handle::before {
+  content: "";
+  position: absolute;
+  top: 13px; /* centred in the 30px tab */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+/* ---------- transient zoom % pill ---------- */
+.zoom-pill {
+  position: absolute;
+  top: calc(56px + env(safe-area-inset-top, 0px) + 12px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  z-index: 28;
+  display: none;
+  padding: 5px 13px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 160ms var(--ease),
+    transform 160ms var(--ease);
+}
+.zoom-pill.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ---------- mobile slide-out drawer ---------- */
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(16, 17, 22, 0.45);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 220ms var(--ease),
+    visibility 220ms var(--ease);
+}
+.drawer-scrim.open {
+  opacity: 1;
+  visibility: visible;
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 61;
+  width: 270px;
+  max-width: 82vw;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  transform: translateX(-100%);
+  transition: transform 240ms var(--ease);
+}
+.drawer.open {
+  transform: translateX(0);
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-room {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 2px 0 8px;
+}
+.drawer-room strong {
+  color: var(--ink);
+}
+.drawer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: auto;
+  /* extend past the drawer's 16px side padding so the row + its hover span the full drawer width */
+  margin: 4px -16px 0;
+  padding: 12px 16px; /* keep the label/icon aligned with the rest of the drawer */
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.drawer-item:hover {
+  background: var(--surface-2);
+}
+.drawer-item-ic {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+}
+/* Mobile drawer: a faint hairline divider between each row (Grid · Theme · Edit profile · Help),
+   each spanning the full drawer width like the row hovers do. */
+.drawer .set-row,
+.drawer .drawer-item {
+  margin: 0 -16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- the draw bar — desktop: a floating vertical column next to the tool dock ----------
+   Pen/highlighter brushes plus style/colour/width buttons that open small popovers; it becomes
+   a bottom mini-sheet on mobile (see the mobile block at the end of the file). */
+.draw-bar {
+  position: absolute;
+  left: 84px; /* just right of the 16px dock (≈56px wide) with a gap */
+  top: calc(56px + (100vh - 56px) / 2);
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+.draw-bar.hidden {
+  display: none;
+}
+
+/* ── Sticky-note colour palette (<komu-sticky-bar>) — a vertical column (like the draw bar) on desktop,
+   shown with the Sticky tool; becomes a horizontal bottom bar on mobile (see the media query). ── */
+.sticky-bar {
+  position: absolute;
+  left: 84px; /* mirrors the draw bar — just right of the dock */
+  top: calc(56px + (100vh - 56px) / 2);
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 9px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+.sticky-bar.hidden {
+  display: none;
+}
+.sticky-bar .swatches {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+}
+.sticky-bar .sw {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+.sticky-bar .sw.on {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+
+/* ── Shapes-and-lines picker (<komu-shape-menu>) — a vertical dropdown shown with the Shapes tool ── */
+.shape-menu {
+  position: absolute;
+  left: 84px; /* mirrors the draw/sticky bars — just right of the dock */
+  top: calc(56px + (100vh - 56px) / 2);
+  transform: translateY(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 224px;
+  padding: 6px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+}
+.shape-menu.hidden {
+  display: none;
+}
+.sm-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 12px 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink, #0e1116);
+  font:
+    15px Inter,
+    system-ui,
+    sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.sm-item:hover {
+  background: var(--surface-2, #f1f3f5);
+}
+.sm-item.on {
+  background: color-mix(in srgb, var(--accent, #3b6ff6) 12%, transparent);
+  /* accent pulled 20% toward the ink: the plain accent on its tint misses WCAG AA text contrast */
+  color: color-mix(in srgb, var(--accent, #3b6ff6) 80%, var(--ink, #0e1116));
+}
+.sm-ico {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+.sm-label {
+  flex: 1;
+}
+/* a divider above the first shape (separates the lines/arrows group from the shapes group) */
+.sm-item.sm-sep {
+  margin-top: 7px;
+  position: relative;
+}
+.sm-item.sm-sep::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 6px;
+  right: 6px;
+  height: 1px;
+  background: var(--border, #e4e7ec);
+}
+/* "More shapes" — opens the panel; while a panel-picked shape is armed it shows that shape instead */
+.sm-more-ico {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+.sm-more-ico svg {
+  width: 22px;
+  height: 22px;
+}
+.sm-more .sm-chevron {
+  color: var(--muted, #586172);
+  font-size: 18px;
+  line-height: 1;
+}
+.sm-more.on .sm-chevron {
+  color: inherit;
+}
+
+/* ── Shapes panel (<komu-shape-panel>) — the searchable shape library ("More shapes"). Desktop: a
+   side panel right of the dock that REPLACES the shape menu while open. Phone: a bottom sheet. ── */
+.komu-shape-panel {
+  position: absolute;
+  left: 84px; /* where the shape menu sits (just right of the dock) */
+  top: 72px; /* below the 56px topbar + a 16px margin */
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  max-width: calc(100vw - 100px);
+  /* As tall as its content (a search with three hits is a short panel), capped so it always ends
+     above the bottom-left zoom bar (16px inset + 42px tall + a 16px gap) — the body scrolls then. */
+  max-height: calc(100vh - 72px - 74px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.komu-shape-panel.hidden {
+  display: none;
+}
+.sp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 10px 4px 16px;
+}
+.sp-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.sp-close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.sp-close:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.sp-search {
+  padding: 4px 12px 8px;
+}
+.sp-search input {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.sp-search input:focus {
+  border-color: var(--accent);
+}
+.sp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+}
+.sp-section + .sp-section {
+  margin-top: 6px;
+}
+.sp-section-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sp-section-head {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 4px 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font:
+    600 13px Inter,
+    system-ui,
+    sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.sp-section-head:hover {
+  background: var(--surface-2);
+}
+.sp-chevron {
+  display: inline-flex;
+}
+.sp-chevron-ico {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  transition: transform var(--dur) var(--ease);
+}
+.sp-section-head[aria-expanded="false"] .sp-chevron-ico {
+  transform: rotate(-90deg);
+}
+.sp-hint {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: help;
+}
+.sp-hint:hover,
+.sp-hint:focus-visible {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.sp-hint-ico {
+  width: 15px;
+  height: 15px;
+}
+.sp-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 2px 0 6px;
+}
+.sp-tilewrap {
+  position: relative;
+}
+.sp-tile {
+  width: 100%;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.sp-tile:hover {
+  background: var(--surface-2);
+}
+.sp-tile.on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.sp-tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.sp-ico {
+  width: 28px;
+  height: 28px;
+}
+.sp-remove {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+.sp-tilewrap:hover .sp-remove,
+.sp-tilewrap:focus-within .sp-remove,
+.sp-remove:focus-visible {
+  opacity: 1;
+}
+.sp-remove:hover {
+  background: var(--bad);
+  color: #fff;
+}
+.sp-upload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 44px;
+  margin-top: 4px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font:
+    500 13px Inter,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+.sp-upload:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.sp-upload-ico {
+  width: 16px;
+  height: 16px;
+}
+.sp-empty {
+  padding: 28px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ── Stamp wheel (<komu-stamp-wheel>) — FigJam-style radial picker shown with the Stamp tool.
+   Outer ring = 8 gray pie-wedge slots (7 colour mark stickers + the user avatar), inner light-blue
+   disc = recent emojis around a "+". The wedge <path>s are the click/hover targets; the mark icons
+   + avatar ride on top (pointer-events:none) so the whole wedge is hot. Items are centred on their
+   ring anchor with negative margins, leaving `transform` free for the entrance animation. */
+.komu-stamp-wheel {
+  position: absolute;
+  left: 84px; /* mirrors the other sheets — just right of the dock */
+  top: calc(56px + (100vh - 56px) / 2);
+  transform: translateY(-50%);
+  z-index: 40;
+  width: 280px;
+  height: 280px;
+  contain: layout paint; /* isolate the wheel's repaints from app-wide transitions (theme switch) */
+}
+.komu-stamp-wheel.hidden {
+  display: none;
+}
+.sw-disc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+/* the 8-wedge ring */
+.sw-wedges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* only the painted wedges are hot (so the inner disc stays clickable) */
+}
+.sw-wedge {
+  fill: var(--surface-2);
+  stroke: var(--surface); /* crisp white separators between wedges */
+  stroke-width: 2;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: fill 60ms linear;
+}
+.sw-wedge:hover {
+  fill: color-mix(in srgb, var(--accent) 13%, var(--surface-2));
+}
+.sw-wedge.on {
+  fill: color-mix(in srgb, var(--accent) 24%, var(--surface-2));
+}
+/* colour mark stickers — the colour + white outline is baked into the SVG asset; here we just size
+   it and add a soft drop shadow for depth (so it reads as a sticker sitting in the wheel). */
+.sw-ico {
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  margin: -25px 0 0 -25px;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 2px rgba(16, 17, 22, 0.3));
+}
+/* avatar slot — photo (cover) or colour + initials, ringed white like the other stickers */
+.sw-avatar {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background-color: var(--av, #8a90a2);
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+  font:
+    600 17px Inter,
+    system-ui,
+    sans-serif;
+  border: 2px solid var(--surface);
+  box-shadow: 0 2px 5px rgba(16, 17, 22, 0.3);
+}
+/* Keyboard focus ring for the roving-tabindex slots. The marks/avatar are pointer-events:none imgs,
+   so they need an explicit indicator; the emoji/"+" buttons share it for one consistent round ring. */
+.komu-stamp-wheel [data-item]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 50%;
+}
+/* inner recents disc (light-blue, like FigJam) */
+.sw-inner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 132px;
+  height: 132px;
+  margin: -66px 0 0 -66px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.komu-stamp-wheel button {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  /* The wheel isn't a .mini-sheet, so on mobile it inherits pointer-events:none from .sheet-wrap. The
+     outer wedges re-enable it themselves; these inner buttons (recent emojis + the "+") must too, or
+     taps fall through to the canvas behind. */
+  pointer-events: auto;
+}
+.sw-emoji {
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  transition: transform 130ms var(--ease, ease-out);
+  will-change: transform; /* own layer → hover scale composites without re-rasterising the filter */
+}
+.sw-emoji img {
+  width: 36px;
+  height: 36px;
+  pointer-events: none;
+  /* The white sticker outline is baked into the image (emojiStickerUrl); just a cheap depth shadow
+     here — the old 9-pass white-outline filter re-rasterised on every repaint and tanked the wheel. */
+  filter: drop-shadow(0 1px 1px rgba(16, 17, 22, 0.28));
+}
+.sw-emoji:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  transform: scale(1.22);
+}
+.sw-emoji.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.sw-plus {
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  color: var(--accent);
+  background: var(--surface) !important;
+  box-shadow: 0 1px 4px rgba(16, 17, 22, 0.2);
+  transition: transform 130ms var(--ease, ease-out);
+  will-change: transform;
+}
+.sw-plus svg {
+  width: 18px;
+  height: 18px;
+}
+.sw-plus:hover {
+  background: var(--surface-2) !important;
+  transform: scale(1.13);
+}
+
+/* Entrance: the wedge ring + sticker icons scale in first, then the inner emoji disc + "+" pop in
+   just after — gated behind `.sw-intro` (added by main.ts when the Stamp tool opens) so the wheel
+   only animates on open, not on every recents re-render. */
+@keyframes sw-disc-in {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes sw-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.komu-stamp-wheel.sw-intro .sw-disc,
+.komu-stamp-wheel.sw-intro .sw-wedges,
+.komu-stamp-wheel.sw-intro .sw-ico,
+.komu-stamp-wheel.sw-intro .sw-avatar,
+.komu-stamp-wheel.sw-intro .sw-inner,
+.komu-stamp-wheel.sw-intro .sw-emoji,
+.komu-stamp-wheel.sw-intro .sw-plus {
+  will-change: transform, opacity; /* promote to GPU layers for the duration of the entrance */
+}
+.komu-stamp-wheel.sw-intro .sw-disc,
+.komu-stamp-wheel.sw-intro .sw-wedges {
+  animation: sw-disc-in 280ms var(--ease, ease-out) both;
+}
+.komu-stamp-wheel.sw-intro .sw-ico,
+.komu-stamp-wheel.sw-intro .sw-avatar {
+  animation: sw-pop-in 320ms var(--ease, ease-out) both;
+}
+.komu-stamp-wheel.sw-intro .sw-inner {
+  animation: sw-disc-in 300ms var(--ease, ease-out) 160ms both;
+}
+.komu-stamp-wheel.sw-intro .sw-emoji,
+.komu-stamp-wheel.sw-intro .sw-plus {
+  animation: sw-pop-in 280ms var(--ease, ease-out) 200ms both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .komu-stamp-wheel.sw-intro .sw-disc,
+  .komu-stamp-wheel.sw-intro .sw-wedges,
+  .komu-stamp-wheel.sw-intro .sw-ico,
+  .komu-stamp-wheel.sw-intro .sw-avatar,
+  .komu-stamp-wheel.sw-intro .sw-inner,
+  .komu-stamp-wheel.sw-intro .sw-emoji,
+  .komu-stamp-wheel.sw-intro .sw-plus {
+    animation: none;
+  }
+}
+
+/* ── Emoji picker (<komu-emoji-picker>) — full Noto grid opened from the wheel's "+" ── */
+.komu-emoji-picker {
+  position: absolute;
+  left: 340px; /* clears the wheel (left 84 + width 244 = 328) */
+  top: calc(56px + (100vh - 56px) / 2);
+  transform: translateY(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  height: 384px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.komu-emoji-picker.hidden {
+  display: none;
+}
+.ep-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px;
+  border-bottom: 1px solid var(--surface-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ep-tabs::-webkit-scrollbar {
+  display: none;
+}
+.ep-tab {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.65;
+}
+.ep-tab img {
+  width: 20px;
+  height: 20px;
+}
+.ep-tab:hover {
+  background: var(--surface-2);
+  opacity: 1;
+}
+.ep-tab.on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  opacity: 1;
+}
+.ep-search {
+  padding: 8px 8px 6px;
+}
+.ep-search input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.ep-search input:focus {
+  border-color: var(--accent);
+}
+.ep-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  padding: 0 8px 8px;
+  overflow-y: auto;
+  align-content: start;
+}
+.ep-emoji {
+  width: 100%;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+.ep-emoji img {
+  width: 26px;
+  height: 26px;
+}
+.ep-emoji:hover {
+  background: var(--surface-2);
+}
+.ep-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--muted);
+  padding: 28px 0;
+  font-size: 13px;
+}
+
+/* the button row: a vertical stack on desktop (becomes a horizontal row on the mobile sheet) */
+.db-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.db-btn {
+  position: relative; /* anchor for .db-tip */
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: none;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.db-btn:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.db-btn.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.db-btn .ico {
+  width: 21px;
+  height: 21px;
+}
+/* colour button shows the current ink as a filled dot */
+.db-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow:
+    inset 0 0 0 1.5px var(--surface),
+    0 0 0 1px var(--border);
+}
+
+/* button tooltips (name only, to the right — mirrors the dock's dark pill) */
+.db-tip {
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1e1e1e;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 9px;
+  border-radius: 8px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 110ms var(--ease);
+  z-index: 70;
+}
+.db-tip::before {
+  content: "";
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-right-color: #1e1e1e;
+}
+/* show on hover, but never for the selected button (active brush / open popover) */
+.db-btn:not(.active):hover .db-tip {
+  opacity: 1;
+}
+/* while a popover menu is open to the right, suppress all tips so none stack under it */
+.draw-bar.pop-open .db-tip {
+  display: none;
+}
+
+/* draw-bar popovers (style / colour / width) — float to the right of the bar */
+.db-popover {
+  position: fixed;
+  z-index: 80;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  user-select: none;
+}
+.db-pop-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 9px;
+}
+.db-pop-label b {
+  color: var(--ink);
+}
+.db-popover input[type="range"] {
+  display: block;
+  width: 184px;
+}
+/* circular swatches (mirror the pen palette) */
+.db-popover .swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 26px);
+  justify-content: center;
+  column-gap: 12px;
+  row-gap: 12px;
+}
+.db-popover .sw {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+.db-popover .sw.on {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+/* style segments hold solid/dotted line icons */
+.db-popover .seg-opt {
+  display: grid;
+  place-items: center;
+  padding: 8px 18px;
+}
+.db-popover .seg-opt .ico {
+  width: 24px;
+  height: 24px;
+}
+
+/* ====================================================================
+   Touch layout — phones (≤640px) OR any coarse-pointer device (tablets, which have no keyboard for
+   the desktop shortcuts). Last in the file so every override wins on order.
+   ==================================================================== */
+@media (max-width: 640px), (pointer: coarse) {
+  /* Every mobile mini-sheet (draw bar, sticky palette, shape menu) shares this: it lives in a
+     .sheet-wrap clip whose bottom edge is the dock's top, so it expands out of / collapses into the
+     toolbar. A grab handle drives the drag-to-collapse (wireSheetHandle in mobile-sheet.ts). Their
+     own popovers float UP, body-appended, so the clip never touches them. */
+  .mini-sheet {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0; /* sits on the wrapper's bottom edge = the dock's top */
+    margin: 0 auto;
+    width: min(340px, calc(100vw - 20px)); /* matches the dock → looks like one toolbar extension */
+    max-width: min(340px, calc(100vw - 20px));
+    min-width: 0;
+    flex-direction: column; /* grab handle on top, content below */
+    align-items: stretch;
+    gap: 4px; /* the 30px handle is the collapsed tab; this gap sits above the content, below the tab */
+    padding: 0 8px 10px;
+    border-radius: 16px 16px 0 0;
+    /* No shadow on the sheet itself — it's a flush extension of the dock, whose downward shadow
+       elevates the whole unit; a sheet shadow would cast up onto the canvas above it. */
+    box-shadow: none;
+    pointer-events: auto;
+    transform: translateY(0);
+    transition: transform 280ms var(--ease);
+    will-change: transform;
+  }
+  /* the grab handle is a fixed-height row at the top; never let it flex-grow to fill the sheet */
+  .mini-sheet > .sheet-handle {
+    flex: 0 0 30px;
+  }
+  .draw-bar .db-row {
+    flex-direction: row;
+    justify-content: center;
+    gap: 6px;
+  }
+  .mini-sheet.collapsed {
+    /* Leave the 30px grab tab peeking — roomy enough to spot/grab above the dock, still short of the
+       content below it. (The tab grew with the handle, so the sticky swatch's ~3px ring overflow is
+       pushed down with the content and stays hidden.) */
+    transform: translateY(calc(100% - 30px));
+  }
+  .mini-sheet.hidden {
+    /* override the global `.hidden { display:none }` so the sheet can animate down into the dock */
+    display: flex !important;
+    transform: translateY(101%);
+    pointer-events: none;
+  }
+  /* no hover tooltips on touch */
+  .db-tip {
+    display: none;
+  }
+  /* hide desktop-only chrome (settings + help live in the drawer on mobile) */
+  .settings-btn,
+  .zoombar,
+  .help-btn {
+    display: none;
+  }
+  .brand-name,
+  .brand .logo {
+    display: none;
+  }
+  .nav-btn {
+    display: inline-grid;
+  }
+  /* on-screen undo/redo — the touch layout's keyboard-shortcut substitute */
+  .tb-history {
+    display: flex;
+  }
+  /* Keep the original mobile controls in their row; the editable title floats below them. */
+  .topbar .room-pill {
+    position: absolute;
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    left: 14px;
+    max-width: calc(100vw - 28px);
+  }
+
+  /* tool dock → centered bottom bar (clears the home indicator) */
+  .dock {
+    left: 0;
+    right: 0;
+    top: auto;
+    margin: 0 auto;
+    width: min(340px, calc(100vw - 20px));
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    transform: none;
+    flex-direction: row;
+    justify-content: center;
+    z-index: 45;
+  }
+  /* while any mini-sheet is out, the dock's top merges seamlessly with it: square top corners,
+     no top border, and a strictly-downward shadow so nothing is cast UP onto the sheet above it. */
+  #app.sheet-open .dock {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top-color: transparent;
+    box-shadow: 0 14px 20px -8px rgba(16, 17, 22, 0.22);
+  }
+  /* collapsed to a tab → show the toolbar's top edge again so the seam is visible */
+  #app.sheet-open:has(.mini-sheet.collapsed) .dock {
+    border-top-color: var(--border);
+  }
+  /* Sticky palette + shape menu are mini-sheets too (.mini-sheet handles position/slide/collapse);
+     here we just lay out their content. The sticky swatches wrap in a centred row. */
+  .sticky-bar .swatches {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 14px;
+    padding: 2px 4px 4px;
+  }
+  .sticky-bar .sw {
+    width: 32px;
+    height: 32px;
+  }
+  /* shape menu → a 4-column icon grid (labels hidden): the four lines/arrows on the top row, the
+     four shapes on the bottom row, with a faint divider in the gap between them. */
+  .shape-menu {
+    display: grid;
+    grid-template-columns: repeat(4, 52px);
+    justify-content: center;
+    column-gap: 6px;
+    row-gap: 6px;
+    padding-bottom: 12px;
+  }
+  /* Keep the grid layout while the sheet slides out. The shared `.mini-sheet.hidden { display:flex }`
+     (which overrides `.hidden { display:none }` so the sheet can animate down) would otherwise restack
+     the 8 grid items into a tall flex *column* mid-animation — and since the sheet is anchored
+     bottom:0, that column balloons UPWARD into the canvas before it slides away. The draw/sticky bars
+     are already flex columns, so they don't reflow; only the grid menu needs this. */
+  .shape-menu.hidden {
+    display: grid !important;
+  }
+  .shape-menu .sm-item {
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    justify-content: center;
+  }
+  .shape-menu .sm-item .sm-label {
+    display: none;
+  }
+  .shape-menu .sm-ico {
+    width: 26px;
+    height: 26px;
+  }
+  /* the lines/shapes divider — a faint full-width line in the gap between the two rows. The first
+     shape (rectangle, .sm-sep) sits at column 1 of the bottom row, so its ::before spans all four. */
+  .shape-menu .sm-item.sm-sep {
+    margin-top: 0;
+    position: relative;
+  }
+  .shape-menu .sm-item.sm-sep::before {
+    display: block;
+    top: -3px;
+    left: 0;
+    right: auto;
+    width: calc(400% + 18px); /* 4 cells × 52px + 3 gaps × 6px = the full row width */
+  }
+  /* the handle spans the full grid width as its own top row */
+  .shape-menu > .sheet-handle {
+    grid-column: 1 / -1;
+  }
+  /* "More shapes" (or the armed panel shape) is a full-width labelled row under the icon grid */
+  .shape-menu .sm-item.sm-more {
+    grid-column: 1 / -1;
+    width: auto;
+    height: 40px;
+    gap: 8px;
+    justify-content: center;
+  }
+  .shape-menu .sm-item.sm-more .sm-label {
+    display: inline;
+    flex: none;
+    font-size: 14px;
+  }
+  .shape-menu .sm-item.sm-more::before {
+    width: 100%;
+  }
+  .sm-more .sm-chevron {
+    display: none;
+  }
+  /* the shapes panel becomes a centred bottom sheet sitting just above the dock (which stays
+     reachable, so a tool switch can still dismiss it) */
+  .komu-shape-panel {
+    left: 50%;
+    top: auto;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    width: min(340px, calc(100vw - 20px));
+    max-width: none;
+    max-height: min(62vh, 520px); /* content-sized too; grows upward from the dock */
+  }
+  /* Stamp wheel + emoji picker float centred above the bottom dock (they're not mini-sheets — a
+     radial wheel doesn't fit the slide-up clip). The picker overlays the wheel while open. */
+  /* The wheel's containing block (#app) ends at the dock's top edge, so `bottom` is measured from
+     there — a small value sits it right above the toolbar. */
+  .komu-stamp-wheel {
+    left: 50%;
+    top: auto;
+    bottom: 8px;
+    transform: translateX(-50%);
+  }
+  .komu-emoji-picker {
+    left: 50%;
+    top: auto;
+    bottom: 8px;
+    transform: translateX(-50%);
+    width: min(340px, calc(100vw - 20px));
+    height: min(60vh, 384px);
+  }
+  /* On a phone, B/I/U/S collapse into ONE toggle (below) so the toolbar fits a single row with no
+     overflow + no dead space. Clamp to the viewport; wrap is only a safety net for very long labels.
+     Body-appended popovers (font/size/colour) aren't clipped — they live outside this box. */
+  .komu-text-bar {
+    max-width: calc(100vw - 12px);
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 4px;
+  }
+  .komu-text-bar .ctb-btn,
+  .komu-text-bar .ctb-text {
+    flex: 0 0 auto; /* keep full-size, tappable targets */
+  }
+  /* Drop the vertical dividers on the compact mobile bar. The shape/sticky variants need the extra
+     class to out-specify the .shape-mode / .sticky-mode rules, which sit *after* this @media in the
+     file — the same reason the marks selectors below are scoped under .ctb-marks. Without this the
+     sticky bar's one extra control (fill) tips it over 100vw and wraps to a second row. */
+  .komu-text-bar .ctb-sep,
+  .komu-text-bar.shape-mode .ctb-sep.ctb-shape-only,
+  .komu-text-bar.shape-mode .ctb-sep.ctb-fill-only,
+  .komu-text-bar.sticky-mode .ctb-sep.ctb-fill-only {
+    display: none;
+  }
+  /* the B/I/U/S group → one toggle that expands a vertical flyout below it. Selectors are scoped
+     under .ctb-marks so they out-specify the desktop defaults (which sit *after* this @media in the
+     file), letting these mobile rules win at ≤640px regardless of source order. */
+  .komu-text-bar .ctb-marks {
+    position: relative;
+  }
+  .komu-text-bar .ctb-marks .ctb-marks-toggle {
+    display: inline-flex;
+  }
+  .komu-text-bar .ctb-marks .ctb-marks-menu {
+    position: absolute;
+    bottom: calc(100% + 8px); /* open UPWARD (above the bar) so it never covers the edited node */
+    left: 50%;
+    transform: translateX(-50%) scaleY(0);
+    transform-origin: bottom center;
+    flex-direction: row; /* a horizontal mini-bar (like the alignment flyout) */
+    gap: 2px;
+    padding: 4px;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--border, #e3e6ea);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      transform 150ms var(--ease, ease),
+      opacity 150ms var(--ease, ease);
+    z-index: 2;
+  }
+  .komu-text-bar .ctb-marks.open .ctb-marks-menu {
+    transform: translateX(-50%) scaleY(1);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Clip window whose bottom edge IS the dock's top: the sheet slides within it and is
+     clipped exactly at the toolbar, so it appears to expand out of / collapse into the
+     toolbar (never sliding below it). */
+  .sheet-wrap {
+    display: block;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px) + 58px); /* = the dock's top edge */
+    /* `clip`, not `hidden`: a hidden-overflow box is still a scroll container, so focusing a sheet
+       button mid-slide (a fast tap on the launcher) scrolled the clip up by a sheet's height and
+       left the "hidden" sheets peeking above the dock. A clipped box can't scroll at all. */
+    overflow: clip;
+    pointer-events: none;
+    z-index: 38; /* below the dock (45) so the sheet tucks behind it */
+  }
+  .sheet-handle {
+    display: block;
+  }
+
+  /* transient zoom readout instead of the zoom widget */
+  .zoom-pill {
+    display: block;
+  }
+}
+
+/* ── Text objects (HTML overlay above the Konva canvas) ─────────────────────
+   The layer is click-through so strokes + selection underneath keep their pointer
+   events; only the active editor opts back in. Boxes are positioned in screen space
+   (world × camera baked into left/top/font-size) so text stays crisp at any zoom —
+   see text-layer.ts. */
+.text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* Remote cursors render in their own Konva stage here — above the text overlay (z-index 1) so a
+   cursor is never painted under a text box. Click-through so the board keeps all pointer events. */
+.cursor-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+.cursor-layer * {
+  pointer-events: none;
+}
+.komu-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  transform-origin: 0 0;
+  line-height: 1.3;
+  font-weight: 400;
+  white-space: pre;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.komu-text-editor {
+  pointer-events: auto;
+  cursor: text;
+  outline: none;
+  min-width: 1ch;
+  user-select: text;
+  -webkit-user-select: text;
+  border-radius: 2px;
+  /* a focus ring — box-shadow doesn't shift glyph positions the way padding/border would */
+  box-shadow: 0 0 0 1.5px #4a9eff;
+}
+/* Links render colour-only (no underline) so underline stays an independent, toggleable mark.
+   The browser default a{text-decoration:underline} otherwise makes queryCommandState report
+   underline-on for any link, which turns execCommand("underline") into a broken no-op. */
+.komu-text a,
+.komu-text-editor a {
+  color: #2563eb;
+  text-decoration: none;
+  /* No pointer-events: a click must pass through to the canvas so it selects/drags the text box
+     (not the link). Link hover is detected by hit-testing pointer moves (see TextLayer.onHoverMove),
+     and the link itself is opened from the hover card's Open button. */
+}
+/* A peer's in-progress text (streamed live over awareness) — faint ring in their cursor colour. */
+.komu-text-remote {
+  box-shadow: 0 0 0 1.5px var(--remote, #4a9eff);
+  border-radius: 2px;
+}
+/* A text box selected with the select tool. */
+.komu-text.selected {
+  box-shadow: 0 0 0 1.5px #4a9eff;
+  border-radius: 2px;
+}
+/* ── Stamps — an emoji/mark sticker placed on the board. ADR-0009 Phase 1: stamps render here in the
+   HTML overlay as a square <img> box, z-ordered with text/shapes/stickies by placement order. The
+   white outline is baked into the image; the drop-shadow lifts it off the board like a sticker. ── */
+.komu-stamp {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  aspect-ratio: 1 / 1; /* square — height tracks width so the box stays square at any zoom/measure */
+  pointer-events: none; /* clicks pass through to the canvas; selection is via hit-test like text */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.komu-stamp img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  filter: drop-shadow(0 2px 3px rgba(16, 17, 22, 0.22));
+}
+/* Selected (local select tool) — a ring around the stamp box, matching .komu-text.selected. */
+.komu-stamp.selected {
+  box-shadow: 0 0 0 1.5px #4a9eff;
+  border-radius: 2px;
+}
+/* Uploaded image — an <img> box sized by width/height (not square like a stamp). */
+.komu-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 6px;
+  pointer-events: none; /* selection via hit-test, like text/stamp */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.komu-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+/* Faint placeholder while the bytes decode (avoids a blank flash on first paint / slow network). */
+.komu-image.loading {
+  background: var(--surface-2);
+}
+/* Bytes unavailable (deleted R2 object / offline): a muted box with an image-off glyph, instead of the
+   browser's torn-picture icon. The fixed gray reads on both themes' surface-2. */
+.komu-image.broken {
+  background: var(--surface-2) center / 30px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%239aa3ad' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 3 18 18'/%3E%3Cpath d='M21 15V5a2 2 0 0 0-2-2H9'/%3E%3Cpath d='M3 7v12a2 2 0 0 0 2 2h12'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3C/svg%3E");
+}
+.komu-image.broken img {
+  display: none;
+}
+.komu-image.selected {
+  box-shadow: 0 0 0 1.5px #4a9eff;
+}
+/* Locked object (⌘L) — a small lock badge in the top-right so it's clear at a glance the object can't
+   be moved / resized / edited / deleted. Re-click it (still selectable) + ⇧⌘L to unlock. */
+.komu-text[data-locked]::after,
+.komu-stamp[data-locked]::after,
+.komu-image[data-locked]::after {
+  content: "🔒";
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.75;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(16, 17, 22, 0.35));
+}
+/* Lock badge for strokes — ink is an <svg> so it can't use the ::after badge above; JS
+   (syncInkLockBadge) pins this real element to the stroke box's top-right corner. */
+.komu-ink-lock {
+  position: absolute;
+  transform: translate(
+    calc(-100% - 2px),
+    1px
+  ); /* sit just inside the top-right, matching ::after */
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.75;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(16, 17, 22, 0.35));
+  z-index: 2;
+}
+/* While an image file is dragged over the board, ring the canvas to signal a drop target. */
+#app.drag-target #board {
+  box-shadow: inset 0 0 0 2.5px #4a9eff;
+}
+/* Transient bottom toast — image-upload errors (bad type / too large / failed). Neutral dark so it
+   reads on either theme; mirrors the join-toast motion. See showToast() in main.ts. */
+/* Transient overlay during an export — it must be OPAQUE so the brief camera fit/restore the capture
+   needs is fully hidden (a translucent scrim let the board visibly zoom underneath). Self-removes. */
+.export-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--muted);
+  font:
+    600 14px Inter,
+    system-ui,
+    sans-serif;
+}
+/* ── Export dialog — file type + background picker (see ui/export-dialog.ts) ─────────────────────── */
+.export-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 14px 0;
+}
+.export-label {
+  flex: 0 0 132px;
+  padding-top: 3px;
+  font:
+    500 15px Inter,
+    system-ui,
+    sans-serif;
+  color: var(--ink);
+}
+.export-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.export-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  color: var(--ink);
+  font:
+    15px Inter,
+    system-ui,
+    sans-serif;
+}
+.export-radio input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.export-bg {
+  position: relative;
+}
+.export-bg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 132px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font:
+    15px Inter,
+    system-ui,
+    sans-serif;
+}
+.export-bg-caret {
+  margin-left: auto;
+  color: var(--muted);
+}
+/* The background dropdown is a popover that overlays the dialog — it must NOT grow the dialog's height.
+   Three things make that work:
+   1. The <dialog> UA style is `overflow: auto`, which clips the popover at the dialog edge — override it
+      to visible for this (short, non-scrolling) dialog so the menu can escape downward.
+   2. overflow:visible on the body so the menu isn't clipped there either.
+   3. position/z-index lift the body (and its popover) ABOVE the footer — without the stacking context
+      the footer, a later flex item painted atomically in document order, covers the menu's lower half
+      regardless of the menu's own z-index (that's what made the third option look clipped). */
+.export-dialog .dialog {
+  overflow: visible;
+}
+.export-dialog .dialog-body {
+  overflow: visible;
+  position: relative;
+  z-index: 1;
+}
+.export-bg-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 190px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  z-index: 5;
+}
+.export-bg-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  font:
+    15px Inter,
+    system-ui,
+    sans-serif;
+}
+.export-bg-opt:hover {
+  background: var(--surface-2);
+}
+.bg-check {
+  width: 14px;
+  flex: none;
+  color: var(--ink);
+  opacity: 0;
+}
+.export-bg-opt.selected .bg-check {
+  opacity: 1;
+}
+.bg-swatch {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+.bg-grid {
+  background-color: var(--surface);
+  background-image: radial-gradient(var(--muted) 1.3px, transparent 1.3px);
+  background-size: 6px 6px;
+}
+.bg-transparent {
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #bbb 25%, transparent 25%),
+    linear-gradient(-45deg, #bbb 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #bbb 75%),
+    linear-gradient(-45deg, transparent 75%, #bbb 75%);
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
+}
+.bg-solid {
+  background: var(--surface);
+}
+/* ── VR mode (see vr/vr-mode.ts): the Exit control floats above the A-Frame scene ────────────────── */
+.vr-exit {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 210; /* above the a-scene (200) */
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: 10px;
+  background: rgb(20 26 34 / 80%);
+  color: #e7ecf3;
+  font:
+    600 13px Inter,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+/* ── Right-click context menu (see ui/context-menu.ts) ───────────────────────────────────────────── */
+.ctx-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 210px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  font:
+    13.5px Inter,
+    system-ui,
+    sans-serif;
+}
+.ctx-item:hover:not([disabled]) {
+  background: var(--surface-2);
+}
+.ctx-item[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+.ctx-kbd {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.ctx-sep {
+  height: 1px;
+  margin: 6px 8px;
+  background: var(--border);
+}
+.komu-toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.komu-toast {
+  max-width: min(92vw, 420px);
+  padding: 9px 15px;
+  font:
+    500 13px Inter,
+    system-ui,
+    sans-serif;
+  color: #fff;
+  background: #2a2d36;
+  border-radius: 10px;
+  box-shadow: 0 10px 28px -12px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+.komu-toast.show {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .komu-toast {
+    transform: none;
+    transition: opacity var(--dur) var(--ease);
+  }
+}
+/* ── Ink (strokes + connectors) rendered as SVG, ADR-0009 Phase 3 ─────────────────────────────── */
+/* Each stroke/connector is its own <svg>, positioned in screen space (left/top) + scale() for zoom;
+   the path coords are in a local box. pointer-events:none → clicks pass to the canvas (hit-test). */
+.komu-ink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible; /* round caps / arrowheads draw past the AABB box */
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.komu-ink * {
+  pointer-events: none;
+}
+/* ── Sticky notes — a text box with a `bg` renders as a coloured, padded, square card ─────────── */
+.komu-text.sticky {
+  padding: 1.2em;
+  border-radius: 0; /* square corners (no rounding) */
+  box-shadow: 0 3px 10px rgba(16, 17, 22, 0.16);
+  /* text flows from the top-left (align stays text-align); the box is a min-square that grows down */
+}
+.komu-text.sticky.selected {
+  box-shadow:
+    0 3px 10px rgba(16, 17, 22, 0.16),
+    0 0 0 1.5px #4a9eff;
+}
+/* The translucent placement preview that tracks the cursor while the Sticky tool is active. */
+.komu-text-ghost {
+  opacity: 0.5;
+  pointer-events: none;
+}
+/* ── Shapes — a text box with a `shape` renders as an outlined card with a centred label ──────── */
+/* The box is a flex column that vertically centres an INNER `.komu-text-body`. The body is the actual
+   text/contenteditable and is content-sized, so when it's empty it's just one line tall — centred by
+   the flex, which puts its caret at the box's centre (an editable === box would be full-height and
+   strand the empty caret at the top). Horizontal placement is left to `text-align`. */
+.komu-text.shape {
+  padding: 0.7em;
+  box-sizing: border-box;
+  border: 1.5px solid #1f2933;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  word-break: break-word;
+}
+.komu-text-body {
+  width: 100%; /* stretch so text-align positions the text; height stays content-sized (centred) */
+  outline: none;
+}
+/* CSS-border kinds (catalog `box` hints): rectangle keeps the base 4px radius; a rounded rectangle's
+   radius is set inline by layout() (18% of the shorter side, in screen px); pill + oval are fixed. */
+.komu-text.shape-box-ellipse {
+  border-radius: 50%;
+}
+.komu-text.shape-box-pill {
+  border-radius: 9999px;
+}
+/* Every other catalog shape — and a custom SVG shape — draws its outline as a stretched SVG
+   background (non-scaling 1.5px stroke) → no CSS border; the SVG fills the box. A shape's label
+   inset (tail / point / cylinder cap) is applied as inline padding by layout(). */
+.komu-text.shape-path {
+  border: none;
+  border-radius: 0;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+}
+/* "Add text" placeholder while a shape's body is empty — but ONLY when the shape is selected
+   (.selected) or being edited (.komu-text-editor). An idle, unselected empty shape shows nothing, so
+   the canvas isn't littered with "Add text" prompts. An ABSOLUTE overlay on the box (not in the
+   editable's line, which would shove the caret to its right). It uses the SAME flex centring +
+   padding + text-align as the box, so it paints exactly over where the centred inner body's
+   caret/text sits. Shown via :has when the body has no text. */
+.komu-text.shape.selected:has(> .komu-text-body:empty)::before,
+.komu-text.komu-text-editor.shape:has(> .komu-text-body:empty)::before {
+  content: "Add text";
+  position: absolute;
+  inset: 0;
+  padding: inherit;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: inherit; /* matches the active horizontal alignment */
+  color: #98a2b3;
+  pointer-events: none;
+}
+.komu-text.shape.selected {
+  box-shadow: 0 0 0 1.5px #4a9eff;
+}
+/* Resize handles for a single selected text box (the box itself only hosts the handles — the
+   selection ring is drawn on the .komu-text). */
+.komu-text-resize {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+/* A LOCKED stroke can't be resized/rotated, so its selection box shows the outline ONLY (no handles /
+   rotate zones), alongside the 🔒 badge — ink is <svg>, so unlike text it has no per-element ring. */
+.komu-text-resize-locked {
+  box-shadow: 0 0 0 1.5px #4a9eff;
+  border-radius: 2px;
+}
+.komu-text-resize-locked .komu-text-handle,
+.komu-text-resize-locked .komu-text-rotate {
+  display: none !important; /* unconditional — beats the shape rule's higher-specificity n/s handles */
+}
+/* ADR-0009 Phase 3 Step 4: the multi-node group transform box (DOM — replaces the Konva proxy +
+   Konva.Transformer). An outline + 8 resize handles over the union of every selected object. */
+.komu-group-box {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px #4a9eff;
+}
+/* A real group reads as one object: a solid accent outline (vs the plain 1px multi-select box). */
+.komu-group-box.is-group {
+  box-shadow: 0 0 0 1.5px #4a9eff;
+  border-radius: 3px;
+}
+/* "Group" chip with an ungroup action, pinned just above the group box's top-left corner. */
+.komu-group-ungroup {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  margin-bottom: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  font:
+    600 11px Inter,
+    system-ui,
+    sans-serif;
+  color: #fff;
+  background: #4a9eff;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(16, 17, 22, 0.28);
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.komu-group-ungroup:hover {
+  background: #3b8eef;
+}
+.komu-group-ungroup svg {
+  opacity: 0.95;
+}
+.komu-group-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  border: 1.5px solid #4a9eff;
+  border-radius: 2px;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+.komu-group-handle.g-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.komu-group-handle.g-ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.komu-group-handle.g-sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.komu-group-handle.g-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.komu-group-handle.g-w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.komu-group-handle.g-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.komu-group-handle.g-n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.komu-group-handle.g-s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+/* Connector attach points — the 4 round dots floating just outside a shape's sides (one per side).
+   Positioned in screen space by the text layer; purely visual (snapping is computed from geometry). */
+.komu-connector-dots {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.komu-connector-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #7ab8ff;
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.5);
+  transform: translate(-50%, -50%);
+}
+/* The locked snap point while drawing a connector — larger + solid (the lock indicator). */
+.komu-connector-dot.is-snapped {
+  width: 16px;
+  height: 16px;
+  background: #3b6ff6;
+  box-shadow: 0 0 0 3px rgba(59, 111, 246, 0.3);
+}
+/* Endpoint handles for a selected connector — white circles with a blue ring, draggable to
+   re-point / re-bind the end (screen-space, positioned by the canvas). */
+.komu-connector-handles {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.komu-connector-handle {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2.5px solid #4a9eff;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+.komu-connector-handle:active {
+  cursor: grabbing;
+}
+/* Touch: the attach dots and the endpoint handles are aim points for a fingertip, not a 1px cursor.
+   The dots grow a little; the handles keep a modest visual size but get an invisible ~44px hit pad
+   (the ::before inherits pointer-events: auto from the handle), so they can be grabbed at all. */
+@media (pointer: coarse) {
+  .komu-connector-dot {
+    width: 15px;
+    height: 15px;
+  }
+  .komu-connector-dot.is-snapped {
+    width: 20px;
+    height: 20px;
+  }
+  .komu-connector-handle {
+    width: 20px;
+    height: 20px;
+  }
+  .komu-connector-handle::before {
+    content: "";
+    position: absolute;
+    inset: -12px;
+    border-radius: 50%;
+  }
+}
+
+/* ── Connector edit bar — a light floating toolbar above a selected connector (matches the text /
+   draw bars; FigJam's dark pill is only a layout reference). ───────────────────────────────────── */
+.komu-connector-bar {
+  position: fixed;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  color: var(--ink, #0e1116);
+  user-select: none;
+}
+.komu-connector-bar .cb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.komu-connector-bar .cb-btn:hover {
+  background: var(--surface-2, #f1f3f5);
+}
+.komu-connector-bar .cb-ico {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+.komu-connector-bar .cb-weight .cb-ico {
+  width: 18px;
+  height: 18px;
+}
+.komu-connector-bar .cb-caret {
+  font-size: 9px;
+  opacity: 0.55;
+}
+.komu-connector-bar .cb-color-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #1f2933;
+  border: 1.5px solid rgba(0, 0, 0, 0.18);
+}
+.komu-connector-bar .cb-sep {
+  width: 1px;
+  height: 22px;
+  margin: 0 3px;
+  background: var(--border, #e3e6ea);
+}
+.cb-pop {
+  position: fixed;
+  z-index: 51;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 6px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+.cb-pop .cb-opt,
+.cb-pop .cb-weight-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink, #0e1116);
+  cursor: pointer;
+}
+.cb-pop .cb-opt:hover,
+.cb-pop .cb-weight-opt:hover {
+  background: var(--surface-2, #f1f3f5);
+}
+.cb-pop .cb-opt.on,
+.cb-pop .cb-weight-opt.on {
+  background: color-mix(in srgb, var(--accent, #3b6ff6) 16%, transparent);
+  color: var(--accent, #3b6ff6);
+}
+.cb-pop .cb-opt .cb-ico {
+  width: 24px;
+  height: 24px;
+}
+/* line-weight popover: a named vertical list (Thin / Medium / …) with a preview line per row */
+.cb-pop-list {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  min-width: 150px;
+}
+.cb-pop-list .cb-weight-opt {
+  width: 100%;
+  height: 34px;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 10px;
+  font:
+    14px Inter,
+    system-ui,
+    sans-serif;
+}
+.cb-pop-list .cb-weight-line {
+  flex: 0 0 56px;
+  border-radius: 3px;
+  background: currentColor;
+}
+.cb-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 24px);
+  gap: 8px;
+  padding: 2px;
+}
+.cb-sw {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--sw);
+  border: 2px solid var(--surface, #ffffff);
+  box-shadow: 0 0 0 1px var(--border, #e3e6ea);
+  cursor: pointer;
+  padding: 0;
+}
+.cb-sw.on {
+  box-shadow:
+    0 0 0 2px var(--surface, #ffffff),
+    0 0 0 4px var(--accent, #3b6ff6);
+}
+.komu-text-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  border: 1.5px solid #4a9eff;
+  border-radius: 2px;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+.komu-text-handle.h-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.komu-text-handle.h-ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.komu-text-handle.h-sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.komu-text-handle.h-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.komu-text-handle.h-w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.komu-text-handle.h-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+/* n/s handles — shown only for shapes (free height); hidden for text/sticky (auto-height). */
+.komu-text-handle.h-n,
+.komu-text-handle.h-s {
+  display: none;
+  left: 50%;
+  cursor: ns-resize;
+}
+.komu-text-handle.h-n {
+  top: 0;
+}
+.komu-text-handle.h-s {
+  top: 100%;
+}
+.komu-text-resize-shape .komu-text-handle.h-n,
+.komu-text-resize-shape .komu-text-handle.h-s {
+  display: block;
+}
+/* A stamp resizes uniformly (square) → corner handles only; hide the w/e side handles too. */
+.komu-text-resize-stamp .komu-text-handle.h-w,
+.komu-text-resize-stamp .komu-text-handle.h-e {
+  display: none;
+}
+/* An image resizes aspect-locked → corner handles only too (a side handle would distort it). */
+.komu-text-resize-image .komu-text-handle.h-w,
+.komu-text-resize-image .komu-text-handle.h-e {
+  display: none;
+}
+/* A circle symbol (catalog lockAspect) stays square → corner handles only (after the shape rule
+   that shows n/s, so this wins on order). */
+.komu-text-resize-square .komu-text-handle.h-n,
+.komu-text-resize-square .komu-text-handle.h-s,
+.komu-text-resize-square .komu-text-handle.h-w,
+.komu-text-resize-square .komu-text-handle.h-e {
+  display: none;
+}
+/* ADR-0009 P3 Step 2: a selected stroke shows only the outline box — resize/rotate handles arrive
+   in Step 3 (gating them off here keeps a handle-drag from mis-committing through the text path). */
+.komu-text-resize-stroke .komu-text-handle,
+.komu-text-resize-stroke .komu-text-rotate {
+  display: none;
+}
+/* Rotation zones — invisible squares just OUTSIDE each corner. Hover shows a curved double-arrow
+   rotate cursor ORIENTED to wrap that corner (the convex side faces outward); drag spins the box.
+   They sit under the resize handles (DOM order) so the corner itself still resizes. */
+.komu-text-rotate {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  pointer-events: auto;
+}
+/* Positioning only — the rotate cursor itself is set inline from the shared ROTATE_CURSORS (cursors.ts),
+   the single source used by both these HTML boxes and the Konva strokes/stamps. */
+.komu-text-rotate.r-nw {
+  left: 0;
+  top: 0;
+  transform: translate(-100%, -100%);
+}
+.komu-text-rotate.r-ne {
+  left: 100%;
+  top: 0;
+  transform: translate(0, -100%);
+}
+.komu-text-rotate.r-sw {
+  left: 0;
+  top: 100%;
+  transform: translate(-100%, 0);
+}
+.komu-text-rotate.r-se {
+  left: 100%;
+  top: 100%;
+  transform: translate(0, 0);
+}
+
+/* ── Floating rich-text toolbar (above the active text editor) ─────────────── */
+.komu-text-bar {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  font:
+    14px/1 Inter,
+    system-ui,
+    sans-serif;
+  color: var(--ink, #0e1116);
+  user-select: none;
+}
+.komu-text-bar .ctb-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 3px 3px;
+  background: var(--border, #e3e6ea);
+}
+.komu-text-bar .ctb-btn,
+.komu-text-bar .ctb-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  min-width: 34px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.komu-text-bar .ctb-btn:hover,
+.komu-text-bar .ctb-text:hover {
+  background: var(--surface-2, #f1f3f5);
+}
+/* B/I/U/S group. Desktop: the 4 marks are inline and the toggle is hidden. (Mobile collapses
+   them behind the toggle into a vertical flyout — see the @media block.) */
+.komu-text-bar .ctb-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.komu-text-bar .ctb-marks-toggle {
+  display: none;
+}
+.komu-text-bar .ctb-marks-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+/* Shape mode (any viewport): the shape bar already carries shape-select / fill / align, so collapse
+   B/I/U/S into the flyout toggle to keep it compact — the same flyout the mobile bar uses. */
+.komu-text-bar.shape-mode .ctb-marks {
+  position: relative;
+}
+.komu-text-bar.shape-mode .ctb-marks-toggle {
+  display: inline-flex;
+}
+.komu-text-bar.shape-mode .ctb-marks-menu {
+  position: absolute;
+  bottom: calc(100% + 8px); /* open UPWARD (above the bar) so it never covers the edited node */
+  left: 50%;
+  transform: translateX(-50%) scaleY(0);
+  transform-origin: bottom center;
+  flex-direction: row; /* a horizontal mini-bar (like the alignment flyout) */
+  gap: 2px;
+  padding: 4px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 150ms var(--ease, ease),
+    opacity 150ms var(--ease, ease);
+  z-index: 2;
+}
+.komu-text-bar.shape-mode .ctb-marks.open .ctb-marks-menu {
+  transform: translateX(-50%) scaleY(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+.komu-text-bar .ctb-btn.on {
+  background: color-mix(in srgb, var(--accent, #3b6ff6) 16%, transparent);
+  color: var(--accent, #3b6ff6);
+}
+.komu-text-bar .ctb-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.komu-text-bar .ctb-text {
+  gap: 4px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+.komu-text-bar .ctb-caret {
+  font-size: 9px;
+  opacity: 0.55;
+}
+.komu-text-bar .ctb-b {
+  font-weight: 700;
+}
+.komu-text-bar .ctb-i {
+  font-style: italic;
+  font-family: Georgia, serif;
+}
+.komu-text-bar .ctb-u {
+  text-decoration: underline;
+}
+.komu-text-bar .ctb-strike {
+  text-decoration: line-through;
+}
+.komu-text-bar .ctb-color {
+  flex-direction: column;
+  gap: 1px;
+}
+.komu-text-bar .ctb-color .ctb-a {
+  font-weight: 600;
+  line-height: 1;
+}
+.komu-text-bar .ctb-underbar {
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: #0e1116;
+}
+.komu-text-bar .ctb-hl-box {
+  width: 18px;
+  height: 15px;
+  border-radius: 3px;
+  background: #ffec99;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+/* No highlight (or a mixed whole-box selection): show a slash instead of a stale colour. */
+.komu-text-bar .ctb-hl-box.is-none {
+  background:
+    linear-gradient(135deg, transparent 43%, #e03131 43%, #e03131 57%, transparent 57%), #ffffff;
+}
+/* ── Shape-mode controls — only visible when the bar edits a shape (.shape-mode on the root) ──── */
+.komu-text-bar .ctb-shape-only {
+  display: none;
+}
+.komu-text-bar.shape-mode .ctb-shape-only {
+  display: inline-flex;
+}
+/* The fill control is shared: a shape's fill and a sticky note's paper colour (which has no other
+   home — the sticky palette only reaches the note being placed). */
+.komu-text-bar .ctb-fill-only {
+  display: none;
+}
+.komu-text-bar.shape-mode .ctb-fill-only,
+.komu-text-bar.sticky-mode .ctb-fill-only {
+  display: inline-flex;
+}
+.komu-text-bar .ctb-shape-kind,
+.komu-text-bar .ctb-fill,
+.komu-text-bar .ctb-border,
+.komu-text-bar .ctb-align {
+  gap: 3px;
+}
+.komu-text-bar .ctb-shape-ico,
+.komu-text-bar .ctb-border-ico,
+.komu-text-bar .ctb-align-ico {
+  display: inline-flex;
+}
+.komu-text-bar .ctb-shape-ico svg,
+.komu-text-bar .ctb-align-ico svg {
+  width: 20px;
+  height: 20px;
+}
+/* the border icon (line-weight glyph) is filled, so it sizes a touch smaller for balance */
+.komu-text-bar .ctb-border-ico svg {
+  width: 17px;
+  height: 17px;
+}
+.komu-text-bar .ctb-border-ico.is-none {
+  opacity: 0.4;
+}
+.komu-text-bar .ctb-fill-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1.5px solid rgba(0, 0, 0, 0.22);
+}
+/* "no fill" indicator — a red crossout slash over a transparent dot */
+.komu-text-bar .ctb-fill-dot.is-none {
+  background:
+    linear-gradient(135deg, transparent 43%, #e03131 43%, #e03131 57%, transparent 57%), #ffffff;
+}
+/* shape-kind popover: search + the catalog grid (shared .sp-grid / .sp-tile styles) */
+.ctb-pop.ctb-shape-pop {
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+  max-height: 380px;
+  padding: 8px;
+  overflow: hidden; /* only the tile body scrolls */
+}
+.ctb-shape-search {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 8px;
+  background: var(--surface-2, #f1f3f5);
+  color: var(--ink, #0e1116);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.ctb-shape-search:focus {
+  border-color: var(--accent, #3b6ff6);
+}
+.ctb-shape-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+.ctb-shape-title {
+  padding: 6px 4px 2px;
+  font:
+    600 12px Inter,
+    system-ui,
+    sans-serif;
+  color: var(--muted, #586172);
+}
+.ctb-shape-glyph {
+  width: 20px;
+  height: 20px;
+}
+/* alignment option row (popover) */
+.ctb-align-pop {
+  flex-direction: row;
+  gap: 2px;
+  padding: 5px;
+}
+.ctb-align-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink, #0e1116);
+  cursor: pointer;
+}
+.ctb-align-opt svg {
+  width: 22px;
+  height: 22px;
+}
+.ctb-align-opt:hover {
+  background: var(--surface-2, #f1f3f5);
+}
+.ctb-align-opt.on {
+  background: color-mix(in srgb, var(--accent, #3b6ff6) 16%, transparent);
+  color: var(--accent, #3b6ff6);
+}
+/* border popover — a row of line styles above a grid of border-colour swatches.
+ * `.ctb-pop.ctb-border-pop` keeps specificity above the base `.ctb-pop` (defined later in source). */
+.ctb-pop.ctb-border-pop {
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.ctb-border-styles {
+  display: flex;
+  gap: 6px;
+}
+.ctb-border-style {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 40px;
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink, #0e1116);
+  cursor: pointer;
+}
+.ctb-border-style svg {
+  width: 22px;
+  height: 22px;
+}
+.ctb-border-style:hover {
+  background: var(--surface-2, #f1f3f5);
+}
+.ctb-border-style.on {
+  background: color-mix(in srgb, var(--accent, #3b6ff6) 16%, transparent);
+  color: var(--accent, #3b6ff6);
+}
+.ctb-border-pop .swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 26px);
+  justify-content: center;
+  column-gap: 14px;
+  row-gap: 12px;
+}
+.ctb-border-pop .sw {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+.ctb-border-pop .sw.on {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+.ctb-pop {
+  position: fixed;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  max-height: 280px;
+  overflow: auto;
+}
+.ctb-pop.ctb-pop-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+}
+.ctb-pop-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 150px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink, #0e1116);
+  font:
+    14px Inter,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+.ctb-pop.ctb-pop-grid .ctb-pop-item {
+  min-width: 0;
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+.ctb-pop-item:hover {
+  background: var(--surface-2, #f1f3f5);
+}
+/* check column on the active font/size preset */
+.ctb-check {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  color: var(--accent, #3b6ff6);
+}
+.ctb-pop-size {
+  min-width: 168px;
+}
+/* the exact-size numeric input at the bottom of the size menu */
+.ctb-size-input {
+  margin-top: 4px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1.5px solid var(--accent, #3b6ff6);
+  border-radius: 6px;
+  background: var(--surface, #ffffff);
+  color: var(--ink, #0e1116);
+  font:
+    14px Inter,
+    system-ui,
+    sans-serif;
+}
+/* link input popover — a floating "Type or paste URL" box with a downward arrow to the node */
+.ctb-link-pop {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  overflow: visible;
+}
+/* The text being linked, painted while the URL input has focus (the native selection can't show —
+   the document's only selection is in the input). Driven by the CSS Custom Highlight API. */
+::highlight(komu-link-target) {
+  background: color-mix(in srgb, var(--accent, #3b6ff6) 30%, transparent);
+}
+.ctb-link-pop::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  margin-left: -7px;
+  border: 7px solid transparent;
+  border-top-color: var(--surface, #ffffff);
+  filter: drop-shadow(0 1px 0 var(--border, #e3e6ea));
+}
+.ctb-link-input {
+  width: 300px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1.5px solid var(--accent, #3b6ff6);
+  border-radius: 8px;
+  background: var(--surface, #ffffff);
+  color: var(--ink, #0e1116);
+  font:
+    14px Inter,
+    system-ui,
+    sans-serif;
+  outline: none;
+}
+/* Editing an existing link: a thin divider + a remove-link (unlink) icon beside the URL field. */
+.ctb-link-sep {
+  flex: none;
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 0;
+  background: var(--border, #e3e6ea);
+}
+.ctb-link-unlink {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted, #586172);
+  cursor: pointer;
+}
+.ctb-link-unlink:hover {
+  background: var(--surface-2, #f1f3f5);
+  color: var(--ink, #0e1116);
+}
+.ctb-link-unlink svg {
+  width: 18px;
+  height: 18px;
+}
+.ctb-link-card {
+  position: fixed;
+  z-index: 52;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  max-width: 360px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+.ctb-link-card-url {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted, #6b7280);
+  font:
+    13px Inter,
+    system-ui,
+    sans-serif;
+}
+.ctb-link-card-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border, #e3e6ea);
+}
+.ctb-link-card-btn {
+  height: 26px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent, #2563eb);
+  font:
+    13px Inter,
+    system-ui,
+    sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ctb-link-card-btn:hover {
+  background: var(--surface-2, #f1f3f5);
+}
+/* Text-toolbar colour/highlight pops mirror the draw tool exactly: circular swatches in a
+   5-up grid (shared palette → shared look). */
+.ctb-color-pop {
+  padding: 10px;
+}
+.ctb-color-pop .swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 26px);
+  justify-content: center;
+  column-gap: 12px;
+  row-gap: 12px;
+}
+.ctb-color-pop .sw {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+.ctb-color-pop .sw.on {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+/* the "none" highlight swatch — a red crossout slash (reuses the .sw base size/border) */
+.sw-none {
+  background:
+    linear-gradient(135deg, transparent 44%, #e03131 44%, #e03131 56%, transparent 56%),
+    var(--surface, #ffffff);
+}
+
+/* ── Phone-only tool dock (narrow widths) ────────────────────────────────────────────────────────
+   On small phones the bottom bar's nine tools are too cramped to tap reliably, so we collapse the five
+   "insert" tools (sticky / text / shape / stamp / image) behind a single + launcher and drop Hand
+   (you pan with two fingers). That leaves Select · Pen · Eraser · + — each big and evenly spaced.
+   This is WIDTH-only (no `pointer: coarse`), so tablets ≥641px keep all nine inline — as requested. */
+@media (max-width: 640px) {
+  .dock {
+    justify-content: space-evenly;
+    gap: 0;
+  }
+  .tool {
+    width: 50px;
+    height: 50px;
+    border-radius: 13px;
+  }
+  .tool .ico {
+    width: 24px;
+    height: 24px;
+  }
+  .tool[data-group="insert"] {
+    display: none; /* the five insert tools collapse behind the + launcher on narrow phones */
+  }
+  .tool[data-tool="insert"] {
+    display: grid; /* …and the launcher itself appears */
+  }
+}
