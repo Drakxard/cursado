@@ -28,7 +28,7 @@ export interface Env {
 const IMMUTABLE = "public, max-age=31536000, immutable";
 // Uploads are a cross-origin fetch in dev (vite :5173 → worker :8787); image GETs are <img> loads
 // (no CORS needed). `*` is fine — images are public anyway.
-const CORS = { "Access-Control-Allow-Origin": "*" };
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Retry-After" };
 
 /** POST /upload — validate, content-hash, and store an image in R2. Returns the key. */
 async function handleUpload(request: Request, env: Env): Promise<Response> {
@@ -52,7 +52,7 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
   if (ip && env.UPLOAD_RL) {
     try {
       if (!(await env.UPLOAD_RL.limit({ key: ip })).success)
-        return Response.json({ error: "rate limited" }, { status: 429, headers: CORS });
+        return Response.json({ error: "rate limited" }, { status: 429, headers: { ...CORS, "Retry-After": "60" } });
     } catch {
       /* limiter unavailable → fail open */
     }

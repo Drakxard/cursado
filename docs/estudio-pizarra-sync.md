@@ -33,6 +33,13 @@ Una pizarra posterior solo pregunta por tipos nuevos o conversiones parciales.
 Cancelar vuelve a Estudio y conserva el borrador sin validar tipos nuevos.
 Los errores impiden aceptar y mantienen el original intacto.
 
+Las migraciones reutilizan imágenes ya presentes en R2 por su hash, incluso al
+reabrir después de un fallo. Las subidas se encolan respetando el límite existente
+de 30 por minuto del Worker, con margen para otras ventanas. Un HTTP 429 respeta
+`Retry-After`; los errores transitorios tienen reintentos acotados. La pausa se
+indica en un aviso compacto. Si no se puede continuar, un único aviso agrupa los
+errores repetidos y permite reintentar sin volver a subir los archivos exitosos.
+
 Trazos, textos, imágenes, figuras compatibles, accesos, tablas y videos tienen
 equivalentes editables. Los tipos sin equivalente conservan una tarjeta con su
 información original consultable y se identifican como conversión parcial;

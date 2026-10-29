@@ -14,12 +14,13 @@ const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   window.read=async path=>{let directory=fs;const parts=path.split('/');for(const part of parts.slice(0,-1))directory=await directory.getDirectoryHandle(part);return JSON.parse(await(await(await directory.getFileHandle(parts.at(-1))).getFile()).text())};
   window.openBoard=id=>root.render(<TopicBoardOverlay key={id} boardId={id} name={id} rootHandle={fs} pdfReferences={[{materialId:1,subjectId:'subject',fileName:'Uno.pdf',workspaceFileId:'workspace://teoria/uno.pdf'},{materialId:2,subjectId:'subject',fileName:'Dos.pdf',workspaceFileId:'workspace://teoria/dos.pdf'}]} onClose={()=>{window.boardClosed=true;root.render(<button onClick={()=>window.openBoard(id)}>Reabrir</button>)}}/>);
   const taskWriter=await(await(await fs.getDirectoryHandle('progreso')).getFileHandle('importantes.json',{create:true})).createWritable();await taskWriter.write(JSON.stringify({version:1,tasks:[{id:'task',text:'Examen',startDate:'2026-01-01',dueDate:'2099-12-31',url:'',topics:[]}]}));await taskWriter.close();
-  for(const id of ['first','second','image','target']){
+  for(const id of ['first','second','image','target','upload-failure']){
     let present=false;try{await dir.getFileHandle(id+'.json');present=true}catch{}
     if(present)continue;
     const content={camera:{x:0,y:0,zoom:1},strokes:[{id:'s',points:[{x:80,y:90},{x:260,y:90}],width:3,color:'#ff0000'}],texts:[{id:'t',x:90,y:140,text:'Texto '+id,color:'#000000',fontSize:24}],media:[],shapes:[],tables:[],graphs:[],videos:[]};
     const assets={};
     if(id==='image'){content.media.push({id:'i',kind:'image',assetId:'asset',x:90,y:210,width:100,height:100});assets.asset='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='}
+    if(id==='upload-failure'){for(let i=0;i<3;i++){content.media.push({id:'image-'+i,kind:'image',assetId:'asset-'+i,x:90+i*120,y:210,width:100,height:100});assets['asset-'+i]='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='}}
     const writer=await(await dir.getFileHandle(id+'.json',{create:true})).createWritable();await writer.write(JSON.stringify({version:1,boardId:id,name:id,content,assets}));await writer.close();
   }
   if(!new URLSearchParams(location.search).has('defer'))window.openBoard(new URLSearchParams(location.search).get('board')||'first');
@@ -175,4 +176,35 @@ test('simultaneous first migration converges without duplicate objects or z-orde
   await expect.poll(() => snapshot(a)).toEqual(await snapshot(b))
   const result = await snapshot(a)
   assert.equal(result.order.length, 4); assert.equal(new Set(result.order).size, 4); assert.equal(Object.keys(result.objects).length, 4)
+})
+
+test('failed migration has one compact notice and retries uploads without losing successes; 429 recovers automatically', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
+  let blocked = true, throttled = false, posts = 0
+  await context.route('**/img/*', route => route.request().method() === 'HEAD' ? route.fulfill({ status: 404, headers: { 'Access-Control-Allow-Origin': '*' } }) : route.continue())
+  await context.route('**/upload', route => {
+    if (route.request().method() !== 'POST') return route.continue()
+    posts++
+    const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Retry-After', 'Retry-After': '0' }
+    if (blocked && posts > 1) return route.fulfill({ status: 415, headers, body: '{}' })
+    if (!blocked && !throttled) { throttled = true; return route.fulfill({ status: 429, headers, body: '{}' }) }
+    return route.continue()
+  })
+  const page = await context.newPage(); await page.goto(origin + '/study-fixture?board=upload-failure')
+  const notice = page.getByRole('alert')
+  await expect(notice).toHaveCount(1)
+  await expect(notice).toContainText('2 elementos')
+  assert.ok((await notice.boundingBox()).height <= 240)
+  assert.ok((await notice.innerText()).length < 500)
+  await expect(page.getByText('¿Confirmás la migración?')).toHaveCount(0)
+  assert.equal(posts, 3)
+  blocked = false
+  await page.getByRole('button', { name: 'Reintentar migración' }).click()
+  await loaded(page, 'upload-failure')
+  await expect(notice).toHaveCount(0)
+  await expect(page.getByText('¿Confirmás la migración?')).toBeVisible()
+  assert.equal(posts, 6); assert.equal(throttled, true)
+  const result = await engine(page).evaluate(() => ({ count: window.__komuboard.doc.getMap('objects').size, order: window.__komuboard.doc.getArray('order').toArray() }))
+  assert.equal(result.count, 7); assert.equal(new Set(result.order).size, 7)
 })

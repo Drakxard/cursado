@@ -40,6 +40,7 @@ export function parseStudyCsv(raw: string) {
   return rows
 }
 export async function* importStudyFiles(files: File[], point: { x: number; y: number }, status: (value: string) => void): AsyncGenerator<StudyObject> {
+  const upload = (file: File) => uploadImage(file, { reuseExisting: true, onWait: ms => status(ms ? `Pausa automática de ${Math.ceil(ms / 1000)} s; la subida continuará sola.` : `Subiendo ${file.name}…`) })
   let y = point.y
   for (const file of files) {
     status(`Importando ${file.name}…`)
@@ -48,7 +49,7 @@ export async function* importStudyFiles(files: File[], point: { x: number; y: nu
       try {
         for (let number = 1; number <= pdf.numPages; number++) {
           status(`Importando PDF: página ${number} de ${pdf.numPages}`)
-          const page = await pageBlob(pdf, number), uploaded = await uploadImage(new File([page.blob], `${file.name}-${number}.png`, { type: 'image/png' }))
+          const page = await pageBlob(pdf, number), uploaded = await upload(new File([page.blob], `${file.name}-${number}.png`, { type: 'image/png' }))
           yield { id: crypto.randomUUID(), type: 'image', authorId: 'estudio', src: uploaded.key, x: point.x, y, width: page.width, height: page.height }; y += page.height + 30
         }
       } finally { await task.destroy() }
@@ -72,7 +73,7 @@ export async function* importStudyFiles(files: File[], point: { x: number; y: nu
     } else if (file.type.startsWith('image/') || /\.(svg|png|jpe?g|webp|gif)$/i.test(file.name)) {
       const blob = /\.svg$/i.test(file.name) || file.type === 'image/svg+xml' ? await svgToPng(file) : file
       const type = blob.type || (/\.jpe?g$/i.test(file.name) ? 'image/jpeg' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/png')
-      const uploaded = await uploadImage(new File([blob], file.name, { type }))
+      const uploaded = await upload(new File([blob], file.name, { type }))
       yield { id: crypto.randomUUID(), type: 'image', authorId: 'estudio', src: uploaded.key, x: point.x, y, width: uploaded.width, height: uploaded.height }; y += uploaded.height + 30
     } else throw new Error(`Formato no admitido: ${file.name}`)
   }

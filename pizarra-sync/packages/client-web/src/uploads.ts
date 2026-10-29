@@ -1,7 +1,8 @@
 // Client helpers for uploaded images. Bytes live in R2 (served by the worker); the Yjs doc holds only
 // the R2 key, which we resolve to a serve URL here — keyed off the same worker host the realtime
 // connection uses, so it works in dev (separate vite + worker origins) and prod alike.
-import { MAX_UPLOAD_BYTES, UPLOAD_IMAGE_TYPES } from "@komuboard/shared";
+import { MAX_UPLOAD_BYTES, UPLOAD_IMAGE_TYPES, UPLOAD_IMAGE_EXT } from "@komuboard/shared";
+import { createUploadQueue } from './upload-queue';
 
 import { t } from "./i18n";
 
@@ -24,7 +25,10 @@ export interface UploadResult {
 }
 
 /** A user-presentable failure (bad type / too large / network). The message is safe to show in a toast. */
-export class UploadError extends Error {}
+export class UploadError extends Error {
+  constructor(message: string, public readonly status?: number, public readonly retryable = false) { super(message) }
+}
+const queuedUpload = createUploadQueue();
 
 function uploadUrl(): string {
   return `${WORKER_HOST.includes("127.0.0.1") || WORKER_HOST.includes("localhost") ? location.protocol : "https:"}//${WORKER_HOST}/upload`;
@@ -56,7 +60,7 @@ async function decode(
 
 /** Validate, optionally downscale, and upload an image file to R2 via the worker. Returns the stored
  *  key + the image's intrinsic size. Throws UploadError with a user-facing message on any failure. */
-export async function uploadImage(file: File): Promise<UploadResult> {
+export async function uploadImage(file: File, options: { reuseExisting?: boolean; onWait?: (ms: number) => void } = {}): Promise<UploadResult> {
   if (!ACCEPTED.has(file.type)) {
     throw new UploadError(t("toast.imageTypeUnsupported"));
   }
@@ -94,17 +98,28 @@ export async function uploadImage(file: File): Promise<UploadResult> {
     throw new UploadError(t("toast.imageTooLarge"));
   }
 
+  if (options.reuseExisting) {
+    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    const hash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    const key = `${hash}.${UPLOAD_IMAGE_EXT[contentType]}`;
+    try {
+      if ((await fetch(imageSrcUrl(key), { method: 'HEAD' })).ok) return { key, width, height };
+    } catch { /* The queued upload will report a recoverable network error. */ }
+  }
+
   let res: Response;
   try {
-    res = await fetch(uploadUrl(), {
+    res = await queuedUpload(uploadUrl(), {
       method: "POST",
       headers: { "content-type": contentType },
       body: blob,
-    });
+    }, options.onWait);
   } catch {
-    throw new UploadError(t("toast.uploadFailedConnection"));
+    throw new UploadError(t("toast.uploadFailedConnection"), 0, true);
   }
-  if (!res.ok) throw new UploadError(t("toast.uploadFailed"));
+  if (!res.ok) throw new UploadError(res.status === 429
+    ? 'El servidor sigue limitando las subidas. Podés reintentar sin perder lo que ya se subió. (HTTP 429)'
+    : `${t("toast.uploadFailed")} (HTTP ${res.status})`, res.status, res.status === 429 || res.status >= 500);
   const { key } = (await res.json()) as { key?: string };
   if (!key) throw new UploadError(t("toast.uploadFailed"));
   return { key, width, height };

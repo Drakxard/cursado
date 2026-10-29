@@ -4,6 +4,16 @@ export const STUDY_CONVERTER_VERSION = 1
 export type StudyObject = Record<string, any>
 export type LegacyStudyBoard = { version: number; boardId: string; name: string; content: Record<string, any>; assets: Record<string, string> }
 export type MigrationReport = { version: number; types: string[]; partial: string[]; errors: string[]; count: number }
+export function migrationTypeLabel(type: string) {
+  return ({ strokes: 'Trazos', texts: 'Texto', images: 'Imágenes', 'pdf-pages': 'Páginas PDF', 'pdf-shortcut': 'Accesos PDF', 'board-shortcut': 'Accesos a pizarras', 'important-countdown': 'Contadores', sticky: 'Notas', shapes: 'Figuras', connectors: 'Conectores', lines: 'Líneas', tables: 'Tablas', videos: 'Videos', 'shapes:review-marker': 'Marcadores de repaso' } as Record<string, string>)[type] || 'Elementos anteriores'
+}
+export function migrationErrorSummary(errors: string[]) {
+  const counts = new Map<string, number>()
+  for (const error of errors) counts.set(error, (counts.get(error) || 0) + 1)
+  const lines = [...counts].slice(0, 3).map(([error, count]) => `${error}${count > 1 ? ` (${count} elementos)` : ''}`)
+  if (counts.size > 3) lines.push(`Y ${counts.size - 3} problemas adicionales.`)
+  return lines.join('\n')
+}
 export type StudyAttachment = { kind: 'pdf' | 'board' | 'important' | 'youtube' | 'table' | 'legacy'; reference?: any; taskId?: string; videoId?: string; start?: number; end?: number; table?: any; original?: any; pinned?: boolean }
 
 export function migrationNeedsReview(report: MigrationReport, approved: Record<string, number>) {
@@ -73,7 +83,7 @@ export async function convertStudyBoard(snapshot: LegacyStudyBoard, image: (item
       if (base.groupId) object.groupId = base.groupId
       object.legacyOriginal = item
       objects.push(object); types.add(type)
-    } catch (error) { errors.push(`${type}: ${error instanceof Error ? error.message : String(error)}`) }
+    } catch (error) { errors.push(`${migrationTypeLabel(type)}: ${error instanceof Error ? error.message : String(error)}`) }
   }
   return { objects, report: { version: STUDY_CONVERTER_VERSION, types: [...types], partial: [...partial], errors, count: entries.length } }
 }

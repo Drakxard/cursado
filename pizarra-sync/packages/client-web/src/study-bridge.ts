@@ -2,8 +2,8 @@ import * as Y from 'yjs'
 import { addObject, objectsMap, type BoardObject } from '@komuboard/shared'
 import type YProvider from 'y-partyserver/provider'
 import type { BoardCanvas } from './canvas'
-import { uploadImage } from './uploads'
-import { convertStudyBoard, studyCard, STUDY_CONVERTER_VERSION, type StudyObject, type MigrationReport } from '../../../../lib/study-board-migration'
+import { uploadImage, UploadError } from './uploads'
+import { convertStudyBoard, migrationErrorSummary, studyCard, STUDY_CONVERTER_VERSION, type StudyObject, type MigrationReport } from '../../../../lib/study-board-migration'
 import { BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, parseBoardPdfDrag, parseBoardLinkDrag, parseImportantDrag } from '../../../../lib/board-library-contract'
 import './study.css'
 import { disposeStudy } from './study-render'
@@ -54,16 +54,24 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     return study?.kind === 'pdf' && study.pinned ? [{ id: map.get('id'), reference: study.reference }] : []
   }) })
   const uploaded = new Map<string, Promise<string>>()
+  let imageIndex = 0, imageCount = 0, uploadFailure: UploadError | null = null
   async function uploadLegacy(item: any, data?: string) {
     if (!data) throw new Error(`Falta el archivo ${item.name || item.assetId}`)
+    if (uploadFailure) throw uploadFailure
+    const current = ++imageIndex
+    const progress = `Migrando imagen ${current} de ${imageCount}…`
+    send('status', { status: progress })
     const key = `${item.assetId}:${item.pdfSource ? item.pageNumber : ''}`
     if (!uploaded.has(key)) uploaded.set(key, (async () => {
       let blob = await (await fetch(data)).blob()
       if (item.pdfSource) {
         const { renderPdfPage } = await import('./study-imports'); blob = await renderPdfPage(blob, item.pageNumber || 1)
       }
-      return (await uploadImage(new File([blob], 'migracion.png', { type: blob.type }))).key
-    })())
+      return (await uploadImage(new File([blob], 'migracion.png', { type: blob.type }), {
+        reuseExisting: true,
+        onWait: ms => send('status', { status: ms ? `${progress} Pausa automática de ${Math.ceil(ms / 1000)} s; la subida continuará sola.` : progress }),
+      })).key
+    })().catch(error => { uploaded.delete(key); if (error instanceof UploadError && error.retryable) uploadFailure = error; throw error }))
     return uploaded.get(key)!
   }
   async function initialize(data: any) {
@@ -75,11 +83,12 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
       const marker = doc.getMap<any>('study-migration')
       const previous = marker.get('report') as MigrationReport | undefined
       if (!marker.get('complete') && data.snapshot) {
+        imageIndex = 0; imageCount = (data.snapshot.content.media || []).filter((item: any) => item.kind !== 'audio').length; uploadFailure = null
         const converted = await convertStudyBoard(data.snapshot, uploadLegacy)
         // Deterministic source ids plus a deterministic Yjs client make parallel initial imports
         // the SAME CRDT update, including order entries; user edits keep their own client ids.
         report = converted.report
-        if (report.errors.length) { send('migration-errors', { report }); throw new Error(report.errors.join('\n')) }
+        if (report.errors.length) { send('migration-errors', { report }); throw new Error(migrationErrorSummary(report.errors)) }
         const seed = new Y.Doc(); seed.clientID = 2147483001
         const updates: Uint8Array[] = []
         seed.on('update', (update: Uint8Array) => updates.push(update))
@@ -122,7 +131,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
       }, 'study-migration')
       initialized = true; send('ready', { report, converterVersion: STUDY_CONVERTER_VERSION }); checkpoint(); emitPins()
     } catch (error) { send('error', { error: String(error) }) }
-    finally { busy = false }
+    finally { busy = false; send('status', { status: '' }) }
   }
   window.addEventListener('message', event => {
     if (event.origin !== location.origin || event.source !== parent || event.data?.session !== session || event.data?.boardId !== boardId) return

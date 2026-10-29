@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { InlineTableEditor } from './study-inline-table-editor'
 import { boardPdfReference, type BoardPdfReference, type BoardLinkReference } from '@/lib/board-library-contract'
 import { openStudyBoard, saveStudyBoard, confirmStudyMigration } from '@/lib/study-board-workspace'
-import { migrationNeedsReview, studyCard, type MigrationReport, type StudyAttachment } from '@/lib/study-board-migration'
+import { migrationNeedsReview, migrationErrorSummary, migrationTypeLabel, studyCard, type MigrationReport, type StudyAttachment } from '@/lib/study-board-migration'
 import { readImportantTasks, importantTaskProgress, importantCountdownStyle } from '@/lib/important-tasks'
 
 export type StudyTopicBoardProps = {
@@ -91,7 +91,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
         if (data.type === 'study-board:checkpoint' && typeof data.draft === 'string') void save(() => saveStudyBoard(rootHandle, boardId, { draft: data.draft, report: data.report, imported: !!data.imported })).catch(() => {})
         if (data.type === 'study-board:closed') void saveQueue.current.then(() => { if (saveError.current) { setClosing(false); return }; const action = pendingClose.current; pendingClose.current = null; action?.() })
         if (data.type === 'study-board:error') { setError(data.error || 'No se pudo abrir la pizarra.'); setClosing(false) }
-        if (data.type === 'study-board:migration-errors') setReview(data.report)
+        if (data.type === 'study-board:migration-errors') { setReview(null); setError(migrationErrorSummary(data.report.errors || [])); setStatus('') }
         if (data.type === 'study-board:status') setStatus(data.status || '')
         if (data.type === 'study-board:pins') {
           const valid = (data.pins || []).flatMap((pin: any) => { const reference = boardPdfReference(pin.reference); return reference && typeof pin.id === 'string' ? [{ id: pin.id, reference }] : [] })
@@ -171,7 +171,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
     <div className="flex h-full">
       <div className="relative min-w-0" style={{ width: split ? '50%' : '100%', height: '100%' }}>
         {initial && <iframe ref={frame} title={`Pizarra de ${name}`} src={`/study-board/index.html?topicBoard=${encodeURIComponent(boardId)}&room=${encodeURIComponent(initial.record.roomId)}&session=${session}`} className="h-full w-full border-0" onLoad={initialize} />}
-        {!ready && <p role="status" className="absolute bottom-4 left-4 rounded bg-white p-3">Abriendo pizarra…</p>}
+        {!ready && !error && !status && <p role="status" className="absolute bottom-4 left-4 rounded bg-white p-3">Abriendo pizarra…</p>}
       </div>
       {split && <aside className="relative h-full w-1/2 border-l bg-background text-foreground">
         <button className="absolute right-3 top-2 z-10 rounded border bg-background px-2" aria-label="Cerrar biblioteca" onClick={() => { setSplit(false); setAttachment(null); focusBoard() }}>×</button>
@@ -191,12 +191,15 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, onClose, 
       <iframe key={reader.materialId} ref={readerFrame} title="Lector de PDF de la pizarra" className="h-full w-full border-0" src={`/biblioteca/pizarra?mode=reader&session=${session}&boardId=${encodeURIComponent(boardId)}&materialId=${reader.materialId}`} />
     </div>}
     {attachment && !['important', 'pdf', 'board', 'youtube'].includes(attachment.study.kind) && <StudyAttachmentEditor value={attachment} onClose={() => setAttachment(null)} onSave={table => { send('update-table', { id: attachment.id, table }); setAttachment(null) }} />}
-    {review && !readerVisible && <div role="status" className="absolute bottom-3 left-3 z-30 max-w-sm rounded-xl border bg-white p-3 text-sm shadow-lg">
-      <p>¿Confirmás la migración?</p><p className="text-xs text-slate-600">{review.types.join(', ')}{review.partial.length ? ` · Conversión parcial: ${review.partial.join(', ')}` : ''}</p>
+    {review && !readerVisible && !error && <div role="status" className="absolute bottom-3 left-3 z-30 max-w-sm rounded-xl border bg-white p-3 text-sm shadow-lg">
+      <p>¿Confirmás la migración?</p><p className="text-xs text-slate-600">{review.types.map(migrationTypeLabel).join(', ')}{review.partial.length ? ` · Conversión parcial: ${review.partial.map(migrationTypeLabel).join(', ')}` : ''}</p>
       {!!review.errors.length && <p role="alert" className="text-red-700">{review.errors.join(' · ')}</p>}
       <div className="mt-2 flex gap-3"><button disabled={!!review.errors.length} onClick={() => void accept()} className="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-40">Aceptar</button><button onClick={() => void cancel()}>Cancelar</button></div>
     </div>}
-    {(error || status) && <div role={error ? 'alert' : 'status'} className="absolute bottom-3 right-3 z-50 max-w-md rounded border bg-white p-3 text-sm shadow"><p>{error || status}</p>{error && <button onClick={() => setError('')}>Cerrar aviso</button>}</div>}
+    {(error || status) && <div role={error ? 'alert' : 'status'} className="absolute bottom-3 left-3 z-50 max-w-sm rounded-xl border bg-white p-3 text-sm shadow" style={{ maxHeight: 'min(240px, 40vh)', overflow: 'auto' }}>
+      <p className="whitespace-pre-wrap">{error || status}</p>
+      {error && <div className="mt-2 flex gap-3">{!ready ? <><button onClick={() => { setError(''); setReview(null); setStatus('Reintentando la migración…'); initialize() }}>Reintentar migración</button><button onClick={() => void cancel()}>Volver a Estudio</button></> : <button onClick={() => setError('')}>Cerrar aviso</button>}</div>}
+    </div>}
   </div>
 }
 
