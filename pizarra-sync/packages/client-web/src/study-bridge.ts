@@ -4,7 +4,7 @@ import type YProvider from 'y-partyserver/provider'
 import type { BoardCanvas } from './canvas'
 import { uploadImage, UploadError } from './uploads'
 import { convertStudyBoard, repairStudyReviewMarker, migrationErrorSummary, studyCard, STUDY_CONVERTER_VERSION, type StudyObject, type StudyAttachment, type MigrationReport } from '../../../../lib/study-board-migration'
-import { BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, parseBoardPdfDrag, parseBoardLinkDrag, parseImportantDrag } from '../../../../lib/board-library-contract'
+import { BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, BOARD_SHORTCUT_MIME, parseBoardShortcutDrag, parseBoardPdfDrag, parseBoardLinkDrag, parseImportantDrag } from '../../../../lib/board-library-contract'
 import './study.css'
 import { disposeStudy } from './study-render'
 
@@ -220,22 +220,76 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     }
     send(button!.dataset.studyAction === 'pin' ? 'pin' : 'open', { id: element.dataset.id, study })
   }, true)
+  // Observe taps without consuming the engine's selection and drag events.
+  type CardPress = { id: string; pointer: number; x: number; y: number; held: boolean; timer?: ReturnType<typeof setTimeout> }
+  let press: CardPress | undefined
+  let lastTap: { id: string; at: number } | undefined
+  const card = (id: string) => [...document.querySelectorAll<HTMLElement>('[data-study][data-id]')].find(el => el.dataset.id === id)
+  const clearPress = () => {
+    if (press?.timer) clearTimeout(press.timer)
+    if (press) card(press.id)?.classList.remove('study-holding')
+    press = undefined
+  }
+  document.addEventListener('pointerdown', event => {
+    if (press) { clearPress(); lastTap = undefined; return }
+    if (event.button !== 0 || !event.isPrimary || (event.target as Element).closest('button,input,[contenteditable],.text-bar')) return
+    const id = canvas.studyHitAt(event.clientX, event.clientY)
+    const study = id ? objectsMap(doc).get(id)?.get('study') as StudyAttachment : undefined
+    if (!id || !study || !['pdf', 'board', 'shortcut'].includes(study.kind)) { lastTap = undefined; return }
+    const current = press = { id, pointer: event.pointerId, x: event.clientX, y: event.clientY, held: false } as CardPress
+    if (study.kind === 'pdf') {
+      card(id)?.classList.add('study-holding')
+      current.timer = setTimeout(() => {
+        if (press !== current) return
+        current.held = true; lastTap = undefined
+        card(id)?.classList.remove('study-holding')
+        send('pin', { id })
+      }, 600)
+    }
+  }, true)
+  document.addEventListener('pointermove', event => {
+    if (press?.pointer === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) { clearPress(); lastTap = undefined }
+  }, true)
+  document.addEventListener('pointerup', event => {
+    if (!press || press.pointer !== event.pointerId) return
+    const current = press; clearPress()
+    if (current.held) return
+    if (lastTap?.id === current.id && Date.now() - lastTap.at < 450) {
+      lastTap = undefined
+      const study = objectsMap(doc).get(current.id)?.get('study') as StudyAttachment
+      if (study?.kind === 'shortcut') {
+        const reference = parseBoardShortcutDrag(JSON.stringify(study.reference))
+        if (reference) window.open(reference.url, '_blank', 'noopener,noreferrer')
+      } else {
+        card(current.id)?.classList.add('study-opening')
+        send('open', { id: current.id, study })
+      }
+    } else lastTap = { id: current.id, at: Date.now() }
+  }, true)
+  document.addEventListener('pointercancel', () => { clearPress(); lastTap = undefined }, true)
+  window.addEventListener('blur', clearPress)
+  window.addEventListener('message', event => {
+    if (event.origin !== location.origin || event.source !== parent || event.data?.session !== session || event.data?.boardId !== boardId) return
+    if (event.data.type === 'study-board:open-finished') document.querySelectorAll('.study-opening').forEach(el => el.classList.remove('study-opening'))
+  })
   document.addEventListener('keydown', event => {
     if ((event.target as Element)?.closest('input,textarea,select,[contenteditable],[role="textbox"]') || event.repeat || event.isComposing) return
     if (event.key === '<' && !event.ctrlKey && !event.altKey && !event.metaKey) { event.preventDefault(); event.stopImmediatePropagation(); send('toggle-pdf') }
   }, true)
   const board = document.getElementById('board')!
   board.addEventListener('dragover', event => {
-    if ([BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME].some(mime => event.dataTransfer?.types.includes(mime)) || event.dataTransfer?.types.includes('Files')) { event.preventDefault(); event.stopImmediatePropagation() }
+    if ([BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, BOARD_SHORTCUT_MIME].some(mime => event.dataTransfer?.types.includes(mime)) || event.dataTransfer?.types.includes('Files')) { event.preventDefault(); event.stopImmediatePropagation() }
   }, true)
   board.addEventListener('drop', event => {
     const transfer = event.dataTransfer; if (!transfer) return
     const pdf = parseBoardPdfDrag(transfer.getData(BOARD_PDF_MIME)), link = parseBoardLinkDrag(transfer.getData(BOARD_LINK_MIME)), important = parseImportantDrag(transfer.getData(BOARD_IMPORTANT_MIME))
-    if (!pdf && !link && !important && !transfer.files.length) return
+    const shortcut = parseBoardShortcutDrag(transfer.getData(BOARD_SHORTCUT_MIME))
+    if (!pdf && !link && !important && !shortcut && !transfer.files.length) return
     event.preventDefault(); event.stopImmediatePropagation()
     const rect = board.getBoundingClientRect(), view = canvas.worldViewport(), x = view.x + (event.clientX - rect.left) / rect.width * view.width, y = view.y + (event.clientY - rect.top) / rect.height * view.height
     if (pdf) { send('publish-pdf',{reference:pdf}); doc.transact(() => insert(studyCard(crypto.randomUUID(), pdf.fileName, { kind: 'pdf', reference: pdf }, x, y))) }
     if (link) doc.transact(() => insert(studyCard(crypto.randomUUID(), link.name, { kind: 'board', reference: link }, x, y)))
+    if (shortcut) doc.transact(() => insert(studyCard(crypto.randomUUID(), shortcut.name, { kind: 'shortcut', reference: shortcut }, x, y)))
     if (important) doc.transact(() => insert(studyCard(crypto.randomUUID(), 'Importante', { kind: 'important', taskId: important.taskId }, x, y)))
     if (transfer.files.length) send('files', { files: [...transfer.files] })
   }, true)

@@ -14,7 +14,7 @@ export function migrationErrorSummary(errors: string[]) {
   if (counts.size > 3) lines.push(`Y ${counts.size - 3} problemas adicionales.`)
   return lines.join('\n')
 }
-export type StudyAttachment = { kind: 'pdf' | 'board' | 'important' | 'review' | 'youtube' | 'table' | 'legacy'; reference?: any; taskId?: string; videoId?: string; start?: number; end?: number; table?: any; original?: any; pinned?: boolean; view?: { center: { x: number; y: number }; zoom: number } }
+export type StudyAttachment = { kind: 'pdf' | 'board' | 'shortcut' | 'important' | 'review' | 'youtube' | 'table' | 'legacy'; reference?: any; taskId?: string; videoId?: string; start?: number; end?: number; table?: any; original?: any; pinned?: boolean; view?: { center: { x: number; y: number }; zoom: number } }
 
 export function studyReviewMarker(id: string, item: StudyObject): StudyObject {
   const view = item.reviewView

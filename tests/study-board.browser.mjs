@@ -56,7 +56,7 @@ async function fixture(context) {
     return route.fulfill({ contentType: 'text/html', body: `<p>${reader ? 'PDF de prueba' : 'Inicio de Estudio'}</p><script>
       window.visibility=[];const params=new URLSearchParams(location.search),session=params.get('session'),boardId=params.get('boardId');
       const send=type=>parent.postMessage({type,session,boardId},location.origin);
-      addEventListener('message',event=>{if(event.source!==parent||event.origin!==location.origin)return;if(event.data.type==='board-library:init')window.reference=event.data.reference;if(event.data.type==='board-library:reader-visibility')window.visibility.push(event.data.visible)});
+      addEventListener('message',event=>{if(event.source!==parent||event.origin!==location.origin)return;if(event.data.type==='board-library:init'){window.reference=event.data.reference;if(window.reference)setTimeout(()=>send('board-library:reader-rendered'),200);}if(event.data.type==='board-library:reader-visibility')window.visibility.push(event.data.visible)});
       addEventListener('keydown',event=>{if(['Escape','<'].includes(event.key))send('board-library:reader-closed')});send('board-library:ready');
       </script>` })
   })
@@ -102,11 +102,13 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   await engine(page).evaluate(() => window.__komuboard.canvas.zoomTo(1))
   const normalHeight = (await card.boundingBox()).height
   await engine(page).evaluate(() => window.__komuboard.canvas.zoomTo(0.25))
-  await expect.poll(() => card.locator('button').first().evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBe(3)
-  assert.ok((await card.boundingBox()).height < normalHeight * 0.4)
-  await expect(card.locator('button').first()).toHaveCSS('white-space', 'nowrap')
+  await expect(card.locator('button')).toHaveCount(0)
+  await expect.poll(async () => (await card.boundingBox()).height).toBeLessThan(normalHeight * 0.4)
+  await expect(card.locator('.study-card-label')).toHaveCSS('white-space', 'nowrap')
   await engine(page).evaluate(() => window.__komuboard.canvas.zoomTo(1))
-  await send(page, 'pin', { id: pdfId })
+  await expect.poll(async () => Math.abs((await card.boundingBox()).height - normalHeight)).toBeLessThan(1)
+  const holdBox = await card.boundingBox()
+  await page.mouse.move(holdBox.x + holdBox.width / 2, holdBox.y + holdBox.height / 2); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up()
   await expect.poll(() => engine(peer).evaluate(id => window.__komuboard.doc.getMap('objects').get(id).get('study').pinned, pdfId)).toBe(true)
   const pinButton = engine(page).getByRole('button', { name: 'PDF fijado', exact: true })
   await expect(pinButton).toBeEnabled()
@@ -120,8 +122,9 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   assert.ok(selectedBox.x >= 0 && selectedBox.x < 1440)
   await expect(page.getByTitle('Lector de PDF de la pizarra')).toHaveCount(0)
   await engine(page).evaluate(({id, x}) => { window.__komuboard.doc.getMap('objects').get(id).set('x', x); window.__komuboard.canvas.restoreStudyView({x:0,y:0,zoom:1}) }, {id:pdfId,x:pdfX})
-  await pinButton.click()
-  const pdf = page.getByTitle('Lector de PDF de la pizarra'); await expect(pdf).toHaveCount(1)
+  const cardBox = await card.boundingBox()
+  await page.mouse.dblclick(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2)
+  const pdf = page.getByTitle('Lector de PDF de la pizarra'); await expect(pdf).toBeVisible()
   const reader = page.frames().find(frame => frame.url().includes('mode=reader'))
   await reader.evaluate(() => { window.retentionSentinel = 'retained' })
   await reader.locator('body').press('Escape')
@@ -143,6 +146,22 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   const widths = await page.locator('iframe').evaluateAll(frames => frames.map(frame => frame.getBoundingClientRect().width))
   assert.ok(Math.abs(widths[0] - widths[1]) < 2)
   await page.getByRole('button', { name: 'Cerrar biblioteca' }).click()
+  await engine(page).evaluate(() => {
+    const transfer = new DataTransfer()
+    transfer.setData('application/x-cursado-shortcut', JSON.stringify({ name: 'NLM semana 3', url: 'https://notebooklm.google.com/notebook/semana-3' }))
+    document.getElementById('board').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer, clientX: 1000, clientY: 250 }))
+  })
+  const shortcut = engine(page).locator('[data-study="shortcut"]')
+  await expect(shortcut).toHaveText('NLM semana 3')
+  await expect.poll(() => engine(peer).locator('[data-study="shortcut"]').count()).toBe(1)
+  await context.route('https://notebooklm.google.com/**', route => route.fulfill({ body: 'NotebookLM' }))
+  const shortcutBox = await shortcut.boundingBox()
+  const popupPromise = page.waitForEvent('popup', {timeout:10000})
+  await page.mouse.dblclick(shortcutBox.x + shortcutBox.width / 2, shortcutBox.y + shortcutBox.height / 2)
+  const popup = await popupPromise
+  await popup.waitForURL('https://notebooklm.google.com/notebook/semana-3')
+  await popup.close()
+
   await page.locator('input[type=file]').setInputFiles([{ name: 'datos.csv', mimeType: 'text/csv', buffer: Buffer.from('Nombre;Cantidad\nEjemplo;=1+2') }, { name: 'dibujo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20" height="10" fill="red"/></svg>') }])
   await expect.poll(() => engine(peer).evaluate(() => [...window.__komuboard.doc.getMap('objects').values()].filter(map => map.get('study')?.kind === 'table').length)).toBe(1)
   await expect.poll(() => engine(peer).evaluate(() => [...window.__komuboard.doc.getMap('objects').values()].filter(map => map.get('type') === 'image').length)).toBe(1)
@@ -186,7 +205,10 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   await expect.poll(() => video.locator('.study-video-body').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(0.25, 0, 0, 0.25, 0, 0)')
   await engine(page).evaluate(() => window.__komuboard.canvas.zoomTo(1))
   await send(page, 'insert', { object: { id: '', type: 'text', authorId: 'test', x: 100, y: 400, width: 320, height: 62, runs: [{ text: 'Destino' }], fontFamily: 'system-ui', fontSize: 18, align: 'left', study: { kind: 'board', reference: { boardId: 'local:important-target', name: 'Destino' } } } })
-  await engine(page).locator('[data-study=board] button').click()
+  const boardCard = engine(page).locator('[data-study=board]')
+  await expect(boardCard).toBeVisible()
+  const boardBox = await boardCard.boundingBox()
+  await page.mouse.dblclick(boardBox.x + boardBox.width / 2, boardBox.y + boardBox.height / 2)
   await expect.poll(() => engine(page)?.url().includes('topicBoard=target')).toBe(true); await loaded(page)
   await page.getByRole('button', { name: 'Volver a la pizarra anterior' }).click(); await loaded(page, 'first')
   await peer.close()

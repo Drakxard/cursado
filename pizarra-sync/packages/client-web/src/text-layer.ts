@@ -1411,7 +1411,7 @@ export class TextLayer {
     const isImage = el.classList.contains("komu-image");
     if (isShape) this.applyShapeMetrics(el, width, height, fontSize, cam.scale);
     el.style.height = "";
-    if ((isImage || ["youtube", "review", "important", "pdf", "board"].includes(el.dataset.study || "")) && height != null) {
+    if ((isImage || ["youtube", "review", "important", "pdf", "board", "shortcut"].includes(el.dataset.study || "")) && height != null) {
       // An image is a fixed box (the <img> fills it via object-fit) — it needs a DEFINITE height,
       // not a content-growing min-height, or the box collapses and it's invisible + un-hittable.
       el.style.height = `${height * cam.scale}px`;

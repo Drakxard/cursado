@@ -50,3 +50,14 @@ export function parseBoardLinkDrag(text: string): BoardLinkReference | null {
 export function parseImportantDrag(text:string):{taskId:string}|null {
   try { const value=JSON.parse(text);return typeof value.taskId==='string'&&value.taskId.length>0&&value.taskId.length<=200?{taskId:value.taskId}:null } catch{return null}
 }
+
+export const BOARD_SHORTCUT_MIME = 'application/x-cursado-shortcut'
+export function parseBoardShortcutDrag(text: string): { name: string; url: string } | null {
+  try {
+    const value = JSON.parse(text)
+    if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 500 || typeof value.url !== 'string' || value.url.length > 4000) return null
+    const url = new URL(value.url)
+    if (!['https:', 'http:'].includes(url.protocol)) return null
+    return { name: value.name, url: url.href }
+  } catch { return null }
+}

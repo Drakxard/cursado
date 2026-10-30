@@ -121,6 +121,7 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
     })().catch(error=>{if(current)setError(error.message)})
     return ()=>{current=false;controller.abort()}
   },[reader,initialized,reference,root])
+  useEffect(() => { if (reader && error) send('board-library:reader-error') }, [reader, error])
   if(error) return <main style={{padding:24}}><p role="alert">{error}</p>{isLocalStorageMode()&&!root&&<button onClick={()=>{
     void pickWorkspaceRootHandle().then(handle=>{setReadyWorkspaceHandle(handle);setProvidedRoot(handle);setError('')}).catch(error=>setError(error.message))
   }}>Conectar carpeta</button>}{reader&&<button onClick={()=>send('board-library:reader-closed')}>Volver a la pizarra</button>}</main>

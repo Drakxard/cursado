@@ -36,6 +36,8 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const [pins, setPins] = useState<Pin[]>([]), [reader, setReader] = useState<BoardPdfReference | null>(null), [readerVisible, setReaderVisible] = useState(false)
   const [review, setReview] = useState<MigrationReport | null>(null), [attachment, setAttachment] = useState<{ id: string; study: StudyAttachment } | null>(null)
   const [closing, setClosing] = useState(false)
+  const [readerLoading, setReaderLoading] = useState(false)
+  const loadedReader = useRef<string | null>(null)
   const files = useRef<HTMLInputElement>(null), saveQueue = useRef<Promise<unknown>>(Promise.resolve()), positions = useRef(new Map<string, string>())
   const saveError = useRef<unknown>(null)
   const pendingClose = useRef<(() => void) | null>(null)
@@ -53,12 +55,13 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const initialize = () => { const value = live.current.initial; if (value) send('init', { ...value.record, name, snapshot: value.snapshot, pdfReferences, shared:!!sharedRoomId }) }
   const focusBoard = () => frame.current?.focus()
   const closeReader = () => {
+    setReaderLoading(false); send('open-finished')
     live.current.readerVisible = false
     setReaderVisible(false)
     if (!live.current.reader || !live.current.pins.some(pin => pdfKey(pin.reference) === pdfKey(live.current.reader!))) setReader(null)
     focusBoard()
   }
-  const openReader = (value: BoardPdfReference) => { live.current.reader = value; live.current.readerVisible = true; setReader(value); setReaderVisible(true); setMenu(false) }
+  const openReader = (value: BoardPdfReference) => { if (!live.current.reader || pdfKey(live.current.reader) !== pdfKey(value)) loadedReader.current = null; setReaderLoading(loadedReader.current !== pdfKey(value)); live.current.reader = value; live.current.readerVisible = true; setReader(value); setReaderVisible(true); setMenu(false) }
   const togglePdf = () => {
     if (live.current.readerVisible) closeReader()
     else { const pin = live.current.pins.at(-1); if (pin) openReader(pin.reference) }
@@ -150,6 +153,10 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       if (data.type === 'board-library:ready') {
         event.source?.postMessage({ type: 'board-library:init', session, boardId, rootHandle, reference: isReader ? live.current.reader : null, readerVisible: live.current.readerVisible, readingPosition: isReader ? positions.current.get(pdfKey(live.current.reader!)) : undefined }, { targetOrigin: location.origin })
       }
+      if (isReader && ['board-library:reader-rendered', 'board-library:reader-error'].includes(data.type)) {
+        if (live.current.reader && data.type === 'board-library:reader-rendered') loadedReader.current = pdfKey(live.current.reader)
+        setReaderLoading(false); send('open-finished')
+      }
       if (isReader && data.type === 'board-library:reading-position' && typeof data.hash === 'string' && data.hash.length <= 512 && live.current.reader) {
         positions.current.set(pdfKey(live.current.reader), data.hash)
         if (positions.current.size > 50) positions.current.delete(positions.current.keys().next().value!)
@@ -172,8 +179,8 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   }, [session, boardId, rootHandle])
   useEffect(() => {
     readerFrame.current?.contentWindow?.postMessage({ type: 'board-library:reader-visibility', session, boardId, visible: readerVisible }, location.origin)
-    if (readerVisible) readerFrame.current?.focus()
-  }, [readerVisible, reader, session, boardId])
+    if (readerVisible && !readerLoading) readerFrame.current?.focus()
+  }, [readerVisible, reader, readerLoading, session, boardId])
   useEffect(() => {
     if (!readerVisible && reader && !pins.some(pin => pdfKey(pin.reference) === pdfKey(reader))) setReader(null)
   }, [pins, readerVisible, reader])
@@ -211,7 +218,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
         <iframe key={attachment?.study.taskId || 'library'} ref={library} title="Biblioteca de Estudio" className="h-full w-full border-0" src={`/biblioteca/pizarra?session=${session}&boardId=${encodeURIComponent(boardId)}${attachment?.study.kind === 'important' ? `&mode=calendar&taskId=${encodeURIComponent(attachment.study.taskId || '')}` : ''}`} />
       </aside>}
     </div>
-    {!readerVisible && <button aria-label={backLabel} title={backLabel} disabled={closing} onClick={() => close()} className="absolute left-3 top-3 z-20 h-10 w-10 rounded-xl border bg-white shadow">{closing ? '…' : '←'}</button>}
+    {(!readerVisible || readerLoading) && <button aria-label={backLabel} title={backLabel} disabled={closing} onClick={() => close()} className="absolute left-3 top-3 z-20 h-10 w-10 rounded-xl border bg-white shadow">{closing ? '…' : '←'}</button>}
     {menu && <div className="absolute bottom-16 left-16 z-30 flex flex-col gap-1 rounded-xl border bg-white p-2 shadow-lg">
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { files.current?.click(); setMenu(false) }}>Agregar material</button>
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { setUrlInput(true); setMenu(false) }}>Link YouTube</button>
@@ -219,10 +226,10 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     </div>}
     {urlInput && <form onSubmit={addVideo} className="absolute bottom-16 left-16 z-30 flex max-w-[85vw] gap-1 rounded-lg border bg-white p-2 shadow"><input autoFocus type="url" aria-label="Link YouTube" placeholder="Link de YouTube" value={url} onChange={event => setUrl(event.target.value)} className="min-w-0 rounded border px-2" /><button type="submit">Agregar</button><button type="button" aria-label="Cerrar enlace" onClick={() => setUrlInput(false)}>×</button></form>}
     <input ref={files} hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.svg,.xlsx,.xlsm,.csv" onChange={event => { const selected = [...(event.target.files || [])]; event.target.value = ''; send('import-files', { files: selected }) }} />
-    {reader && <div aria-hidden={!readerVisible} inert={!readerVisible} role={readerVisible ? 'dialog' : undefined} aria-modal={readerVisible || undefined} aria-label={`Leer ${reader.fileName}`} className="absolute inset-0 z-40 bg-white" style={{ visibility: readerVisible ? 'visible' : 'hidden', pointerEvents: readerVisible ? 'auto' : 'none' }}>
+    {reader && <div aria-hidden={!readerVisible || readerLoading} inert={!readerVisible || readerLoading} role={readerVisible ? 'dialog' : undefined} aria-modal={readerVisible || undefined} aria-label={`Leer ${reader.fileName}`} className="absolute inset-0 z-40 bg-white" style={{ visibility: readerVisible && !readerLoading ? 'visible' : 'hidden', pointerEvents: readerVisible && !readerLoading ? 'auto' : 'none' }}>
       <iframe key={pdfKey(reader)} ref={readerFrame} title="Lector de PDF de la pizarra" className="h-full w-full border-0" src={`/biblioteca/pizarra?mode=reader&session=${session}&boardId=${encodeURIComponent(boardId)}&materialId=${reader.materialId}`} />
     </div>}
-    {attachment && !['important', 'pdf', 'board', 'youtube'].includes(attachment.study.kind) && <StudyAttachmentEditor value={attachment} onClose={() => setAttachment(null)} onSave={table => { send('update-table', { id: attachment.id, table }); setAttachment(null) }} />}
+    {attachment && !['important', 'pdf', 'board', 'shortcut', 'youtube'].includes(attachment.study.kind) && <StudyAttachmentEditor value={attachment} onClose={() => setAttachment(null)} onSave={table => { send('update-table', { id: attachment.id, table }); setAttachment(null) }} />}
     {review && !readerVisible && !error && <div role="status" className="absolute bottom-3 left-3 z-30 max-w-sm rounded-xl border bg-white p-3 text-sm shadow-lg">
       <p>¿Confirmás la migración?</p><p className="text-xs text-slate-600">{review.types.map(migrationTypeLabel).join(', ')}{review.partial.length ? ` · Conversión parcial: ${review.partial.map(migrationTypeLabel).join(', ')}` : ''}</p>
       {!!review.errors.length && <p role="alert" className="text-red-700">{review.errors.join(' · ')}</p>}

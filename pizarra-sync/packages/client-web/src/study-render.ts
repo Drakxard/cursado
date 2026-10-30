@@ -80,6 +80,12 @@ export function paintStudy(el: HTMLElement, obj: TextObject): boolean {
   } else {
     const label = document.createElement('span'); label.textContent = obj.runs.map(run => run.text).join(''); label.className = 'study-card-label'; el.append(label)
   }
+  if (['pdf', 'board', 'shortcut'].includes(study.kind)) {
+    el.title = study.kind === 'pdf' ? 'Doble toque para abrir ? Mantener presionado para fijar o desfijar' : 'Doble toque para abrir'
+    el.setAttribute('aria-label', obj.runs.map(run => run.text).join(''))
+    el.dataset.pinned = String(!!study.pinned)
+    return true
+  }
   const actions = document.createElement('span'); actions.className = 'study-card-actions'
   const action = (label: string, name: string) => {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.studyAction = name; button.setAttribute('aria-label', label)

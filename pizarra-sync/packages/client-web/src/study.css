@@ -22,3 +22,11 @@
 /* The header passes gestures through to the engine's selection/drag handling. */
 .study-video-drag{flex-shrink:0;padding:7px 10px;background:#e2e8f0;color:#334155;font:12px system-ui;cursor:move}
 .study-video-content .board-video-toolbar,.study-video-content .board-video-screen,.study-video-content .board-video-inline-error{pointer-events:auto}
+
+[data-study="pdf"],[data-study="board"],[data-study="shortcut"]{user-select:none}
+[data-study="pdf"][data-pinned="true"]{box-shadow:inset 0 0 0 2px #16a34a}
+.study-opening{animation:study-opening 2s ease-out forwards}
+.study-holding{animation:study-hold .6s linear forwards}
+@keyframes study-opening{from{box-shadow:inset 0 0 0 1000px #22c55e12}to{box-shadow:inset 0 0 0 1000px #22c55e40}}
+@keyframes study-hold{to{box-shadow:inset 0 0 0 1000px #22c55e50}}
+@media(prefers-reduced-motion:reduce){.study-opening,.study-holding{animation-duration:.01ms}}

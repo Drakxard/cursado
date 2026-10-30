@@ -8472,6 +8472,13 @@ export function SubjectWheel({
                           <Button key={shortcut.id} asChild variant="outline" className="h-8 px-2 text-[0.68rem] sm:text-xs">
                             <a
                               href={url}
+                              draggable={boardLibrary}
+                              onDragStart={event => {
+                                if (!boardLibrary) return
+                                handleShortcutPointerCancel()
+                                event.dataTransfer.effectAllowed = "copy"
+                                event.dataTransfer.setData("application/x-cursado-shortcut", JSON.stringify({ name: shortcut.label, url }))
+                              }}
                               target="_blank"
                               rel="noopener noreferrer"
                               {...commonProps}
@@ -8679,7 +8686,12 @@ export function SubjectWheel({
                             <div className="flex flex-wrap items-center gap-2">
                               {entry.external_links.map((link) => (
                                 <Button key={link.id} type="button" variant="outline" className="h-8 border-border px-3 text-xs text-foreground" asChild>
-                                  <a href={link.url} target="_blank" rel="noreferrer">
+                                  <a href={link.url} target="_blank" rel="noreferrer" draggable={boardLibrary}
+                                    onDragStart={event => {
+                                      if (!boardLibrary) return
+                                      event.dataTransfer.effectAllowed = "copy"
+                                      event.dataTransfer.setData("application/x-cursado-shortcut", JSON.stringify({ name: link.label, url: link.url }))
+                                    }}>
                                     <Link2 className="h-3.5 w-3.5" />
                                     {link.label}
                                   </a>
@@ -10202,6 +10214,13 @@ export function SubjectWheel({
                           >
                             <a
                               href={url}
+                              draggable={boardLibrary}
+                              onDragStart={event => {
+                                if (!boardLibrary) return
+                                handleShortcutPointerCancel()
+                                event.dataTransfer.effectAllowed = "copy"
+                                event.dataTransfer.setData("application/x-cursado-shortcut", JSON.stringify({ name: shortcut.label, url }))
+                              }}
                               target="_blank"
                               rel="noopener noreferrer"
                               onPointerDown={() => handleShortcutPointerDown(shortcut)}

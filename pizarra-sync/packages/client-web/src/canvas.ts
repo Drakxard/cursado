@@ -1937,6 +1937,12 @@ export class BoardCanvas {
     return this.clipboard.length > 0;
   }
   /** The camera's visible world rect (VR seeds its panel viewport window from this). */
+  studyHitAt(clientX: number, clientY: number): string | null {
+    if (this.tool !== 'select') return null
+    const rect = this.stage.container().getBoundingClientRect(), view = this.worldViewport()
+    return this.textLayer.hitTest({ x: view.x + (clientX - rect.left) / rect.width * view.width, y: view.y + (clientY - rect.top) / rect.height * view.height })
+  }
+
   worldViewport(): { x: number; y: number; width: number; height: number } {
     return this.viewport.worldViewport();
   }
