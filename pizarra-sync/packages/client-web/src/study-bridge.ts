@@ -3,7 +3,7 @@ import { addObject, objectsMap, type BoardObject } from '@komuboard/shared'
 import type YProvider from 'y-partyserver/provider'
 import type { BoardCanvas } from './canvas'
 import { uploadImage, UploadError } from './uploads'
-import { convertStudyBoard, migrationErrorSummary, studyCard, STUDY_CONVERTER_VERSION, type StudyObject, type MigrationReport } from '../../../../lib/study-board-migration'
+import { convertStudyBoard, repairStudyReviewMarker, migrationErrorSummary, studyCard, STUDY_CONVERTER_VERSION, type StudyObject, type StudyAttachment, type MigrationReport } from '../../../../lib/study-board-migration'
 import { BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, parseBoardPdfDrag, parseBoardLinkDrag, parseImportantDrag } from '../../../../lib/board-library-contract'
 import './study.css'
 import { disposeStudy } from './study-render'
@@ -131,6 +131,17 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
         report = { version: STUDY_CONVERTER_VERSION, types: [], partial: [], errors: [], count: 0 }
         doc.transact(() => { marker.set('report', report!); marker.set('complete', true) }, 'study-migration')
       }
+      // Repair v1 placeholders in place, including already accepted/checkpointed boards.
+      doc.transact(() => {
+        for (const map of objectsMap(doc).values()) {
+          const repaired = repairStudyReviewMarker(map.toJSON())
+          if (repaired) for (const [key, value] of Object.entries(repaired)) map.set(key, value)
+        }
+        if (report?.partial.includes('shapes:review-marker')) {
+          report = { ...report, version: STUDY_CONVERTER_VERSION, partial: report.partial.filter(type => type !== 'shapes:review-marker') }
+          marker.set('report', report)
+        }
+      }, 'study-migration-repair')
       // New PDFs in a container are appended once, without reopening any reader.
       doc.transact(() => {
         for (const reference of data.pdfReferences || []) {
@@ -201,7 +212,12 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     const element = button?.closest<HTMLElement>('[data-id]')
     if (!element) return
     event.stopPropagation()
-    const map = objectsMap(doc).get(element.dataset.id!), study = map?.get('study')
+    const map = objectsMap(doc).get(element.dataset.id!), study = map?.get('study') as StudyAttachment | undefined
+    if (study?.kind === 'review') {
+      if (study.view && !(event as MouseEvent).shiftKey) canvas.restoreStudyReviewView(study.view)
+      else map!.set('study', { ...study, view: canvas.captureStudyReviewView() })
+      return
+    }
     send(button!.dataset.studyAction === 'pin' ? 'pin' : 'open', { id: element.dataset.id, study })
   }, true)
   document.addEventListener('keydown', event => {

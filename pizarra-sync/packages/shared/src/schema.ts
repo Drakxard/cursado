@@ -1033,7 +1033,7 @@ function readText(m: Y.Map<unknown>): TextObject | null {
   if (borderStyle === "solid" || borderStyle === "dashed" || borderStyle === "none")
     text.borderStyle = borderStyle;
   const study = m.get("study");
-  if (study && typeof study === "object" && ["pdf", "board", "important", "youtube", "table", "legacy"].includes(String((study as {kind?:unknown}).kind))) text.study = study as NonNullable<TextObject["study"]>;
+  if (study && typeof study === "object" && ["pdf", "board", "important", "review", "youtube", "table", "legacy"].includes(String((study as {kind?:unknown}).kind))) text.study = study as NonNullable<TextObject["study"]>;
   return text;
 }
 

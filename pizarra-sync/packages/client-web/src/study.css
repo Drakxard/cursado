@@ -3,10 +3,15 @@
 .study-card-actions{display:flex;gap:5px;padding:2px 8px;position:relative;z-index:1}
 .study-card-actions button{font:12px system-ui;border:1px solid #94a3b8;background:white;color:#1e293b;border-radius:5px;padding:3px 6px;pointer-events:auto;cursor:pointer}
 .study-plus{font-size:26px!important}
-.komu-text:is([data-study="pdf"],[data-study="board"]){border-radius:calc(10px * var(--study-scale,1))!important}
-:is([data-study="pdf"],[data-study="board"]) .study-card-label{padding:calc(8px * var(--study-scale,1)) calc(12px * var(--study-scale,1));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-:is([data-study="pdf"],[data-study="board"]) .study-card-actions{gap:calc(5px * var(--study-scale,1));padding:calc(2px * var(--study-scale,1)) calc(8px * var(--study-scale,1))}
-:is([data-study="pdf"],[data-study="board"]) .study-card-actions button{flex-shrink:0;white-space:nowrap;font-size:calc(12px * var(--study-scale,1));border-radius:calc(5px * var(--study-scale,1));padding:calc(3px * var(--study-scale,1)) calc(6px * var(--study-scale,1))}
+.komu-text[data-study]{border-radius:calc(10px * var(--study-scale,1))!important;border-width:calc(1px * var(--study-scale,1))!important}
+[data-study] .study-card-label{padding:calc(8px * var(--study-scale,1)) calc(12px * var(--study-scale,1));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-study] .study-card-actions{gap:calc(5px * var(--study-scale,1));padding:calc(2px * var(--study-scale,1)) calc(8px * var(--study-scale,1))}
+[data-study] .study-card-actions button{flex-shrink:0;white-space:nowrap;font-size:calc(12px * var(--study-scale,1));border-radius:calc(5px * var(--study-scale,1));padding:calc(3px * var(--study-scale,1)) calc(6px * var(--study-scale,1))}
+.komu-text[data-study="review"]{padding:0!important;border:0!important;background:transparent!important;min-height:0!important}
+.study-review-marker,.study-countdown{display:block;width:100%;height:100%;padding:0;border:0;background:transparent;cursor:pointer;font:inherit;color:inherit;pointer-events:auto}
+.study-review-marker svg{display:block;width:100%;height:100%}
+.study-countdown{font-weight:700;text-align:center;color:white}
+.study-countdown .study-card-label{padding:0}
 .study-sheet{border-collapse:collapse;width:100%;background:white;color:#1f2937;font:14px system-ui}
 .study-sheet td{border:1px solid #cbd5e1;padding:5px 8px;min-width:70px}
 .study-sheet caption{padding:5px;background:#e2e8f0;text-align:left}

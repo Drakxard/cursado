@@ -1944,6 +1944,15 @@ export class BoardCanvas {
     if ([camera.x, camera.y, camera.zoom].every(Number.isFinite) && camera.zoom > 0)
       this.viewport.applyTransform(this.viewport.clamp(camera.zoom), { x: camera.x, y: camera.y });
   }
+  captureStudyReviewView() {
+    const view = this.worldViewport()
+    return { center: { x: view.x + view.width / 2, y: view.y + view.height / 2 }, zoom: this.viewport.scale() }
+  }
+  restoreStudyReviewView(view: { center: { x: number; y: number }; zoom: number }) {
+    if (![view.center?.x, view.center?.y, view.zoom].every(Number.isFinite) || view.zoom <= 0) return
+    const zoom = this.viewport.clamp(view.zoom)
+    this.restoreStudyView({ x: this.stage.width() / 2 - view.center.x * zoom, y: this.stage.height() / 2 - view.center.y * zoom, zoom })
+  }
   /** Right-click target resolution: hit-test the point and make sure the object under it is selected
    *  (an existing multi-selection is KEPT when the point lands inside it, so the menu can act on the
    *  whole selection — matching every canvas app). Returns which context menu applies. */

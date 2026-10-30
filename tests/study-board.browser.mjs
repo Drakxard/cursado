@@ -14,11 +14,16 @@ const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   window.read=async path=>{let directory=fs;const parts=path.split('/');for(const part of parts.slice(0,-1))directory=await directory.getDirectoryHandle(part);return JSON.parse(await(await(await directory.getFileHandle(parts.at(-1))).getFile()).text())};
   window.openBoard=id=>root.render(<TopicBoardOverlay key={id} boardId={id} name={id} rootHandle={fs} pdfReferences={[{materialId:1,subjectId:'subject',fileName:'Uno.pdf',workspaceFileId:'workspace://teoria/uno.pdf'},{materialId:2,subjectId:'subject',fileName:'Dos.pdf',workspaceFileId:'workspace://teoria/dos.pdf'}]} onClose={()=>{window.boardClosed=true;root.render(<button onClick={()=>window.openBoard(id)}>Reabrir</button>)}}/>);
   const taskWriter=await(await(await fs.getDirectoryHandle('progreso')).getFileHandle('importantes.json',{create:true})).createWritable();await taskWriter.write(JSON.stringify({version:1,tasks:[{id:'task',text:'Examen',startDate:'2026-01-01',dueDate:'2099-12-31',url:'',topics:[]}]}));await taskWriter.close();
-  for(const id of ['first','second','image','target','upload-failure']){
+  for(const id of ['first','second','image','target','upload-failure','review']){
     let present=false;try{await dir.getFileHandle(id+'.json');present=true}catch{}
     if(present)continue;
     const content={camera:{x:0,y:0,zoom:1},strokes:[{id:'s',points:[{x:80,y:90},{x:260,y:90}],width:3,color:'#ff0000'}],texts:[{id:'t',x:90,y:140,text:'Texto '+id,color:'#000000',fontSize:24}],media:[],shapes:[],tables:[],graphs:[],videos:[]};
     const assets={};
+    if(id==='review')content.shapes.push(
+      {id:'marker',kind:'circle',visualType:'review-marker',x:100,y:200,width:56,height:56,color:'#202020',strokeWidth:3.5,reviewView:{center:{x:500,y:400},zoom:1}},
+      {id:'countdown',kind:'rectangle',visualType:'important-countdown',x:400,y:200,width:140,height:64,importantTaskId:'task',label:'Examen'},
+      {id:'shape',kind:'rectangle',x:600,y:200,width:120,height:80,color:'#000',strokeWidth:2,label:'Figura'}
+    );
     if(id==='image'){content.media.push({id:'i',kind:'image',assetId:'asset',x:90,y:210,width:100,height:100});assets.asset='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='}
     if(id==='upload-failure'){for(let i=0;i<3;i++){content.media.push({id:'image-'+i,kind:'image',assetId:'asset-'+i,x:90+i*120,y:210,width:100,height:100});assets['asset-'+i]='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='}}
     const writer=await(await dir.getFileHandle(id+'.json',{create:true})).createWritable();await writer.write(JSON.stringify({version:1,boardId:id,name:id,content,assets}));await writer.close();
@@ -196,7 +201,8 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   assert.equal(cancelled.record.status, 'cancelled'); assert.ok(cancelled.record.draft); assert.equal(cancelled.approved.images, undefined); assert.equal(cancelled.original.content.media.length, 1)
   await page.getByRole('button', { name: 'Reabrir' }).click(); await loaded(page)
   await page.getByRole('button', { name: 'Aceptar', exact: true }).click()
-  await expect.poll(() => page.evaluate(async () => (await window.read('progreso/pizarra-sync/migration-approvals.json')).images)).toBe(1)
+  const converterVersion=await engine(page).evaluate(()=>window.__komuboard.doc.getMap('study-migration').get('report').version)
+  await expect.poll(() => page.evaluate(async () => (await window.read('progreso/pizarra-sync/migration-approvals.json')).images)).toBe(converterVersion)
   assert.deepEqual(errors, [])
 })
 
@@ -284,4 +290,40 @@ test('failed migration has one compact notice and retries uploads without losing
   assert.equal(posts, 6); assert.equal(throttled, true)
   const result = await engine(page).evaluate(() => ({ count: window.__komuboard.doc.getMap('objects').size, order: window.__komuboard.doc.getArray('order').toArray() }))
   assert.equal(result.count, 7); assert.equal(new Set(result.order).size, 7)
+})
+
+
+test('review markers migrate and repair accepted placeholders; countdown and marker geometry follows zoom', { timeout: 120000 }, async t => {
+  const browser=await chromium.launch({channel:process.env.CI?undefined:'chrome'}); t.after(()=>browser.close())
+  const context=await browser.newContext({viewport:{width:1440,height:1000}}); await fixture(context)
+  const page=await context.newPage(); await page.goto(origin+'/study-fixture?board=review'); await loaded(page)
+  await expect(page.getByText('Elemento anterior: shapes:review-marker')).toHaveCount(0)
+  await page.getByRole('button',{name:'Aceptar',exact:true}).click()
+  const frame=engine(page), marker=frame.locator('[data-study=review]'), counter=frame.locator('[data-study=important]')
+  await expect(marker).toHaveCount(1); await expect(counter.locator('.study-card-label')).toHaveText(/^\d+d$/)
+  const sizes=[]
+  for(const zoom of [1,.25,2]) {
+    await frame.evaluate(zoom=>window.__komuboard.canvas.restoreStudyView({x:0,y:0,zoom}),zoom)
+    await expect.poll(()=>marker.evaluate(el=>parseFloat(el.style.width))).toBe(56*zoom)
+    sizes.push(await Promise.all([marker.boundingBox(),counter.boundingBox(),frame.locator('[data-shape=rectangle]').boundingBox()]))
+  }
+  for(let i=0;i<3;i++) for(const [index,ratio] of [[1,.25],[2,2]]) {
+    assert.ok(Math.abs(sizes[index][i].width/sizes[0][i].width-ratio)<.02)
+    assert.ok(Math.abs(sizes[index][i].height/sizes[0][i].height-ratio)<.02)
+  }
+  await frame.evaluate(()=>window.__komuboard.canvas.restoreStudyView({x:0,y:0,zoom:1}))
+  await marker.getByRole('button',{name:'Ir al repaso'}).click()
+  const view=await frame.evaluate(()=>window.__komuboard.canvas.captureStudyReviewView())
+  assert.ok(Math.abs(view.center.x-500)<.01); assert.ok(Math.abs(view.center.y-400)<.01)
+  const original={id:'old',kind:'circle',visualType:'review-marker',x:250,y:300,width:56,height:56,color:'#202020'}
+  await send(page,'insert',{object:{id:'repair-me',type:'text',authorId:'test',x:280,y:330,width:320,height:62,runs:[{text:'Old placeholder'}],fontFamily:'system-ui',fontSize:18,align:'left',study:{kind:'legacy',original},legacyOriginal:original}})
+  await frame.locator('[data-study=legacy]').waitFor()
+  const repairedId=await frame.locator('[data-study=legacy]').getAttribute('data-id')
+  await page.getByRole('button',{name:/Volver a Estudio/}).click()
+  await expect(page.getByRole('button',{name:'Reabrir',exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'Reabrir',exact:true}).click(); await loaded(page)
+  await expect(engine(page).locator(`[data-id="${repairedId}"][data-study=review]`)).toHaveCount(1)
+  const repaired=await engine(page).evaluate(id=>window.__komuboard.doc.getMap('objects').get(id).toJSON(),repairedId)
+  assert.equal(repaired.x,280); assert.equal(repaired.y,330); assert.equal(repaired.width,56)
+  await expect(page.getByText('Elemento anterior: shapes:review-marker')).toHaveCount(0)
 })

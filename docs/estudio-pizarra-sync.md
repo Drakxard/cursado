@@ -33,6 +33,13 @@ Una pizarra posterior solo pregunta por tipos nuevos o conversiones parciales.
 Cancelar vuelve a Estudio y conserva el borrador sin validar tipos nuevos.
 Los errores impiden aceptar y mantienen el original intacto.
 
+El conversor v2 conserva los marcadores de repaso como círculos interactivos y
+su vista guardada. Al reabrir, también repara las tarjetas `shapes:review-marker`
+de conversiones anteriores usando el original guardado en cada objeto, sin
+reimportar la pizarra ni perder posiciones editadas. Clic recupera la vista;
+Mayús + clic la actualiza. Los marcadores y contadores mantienen su geometría y
+acompañan el zoom como el resto del contenido, incluidos bordes y controles.
+
 Las migraciones reutilizan imágenes ya presentes en R2 por su hash, incluso al
 reabrir después de un fallo. Las subidas se encolan respetando el límite existente
 de 30 por minuto del Worker, con margen para otras ventanas. Un HTTP 429 respeta

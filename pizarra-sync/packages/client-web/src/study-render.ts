@@ -47,6 +47,24 @@ export function paintStudy(el: HTMLElement, obj: TextObject): boolean {
   }
   disposeStudy(el)
   el.replaceChildren()
+  if (study.kind === 'review') {
+    const button = document.createElement('button')
+    button.type = 'button'; button.dataset.studyAction = 'review'; button.className = 'study-review-marker'
+    button.setAttribute('aria-label', study.view ? 'Ir al repaso' : 'Guardar vista de repaso')
+    button.title = 'Clic: ir al repaso. Mayús + clic: guardar la vista actual.'
+    button.style.color = study.view ? '#16a34a' : obj.borderColor || '#202020'
+    button.innerHTML = '<svg viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="25" fill="white" stroke="currentColor" stroke-width="3.5"/><path d="M28 15V30" stroke="currentColor" stroke-width="5" stroke-linecap="round"/><circle cx="28" cy="40" r="2.8" fill="currentColor"/></svg>'
+    button.addEventListener('pointerdown', event => event.stopPropagation())
+    el.append(button); return true
+  }
+  if (study.kind === 'important') {
+    const button = document.createElement('button')
+    button.type = 'button'; button.dataset.studyAction = 'open'; button.className = 'study-countdown'
+    button.setAttribute('aria-label', 'Abrir tarea del contador')
+    const label = document.createElement('span'); label.className = 'study-card-label'; label.textContent = obj.runs.map(run => run.text).join('')
+    button.append(label); button.addEventListener('pointerdown', event => event.stopPropagation()); el.append(button)
+    return true
+  }
   if (study.kind === 'table' && study.table) {
     const table = document.createElement('table')
     table.className = 'study-sheet'

@@ -2,11 +2,37 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { memoryWorkspace } from './helpers/cooperation-filesystem.mjs'
 import { writeWorkspaceJson, readWorkspaceJson } from '../lib/workspace-json.ts'
-import { convertStudyBoard, migrationNeedsReview, acceptMigrationTypes, STUDY_CONVERTER_VERSION, type LegacyStudyBoard } from '../lib/study-board-migration.ts'
+import { convertStudyBoard, repairStudyReviewMarker, migrationNeedsReview, acceptMigrationTypes, STUDY_CONVERTER_VERSION, type LegacyStudyBoard } from '../lib/study-board-migration.ts'
 import { openStudyBoard, saveStudyBoard, confirmStudyMigration } from '../lib/study-board-workspace.ts'
 
 const snapshot = (boardId = 'example'): LegacyStudyBoard => ({ version: 1, boardId, name: 'Example', assets: {}, content: { strokes: [{ points: [{ x: 12, y: 20 }, { x: 40, y: 80 }], color: '#ff0000', width: 3 }], texts: [{ id: 'a', text: 'Trabajado', x: 30, y: 40, fontSize: 24, color: '#000000' }], media: [], shapes: [], camera: { x: 3, y: 7, zoom: 2 } } })
 const upload = async () => 'images/example.png'
+
+test('review markers keep their circle, geometry and saved camera without partial migration', async () => {
+  const source = snapshot()
+  const marker = { id:'review',kind:'circle',visualType:'review-marker',x:1135.370460069432,y:145.8020705296085,width:56,height:56,color:'#202020',strokeWidth:3.5,reviewView:{center:{x:693.2792668363143,y:437.52452590707617},zoom:1},labelFontSize:16 }
+  source.content.shapes=[marker]
+  const result=await convertStudyBoard(source,upload)
+  const migrated=result.objects.find(object=>object.study?.kind==='review')!
+  assert.equal(migrated.width,56); assert.equal(migrated.height,56)
+  assert.equal(migrated.x,marker.x); assert.equal(migrated.shape,'ellipse')
+  assert.deepEqual(migrated.study.view,marker.reviewView)
+  assert.deepEqual(result.report.partial,[])
+  assert.equal(migrated.legacyOriginal,marker)
+})
+
+test('repair old marker placeholders in place without resetting moved/resized objects or other cards', () => {
+  const original={id:'review',kind:'circle',visualType:'review-marker',x:100,y:200,width:56,height:56,reviewView:{center:{x:500,y:600},zoom:2}}
+  const placeholder={id:'stable-id',type:'text',x:300,y:400,width:320,height:62,rotation:12,study:{kind:'legacy',original},legacyOriginal:original}
+  const repaired=repairStudyReviewMarker(placeholder)!
+  assert.equal(repaired.id,'stable-id'); assert.equal(repaired.x,300); assert.equal(repaired.y,400)
+  assert.equal(repaired.width,56); assert.equal(repaired.height,56); assert.equal(repaired.rotation,12)
+  assert.deepEqual(repaired.study.view,original.reviewView)
+  assert.equal(repairStudyReviewMarker({...placeholder,width:90,height:110})!.width,90)
+  assert.equal(repairStudyReviewMarker({...placeholder,study:{kind:'pdf'}}),null)
+  assert.equal(repairStudyReviewMarker({...placeholder,...repaired}),null)
+  assert.equal(placeholder.width,320)
+})
 
 test('conversion preserves geometry, originals and stable identifiers without mutating the source', async () => {
   const source = snapshot(); source.content.strokes[0].groupId = 'group'

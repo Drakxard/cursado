@@ -1,6 +1,6 @@
 // This converter deliberately has no dependency on either board engine.
 // Originals remain in progreso/pizarras; only the returned objects enter Yjs.
-export const STUDY_CONVERTER_VERSION = 1
+export const STUDY_CONVERTER_VERSION = 2
 export type StudyObject = Record<string, any>
 export type LegacyStudyBoard = { version: number; boardId: string; name: string; content: Record<string, any>; assets: Record<string, string> }
 export type MigrationReport = { version: number; types: string[]; partial: string[]; errors: string[]; count: number }
@@ -14,7 +14,21 @@ export function migrationErrorSummary(errors: string[]) {
   if (counts.size > 3) lines.push(`Y ${counts.size - 3} problemas adicionales.`)
   return lines.join('\n')
 }
-export type StudyAttachment = { kind: 'pdf' | 'board' | 'important' | 'youtube' | 'table' | 'legacy'; reference?: any; taskId?: string; videoId?: string; start?: number; end?: number; table?: any; original?: any; pinned?: boolean }
+export type StudyAttachment = { kind: 'pdf' | 'board' | 'important' | 'review' | 'youtube' | 'table' | 'legacy'; reference?: any; taskId?: string; videoId?: string; start?: number; end?: number; table?: any; original?: any; pinned?: boolean; view?: { center: { x: number; y: number }; zoom: number } }
+
+export function studyReviewMarker(id: string, item: StudyObject): StudyObject {
+  const view = item.reviewView
+  const valid = view && [view.center?.x, view.center?.y, view.zoom].every(Number.isFinite) && view.zoom >= .01 && view.zoom <= 5
+  return { ...studyCard(id, '!', { kind: 'review', ...(valid ? { view: structuredClone(view) } : {}) }), x: item.x ?? 0, y: item.y ?? 0, width: item.width ?? 56, height: item.height ?? 56, fontSize: item.labelFontSize ?? 16, shape: 'ellipse', bg: '#fff', borderColor: valid ? '#16a34a' : item.color || '#202020' }
+}
+
+/** Upgrade only known placeholder cards. Never reimport a board or overwrite user edits. */
+export function repairStudyReviewMarker(object: StudyObject): StudyObject | null {
+  const original = object.legacyOriginal ?? object.study?.original
+  if (object.study?.kind !== 'legacy' || original?.visualType !== 'review-marker') return null
+  const repaired = studyReviewMarker(object.id, original)
+  return { ...repaired, x: object.x, y: object.y, rotation: object.rotation ?? 0, ...(object.groupId ? { groupId: object.groupId } : {}), width: object.width === 320 ? repaired.width : object.width ?? repaired.width, height: object.height === 62 ? repaired.height : object.height ?? repaired.height }
+}
 
 export function migrationNeedsReview(report: MigrationReport, approved: Record<string, number>) {
   return report.count > 0 && (report.errors.length > 0 || report.partial.length > 0 || report.types.some(type => approved[type] !== report.version))
@@ -49,6 +63,9 @@ export async function convertStudyBoard(snapshot: LegacyStudyBoard, image: (item
         type = item.pdfSource ? 'pdf-pages' : 'images'
         object = { ...base, type: 'image', src: await image(item, snapshot.assets[item.assetId]), width: item.width, height: item.height }
         if (item.crop) { partial.add(type); object.legacyOriginal = item }
+      } else if (kind === 'shapes' && item.visualType === 'review-marker') {
+        type = 'shapes:review-marker'
+        object = { ...studyReviewMarker(id, item), ...base }
       } else if (kind === 'shapes' && ['pdf-shortcut', 'board-shortcut', 'important-countdown'].includes(item.visualType)) {
         type = item.visualType
         const study: StudyAttachment = item.visualType === 'pdf-shortcut' ? { kind: 'pdf', reference: item.pdfReference, pinned: !!item.pdfPinned }
