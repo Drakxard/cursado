@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
+import { StudyBoardNavigationContext } from './study-board-navigation'
 import { InlineTableEditor } from './study-inline-table-editor'
-import { boardPdfReference, type BoardPdfReference, type BoardLinkReference } from '@/lib/board-library-contract'
+import { boardPdfReference, parseBoardLinkDrag, type BoardPdfReference, type BoardLinkReference } from '@/lib/board-library-contract'
 import { openStudyBoard, saveStudyBoard, confirmStudyMigration } from '@/lib/study-board-workspace'
 import { migrationNeedsReview, migrationErrorSummary, migrationTypeLabel, studyCard, type MigrationReport, type StudyAttachment } from '@/lib/study-board-migration'
 import { readImportantTasks, importantTaskProgress, importantCountdownStyle } from '@/lib/important-tasks'
@@ -19,7 +20,12 @@ const pdfKey = (reference: BoardPdfReference) => reference.sharedPdf?.hash || `$
 const localPdfKey = (reference: BoardPdfReference) => JSON.stringify([reference.subjectId,reference.materialId,reference.workspaceFileId])
 
 export function StudyTopicBoardOverlay(props: StudyTopicBoardProps) {
+  const delegate = useContext(StudyBoardNavigationContext)
+  useEffect(() => {
+    if (delegate) delegate({ boardId: `local:important-${props.boardId}`, name: props.name, topic: { pdfReferences: props.pdfReferences, cooperationSubjectId: props.cooperationSubjectId, cooperationWeekNumber: props.cooperationWeekNumber } })
+  }, [delegate, props.boardId, props.name, props.pdfReferences, props.cooperationSubjectId, props.cooperationWeekNumber])
   const [stack, setStack] = useState<Destination[]>([{ boardId: props.boardId, name: props.name, pdfReferences: props.pdfReferences, cooperationSubjectId: props.cooperationSubjectId, cooperationWeekNumber: props.cooperationWeekNumber }])
+  if (delegate) return null
   const destination = stack[stack.length - 1]!
   // A new session owns all iframe messages and resources for one board.
   return <StudyBoardSession key={destination.boardId} {...props} {...destination} backLabel={stack.length > 1 ? 'Volver a la pizarra anterior' : props.backLabel}
@@ -70,6 +76,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const navigate = (reference: BoardLinkReference) => {
     const id = reference.boardId.startsWith('local:important-') ? reference.boardId.slice(16) : reference.boardId
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(id)) { setError('Este acceso no pertenece a una pizarra de Estudio.'); return }
+    if (id === boardId) { setSplit(false); setAttachment(null); focusBoard(); return }
     close(() => onNavigate({ boardId: id, name: reference.name, ...reference.topic }))
   }
   const refreshTasks = async () => {
@@ -150,6 +157,10 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       }
       const isReader = event.source === readerFrame.current?.contentWindow, isLibrary = event.source === library.current?.contentWindow
       if (!isReader && !isLibrary) return
+      if (isLibrary && data.type === 'board-library:open-board') {
+        const reference = parseBoardLinkDrag(JSON.stringify(data.reference))
+        if (reference) navigate(reference)
+      }
       if (data.type === 'board-library:ready') {
         event.source?.postMessage({ type: 'board-library:init', session, boardId, rootHandle, reference: isReader ? live.current.reader : null, readerVisible: live.current.readerVisible, readingPosition: isReader ? positions.current.get(pdfKey(live.current.reader!)) : undefined }, { targetOrigin: location.origin })
       }

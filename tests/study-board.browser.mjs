@@ -8,9 +8,11 @@ const origin = process.env.STUDY_TEST_ORIGIN || 'http://127.0.0.1:5173'
 const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   import {createRoot} from 'react-dom/client';
   import {TopicBoardOverlay} from './components/topic-board-overlay';
+  import {StudyBoardNavigationContext} from './components/study-board-navigation';
   const fs=await navigator.storage.getDirectory();
   const dir=await(await fs.getDirectoryHandle('progreso',{create:true})).getDirectoryHandle('pizarras',{create:true});
   const root=createRoot(document.getElementById('root'));
+  window.delegateBoard=()=>root.render(<StudyBoardNavigationContext.Provider value={reference=>{window.delegatedBoard=reference}}><TopicBoardOverlay boardId="target" name="Destino" rootHandle={fs} onClose={()=>{}} /></StudyBoardNavigationContext.Provider>);
   window.read=async path=>{let directory=fs;const parts=path.split('/');for(const part of parts.slice(0,-1))directory=await directory.getDirectoryHandle(part);return JSON.parse(await(await(await directory.getFileHandle(parts.at(-1))).getFile()).text())};
   window.openBoard=id=>root.render(<TopicBoardOverlay key={id} boardId={id} name={id} rootHandle={fs} pdfReferences={[{materialId:1,subjectId:'subject',fileName:'Uno.pdf',workspaceFileId:'workspace://teoria/uno.pdf'},{materialId:2,subjectId:'subject',fileName:'Dos.pdf',workspaceFileId:'workspace://teoria/dos.pdf'}]} onClose={()=>{window.boardClosed=true;root.render(<button onClick={()=>window.openBoard(id)}>Reabrir</button>)}}/>);
   const taskWriter=await(await(await fs.getDirectoryHandle('progreso')).getFileHandle('importantes.json',{create:true})).createWritable();await taskWriter.write(JSON.stringify({version:1,tasks:[{id:'task',text:'Examen',startDate:'2026-01-01',dueDate:'2099-12-31',url:'',topics:[]}]}));await taskWriter.close();
@@ -226,6 +228,36 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   const converterVersion=await engine(page).evaluate(()=>window.__komuboard.doc.getMap('study-migration').get('report').version)
   await expect.poll(() => page.evaluate(async () => (await window.read('progreso/pizarra-sync/migration-approvals.json')).images)).toBe(converterVersion)
   assert.deepEqual(errors, [])
+})
+
+test('library navigation replaces board sessions instead of accumulating embedded boards', { timeout: 90000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext(); await fixture(context)
+  const page = await context.newPage()
+  await page.goto(origin + '/study-fixture?board=first'); await loaded(page)
+  for (const boardId of ['second', 'target', 'first']) {
+    const accept = page.getByRole('button', { name: 'Aceptar', exact: true })
+    if (await accept.isVisible()) await accept.click()
+    await engine(page).getByRole('button', { name: 'Agregar a la pizarra' }).click()
+    await page.getByRole('button', { name: 'Biblioteca', exact: true }).click()
+    const previous = page.frames().find(frame => frame.url().includes('/study-board/index.html'))
+    const libraryFrame = page.frames().find(frame => frame.url().includes('/biblioteca/pizarra'))
+    await libraryFrame.evaluate(boardId => {
+      const params = new URLSearchParams(location.search)
+      parent.postMessage({ type: 'board-library:open-board', session: params.get('session'), boardId: params.get('boardId'), reference: { boardId: `local:important-${boardId}`, name: boardId } }, location.origin)
+    }, boardId)
+    await loaded(page, boardId)
+    await expect(page.locator('iframe')).toHaveCount(1)
+    await expect.poll(() => previous.isDetached()).toBe(true)
+    assert.ok(await page.evaluate(async id => (await window.read(`progreso/pizarra-sync/${id}.json`)).draft, new URL(previous.url()).searchParams.get('topicBoard')))
+  }
+  await page.getByRole('button', { name: 'Volver a la pizarra anterior' }).click(); await loaded(page, 'target')
+  await expect(page.locator('iframe')).toHaveCount(1)
+  // The same adapter used by subjects and Important tasks delegates before
+  // creating a session when it runs inside the library's React context.
+  await page.evaluate(() => window.delegateBoard())
+  await expect(page.locator('iframe')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => window.delegatedBoard?.boardId)).toBe('local:important-target')
 })
 
 test('Shapes stay active for repeated arrows and figures until Escape or a tool change', { timeout: 60000 }, async t => {

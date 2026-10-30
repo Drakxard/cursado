@@ -1,13 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
+import { StudyBoardNavigationContext } from './study-board-navigation'
 import { useSearchParams } from 'next/navigation'
 import type { AuthSession } from '@/lib/authz'
 import ImportantProgressView from './important-progress-view'
 import { SubjectWheelLoader } from './subject-wheel-loader'
 import { EmbeddedWorkspaceProvider } from './local-workspace-provider'
 import { PracticeViewerClient } from '@/app/practice/viewer/practice-viewer-client'
-import { boardPdfReference, type BoardPdfReference } from '@/lib/board-library-contract'
+import { boardPdfReference, type BoardPdfReference, type BoardLinkReference } from '@/lib/board-library-contract'
 import { getLocalMaterialById } from '@/lib/local-workspace-data'
 import { getSubjectById } from '@/lib/subjects'
 import { downloadStudyPdf } from '@/lib/study-board-pdf'
@@ -19,6 +20,9 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
   const params = useSearchParams(), session = params.get('session'), boardId = params.get('boardId')
   const reader = params.get('mode') === 'reader'
   const calendar = params.get('mode') === 'calendar'
+  const navigateBoard = useCallback((reference: BoardLinkReference) => {
+    parent.postMessage({ type: 'board-library:open-board', session, boardId, reference }, location.origin)
+  }, [session, boardId])
   const [providedRoot,setProvidedRoot] = useState<FileSystemDirectoryHandle | null>(null)
   const [initialized,setInitialized] = useState(false)
   const [reference,setReference] = useState<BoardPdfReference | null>(null)
@@ -130,5 +134,5 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
     ? <PracticeViewerClient material={material} materialId={reference.materialId} mode="inline" boardReader onRequestClose={()=>send('board-library:reader-closed')} />
     : download !== null ? <div role="status" style={{padding:24}}><p>Descargando {reference?.fileName}: {download}%</p><progress value={download} max={100} style={{width:'min(360px, 100%)'}} /></div> : <div aria-busy="true" aria-label="Abriendo PDF" />}</div>
     : <SubjectWheelLoader authSession={authSession} boardLibrary />
-  return root ? <EmbeddedWorkspaceProvider rootHandle={root}>{content}</EmbeddedWorkspaceProvider> : content
+  return <StudyBoardNavigationContext.Provider value={navigateBoard}>{root ? <EmbeddedWorkspaceProvider rootHandle={root}>{content}</EmbeddedWorkspaceProvider> : content}</StudyBoardNavigationContext.Provider>
 }
