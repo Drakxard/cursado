@@ -77,7 +77,10 @@ test('study dialog renders local mindmaps with separate KaTeX rows and inserts t
 @endmindmap`
   await code.fill(source)
   const insert = page.getByRole('button', { name: 'Insertar', exact: true })
-  await expect(insert).toBeEnabled({ timeout: 60000 })
+  await expect.poll(async () => {
+    if (await page.getByRole('alert').count()) throw new Error(await page.getByRole('alert').textContent())
+    return insert.isEnabled()
+  }, { timeout: 60000 }).toBe(true)
   const rows = await page.evaluate(() => window.formulaRows)
   assert.equal(rows.flat().filter(row => row.math).length, 3)
   assert.deepEqual(rows[1].map(row => row.kind), ['text', 'math', 'text'])
@@ -125,6 +128,23 @@ test('exact variation of parameters map completes on mobile with an older board 
   const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true })
   await context.addInitScript(() => {
     window.renderedLabels = 0
+    window.labelInk = []
+    const draw = CanvasRenderingContext2D.prototype.drawImage
+    CanvasRenderingContext2D.prototype.drawImage = function(image, ...args) {
+      if (image instanceof HTMLCanvasElement && args.length === 4) {
+        const pixels = image.getContext('2d').getImageData(0, 0, image.width, image.height).data
+        let ink = 0
+        for (let i = 3; i < pixels.length; i += 4) if (pixels[i]) ink++
+        window.parent.labelInk.push(ink)
+      }
+      return draw.call(this, image, ...args)
+    }
+    window.labelFrameWaits = 0
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => {
+      if (document.querySelector('[data-plantuml-label]')) window.parent.labelFrameWaits++
+      return frame(callback)
+    }
     new MutationObserver(records => {
       for (const record of records) for (const node of record.addedNodes) {
         if (node instanceof HTMLElement && node.dataset.plantumlLabel) window.parent.renderedLabels++
@@ -160,5 +180,9 @@ test('exact variation of parameters map completes on mobile with an older board 
   assert.ok(result.width > 100 && result.height > 100)
   assert.ok(result.width <= 4096 && result.height <= 4096)
   assert.equal(await page.evaluate(() => window.renderedLabels), source.split('\n').filter(line => /^\*+ /.test(line)).length)
+  assert.equal(await page.evaluate(() => window.labelFrameWaits), 0, 'label conversion must not wait for throttled offscreen animation frames')
+  const ink = await page.evaluate(() => window.labelInk)
+  assert.equal(ink.length, await page.evaluate(() => window.renderedLabels))
+  assert.ok(ink.every(count => count > 20), 'every cropped label must contain visible text or formulas')
   assert.equal(await page.locator('iframe').count(), 0)
 })
