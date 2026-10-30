@@ -39,6 +39,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     return
   }
   document.body.classList.add('study-embedded')
+  document.querySelector('komu-tool-dock [data-tool="image"]')?.remove()
   let initialized = false, busy = false, report: MigrationReport | undefined, checkpointTimer: ReturnType<typeof setTimeout> | undefined
   const send = (type: string, data: Record<string, unknown> = {}) => parent.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin)
   const checkpoint = () => { send('checkpoint', { draft: encode(Y.encodeStateAsUpdate(doc)), report, imported: !!doc.getMap('study-migration').get('complete') }); checkpointTimer = undefined }
@@ -51,16 +52,11 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (object.study) map.set('study', object.study)
     if (object.legacyOriginal) map.set('legacyOriginal', object.legacyOriginal)
   }
-  let pinnedPdfId: string | undefined
   const emitPins = () => {
     const pins = [...objectsMap(doc).values()].flatMap(map => {
     const study = map.get('study') as any
     return study?.kind === 'pdf' && study.pinned ? [{ id: map.get('id'), reference: study.reference }] : []
     })
-    const pin = pins.at(-1)
-    pinnedPdfId = typeof pin?.id === 'string' ? pin.id : undefined
-    pinButton.disabled = !pin
-    pinButton.title = pin ? `${pin.reference.fileName} · Clic para abrir; mantener presionado para ir al acceso · <` : 'Fijá un PDF desde su acceso'
     send('pins', { pins })
     send('pdfs',{pdfs:[...objectsMap(doc).values()].flatMap(map=>{
       const study = map.get('study') as any
@@ -202,12 +198,15 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
         if (label) { label.textContent = task ? `${task.days}d` : 'Vínculo no disponible'; element.style.background = task?.color || '#cbd5e1' }
       })
     }
-    if (data.type === 'study-board:import-files' && (!initialized || busy)) { send('error', { error: 'Esperá a que termine la carga o importación en curso.' }); return }
+    if (data.type === 'study-board:import-files' && (!initialized || busy)) {
+      send(data.requestId ? 'import-result' : 'error', { requestId: data.requestId, ok: false, error: 'Esperá a que termine la carga o importación en curso.' }); return
+    }
     if (data.type === 'study-board:import-files' && initialized && !busy) {
       busy = true
       void import('./study-imports').then(async ({ importStudyFiles }) => {
         for await (const object of importStudyFiles(data.files, atCenter(), status => send('status', { status }))) doc.transact(() => insert(object))
-      }).catch(error => send('error', { error: String(error) })).finally(() => { busy = false; send('status', { status: '' }); checkpoint() })
+        if (data.requestId) send('import-result', { requestId: data.requestId, ok: true })
+      }).catch(error => send(data.requestId ? 'import-result' : 'error', { requestId: data.requestId, ok: false, error: String(error) })).finally(() => { busy = false; send('status', { status: '' }); checkpoint() })
     }
   })
   doc.on('update', () => {
@@ -310,21 +309,11 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (important) doc.transact(() => insert(studyCard(crypto.randomUUID(), 'Importante', { kind: 'important', taskId: important.taskId }, x, y)))
     if (transfer.files.length) send('files', { files: [...transfer.files] })
   }, true)
-  const pinButton = document.createElement('button'); pinButton.type = 'button'; pinButton.className = 'tool'; pinButton.disabled = true
-  pinButton.setAttribute('aria-label', 'PDF fijado'); pinButton.title = 'Fijá un PDF desde su acceso'
-  pinButton.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 5 5-4 2-2 5-2 2-6-6 2-2 5-2Z"/><path d="m10 14-7 7"/></svg>'
-  let hold: ReturnType<typeof setTimeout> | undefined, held = false
-  const clearHold = () => { if (hold) clearTimeout(hold); hold = undefined }
-  pinButton.addEventListener('pointerdown', event => {
-    if (event.button !== 0) return
-    held = false; clearHold(); pinButton.setPointerCapture(event.pointerId)
-    hold = setTimeout(() => { held = true; if (pinnedPdfId) canvas.selectById(pinnedPdfId) }, 550)
-  })
-  pinButton.addEventListener('pointerup', clearHold)
-  pinButton.addEventListener('pointercancel', () => { clearHold(); held = true })
-  window.addEventListener('blur', clearHold)
-  pinButton.onclick = () => { if (!held) send('open-pinned'); held = false }
+  const diagrams = document.createElement('button'); diagrams.type = 'button'; diagrams.className = 'tool'
+  diagrams.setAttribute('aria-label', 'Diagramas'); diagrams.title = 'Diagramas'
+  diagrams.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="5" rx="1.5"/><rect x="1" y="17" width="8" height="5" rx="1.5"/><rect x="15" y="17" width="8" height="5" rx="1.5"/><path d="M12 7v5M5 17v-5h14v5"/></svg>'
+  diagrams.onclick = () => send('diagrams')
   const plus = document.createElement('button'); plus.type = 'button'; plus.className = 'tool study-plus'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Agregar a la pizarra'); plus.onclick = () => send('menu')
-  document.querySelector('komu-tool-dock')?.append(pinButton, plus)
+  document.querySelector('komu-tool-dock')?.append(diagrams, plus)
   send('request-init')
 }

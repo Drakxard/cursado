@@ -3,3 +3,8 @@
 .pk_modal_back{background:rgba(255,255,255,.75)}
 
 .pk_sloop{background:#fff}
+.pk_transport .cursado-audio-save,.pk_modal_bottom .cursado-audio-save{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:auto;min-width:38px;padding:0 10px;color:var(--ac);font:12px system-ui,sans-serif}
+.cursado-audio-save span{position:static!important;display:inline!important;visibility:visible!important;opacity:1!important;background:none!important;color:inherit!important;font:inherit!important;transform:none!important;padding:0!important}
+.pk_transport .cursado-audio-close{font:22px system-ui,sans-serif;color:var(--fg-2)}
+.pk_modal_bottom .cursado-audio-save{height:34px;border:1px solid var(--bd);border-radius:5px;float:right;margin:0 8px}
+@media(max-width:600px){.pk_transport .cursado-audio-save span{display:none!important}.pk_transport .cursado-audio-save{padding:0 6px}}

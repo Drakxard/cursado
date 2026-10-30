@@ -4,6 +4,26 @@
   var app = window.PKAudioEditor;
   var dirty = false, recording = false;
   function send(type, value) { parent.postMessage(Object.assign({ source: 'cursado-audiomass', type: type }, value), location.origin); }
+  function saveButton() {
+    var button = document.createElement('button'); button.type = 'button'; button.className = 'pk_btn cursado-audio-save';
+    button.setAttribute('aria-label', 'Guardar audio'); button.title = 'Guardar audio';
+    button.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg><span>Guardar</span>';
+    button.onclick = function () { send('save'); };
+    return button;
+  }
+  var transport = document.querySelector('.pk_transport');
+  if (transport) {
+    transport.appendChild(saveButton());
+    var close = document.createElement('button'); close.type = 'button'; close.className = 'pk_btn cursado-audio-close'; close.textContent = '×';
+    close.setAttribute('aria-label', 'Cerrar editor de audio'); close.title = 'Cerrar editor de audio'; close.onclick = function () { send('close'); };
+    transport.appendChild(close);
+  }
+  // A new recording has its own modal above the transport controls.
+  var modalObserver = new MutationObserver(function () {
+    var rec = document.querySelector('.pk_rec'), bottom = rec && rec.closest('.pk_modal').querySelector('.pk_modal_bottom');
+    if (bottom && !bottom.querySelector('.cursado-audio-save')) bottom.appendChild(saveButton());
+  });
+  modalObserver.observe(document.body, { childList: true, subtree: true });
   var speech = window.CursadoLiveSpeech(function (state) { send('transcript', state); });
   ['DidLoadFile', 'DidStateChange', 'DidUpdateMultitrack', 'DidActionRecordStart', 'DidActionRecordStop'].forEach(function (event) {
     app.listenFor(event, function () { dirty = true; send('dirty'); });
@@ -76,6 +96,6 @@
     if (event.key === 'Escape' && !document.querySelector('.pk_modal')) send('close');
   });
   window.addEventListener('beforeunload', function (event) { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', function () { speech.dispose(); });
+  window.addEventListener('pagehide', function () { modalObserver.disconnect(); speech.dispose(); });
   send('ready');
 })();

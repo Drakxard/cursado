@@ -2,6 +2,7 @@
 
 import { useContext, useEffect, useRef, useState } from 'react'
 import { StudyBoardNavigationContext } from './study-board-navigation'
+import { StudyDiagramsDialog } from './study-diagrams-dialog'
 import { InlineTableEditor } from './study-inline-table-editor'
 import { boardPdfReference, parseBoardLinkDrag, type BoardPdfReference, type BoardLinkReference } from '@/lib/board-library-contract'
 import { openStudyBoard, saveStudyBoard, confirmStudyMigration } from '@/lib/study-board-workspace'
@@ -42,6 +43,8 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const [pins, setPins] = useState<Pin[]>([]), [reader, setReader] = useState<BoardPdfReference | null>(null), [readerVisible, setReaderVisible] = useState(false)
   const [review, setReview] = useState<MigrationReport | null>(null), [attachment, setAttachment] = useState<{ id: string; study: StudyAttachment } | null>(null)
   const [closing, setClosing] = useState(false)
+  const [diagrams, setDiagrams] = useState(false)
+  const diagramImport = useRef<{ id: string; resolve: () => void; reject: (error: Error) => void } | null>(null)
   const [readerLoading, setReaderLoading] = useState(false)
   const loadedReader = useRef<string | null>(null)
   const files = useRef<HTMLInputElement>(null), saveQueue = useRef<Promise<unknown>>(Promise.resolve()), positions = useRef(new Map<string, string>())
@@ -60,6 +63,11 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   }
   const initialize = () => { const value = live.current.initial; if (value) send('init', { ...value.record, name, snapshot: value.snapshot, pdfReferences, shared:!!sharedRoomId }) }
   const focusBoard = () => frame.current?.focus()
+  const insertDiagram = (file: File) => new Promise<void>((resolve, reject) => {
+    const id = crypto.randomUUID()
+    diagramImport.current = { id, resolve, reject }
+    send('import-files', { files: [file], requestId: id })
+  })
   const closeReader = () => {
     setReaderLoading(false); send('open-finished')
     live.current.readerVisible = false
@@ -95,7 +103,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       }
       live.current.initial = value; setInitial(value)
     } }).catch(reason => { if (active) setError(String(reason)) })
-    return () => { active = false; mounted.current = false }
+    return () => { active = false; mounted.current = false; diagramImport.current?.reject(new Error('Se cerró la pizarra.')); diagramImport.current = null }
   }, [rootHandle, boardId, sharedRoomId])
   useEffect(() => { if (initial) initialize() }, [initial])
   useEffect(() => {
@@ -105,6 +113,11 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       const data = event.data
       if (event.origin !== location.origin || data?.session !== session || data?.boardId !== boardId) return
       if (event.source === frame.current?.contentWindow) {
+        if (data.type === 'study-board:diagrams') setDiagrams(true)
+        if (data.type === 'study-board:import-result' && data.requestId === diagramImport.current?.id) {
+          const pending = diagramImport.current; diagramImport.current = null
+          if (pending) { if (data.ok) pending.resolve(); else pending.reject(new Error(data.error || 'No se pudo insertar el diagrama.')) }
+        }
         if(data.type === 'study-board:publish-pdf') {
           const reference = boardPdfReference(data.reference)
           if(reference) {
@@ -237,6 +250,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     </div>}
     {urlInput && <form onSubmit={addVideo} className="absolute bottom-16 left-16 z-30 flex max-w-[85vw] gap-1 rounded-lg border bg-white p-2 shadow"><input autoFocus type="url" aria-label="Link YouTube" placeholder="Link de YouTube" value={url} onChange={event => setUrl(event.target.value)} className="min-w-0 rounded border px-2" /><button type="submit">Agregar</button><button type="button" aria-label="Cerrar enlace" onClick={() => setUrlInput(false)}>×</button></form>}
     <input ref={files} hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.svg,.xlsx,.xlsm,.csv" onChange={event => { const selected = [...(event.target.files || [])]; event.target.value = ''; send('import-files', { files: selected }) }} />
+    {diagrams && <StudyDiagramsDialog onClose={() => { setDiagrams(false); focusBoard() }} onInsert={insertDiagram} />}
     {reader && <div aria-hidden={!readerVisible || readerLoading} inert={!readerVisible || readerLoading} role={readerVisible ? 'dialog' : undefined} aria-modal={readerVisible || undefined} aria-label={`Leer ${reader.fileName}`} className="absolute inset-0 z-40 bg-white" style={{ visibility: readerVisible && !readerLoading ? 'visible' : 'hidden', pointerEvents: readerVisible && !readerLoading ? 'auto' : 'none' }}>
       <iframe key={pdfKey(reader)} ref={readerFrame} title="Lector de PDF de la pizarra" className="h-full w-full border-0" src={`/biblioteca/pizarra?mode=reader&session=${session}&boardId=${encodeURIComponent(boardId)}&materialId=${reader.materialId}`} />
     </div>}
