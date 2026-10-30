@@ -1,3 +1,13 @@
+.study-diagrams-help{margin:0 26px 12px;color:#66758d;font:12px/1.5 system-ui,sans-serif}
+.plantuml-prompt-control{position:relative;display:flex;align-items:center}
+.study-diagrams .plantuml-prompt-copy{display:grid;place-items:center;padding:7px;border-color:transparent;border-radius:7px;color:#66758d;touch-action:none;user-select:none;-webkit-touch-callout:none}
+.plantuml-prompt-announcement{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.plantuml-prompt-editor{position:absolute;top:calc(100% + 10px);left:0;z-index:2;width:min(360px,calc(100vw - 70px));box-sizing:border-box;padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;box-shadow:0 8px 30px #0f172a20;transform:translateX(-50%)}
+.plantuml-prompt-editor label{display:block;margin-bottom:8px;color:#66758d;font-size:12px}
+.plantuml-prompt-editor textarea{display:block;box-sizing:border-box;width:100%;resize:vertical;min-height:100px;padding:10px;border:1px solid #dce3ef;border-radius:8px;color:#253552;background:#f8faff;font:13px/1.5 system-ui,sans-serif}
+.plantuml-prompt-editor>div{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}.study-diagrams .plantuml-prompt-editor button{padding:7px 10px;font-size:12px}
+.plantuml-prompt-error{position:absolute;top:100%;left:-100px;width:250px;padding:10px;background:white;color:#b42333;font-size:12px;z-index:2}
+@media(max-width:640px){.plantuml-prompt-editor{position:fixed;top:90px;left:24px;right:24px;width:auto;transform:none}}
 .study-diagrams-backdrop{display:flex;align-items:center;justify-content:center;padding:clamp(12px,3vw,40px);background:#0f172a70;backdrop-filter:blur(3px)}
 .study-diagrams{display:flex;flex-direction:column;width:min(1180px,100%);height:min(760px,94dvh);min-height:0;border:1px solid #e2e8f0;border-radius:20px;background:#fff;color:#172033;box-shadow:0 24px 80px #0f172a40;font:14px system-ui,sans-serif;overflow:hidden}
 .study-diagrams header{display:flex;align-items:center;justify-content:space-between;padding:20px 26px;border-bottom:1px solid #e9edf5}

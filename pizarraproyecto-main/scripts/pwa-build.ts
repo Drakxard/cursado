@@ -4,7 +4,7 @@ import type { Plugin } from 'vite'
 
 export function offlineApp():Plugin {
   return {name:'pizarra-offline-app',enforce:'post',apply:'build',generateBundle(_options,bundle){
-    const files=['/pizarra/','/pizarra/index.html','/pizarra/manifest.webmanifest','/pizarra/favicon.svg','/pizarra/icons/pizarra-192.png','/pizarra/icons/pizarra-512.png','/pizarra/icons/pizarra-maskable.png',
+    const files=['/pizarra/','/pizarra/index.html','/pizarra/plantuml.html','/pizarra/manifest.webmanifest','/pizarra/favicon.svg','/pizarra/icons/pizarra-192.png','/pizarra/icons/pizarra-512.png','/pizarra/icons/pizarra-maskable.png',
       ...Object.keys(bundle).filter(name=>name.startsWith('assets/')).map(name=>'/pizarra/'+name)]
     const hash=createHash('sha256').update(JSON.stringify(files))
     for(const name of ['manifest.webmanifest','favicon.svg','icons/pizarra-192.png','icons/pizarra-512.png','icons/pizarra-maskable.png'])hash.update(readFileSync(new URL('../public/'+name,import.meta.url)))
@@ -43,6 +43,10 @@ self.addEventListener('fetch',event=>{
   if(request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/pizarra/api/')||url.pathname.startsWith('/pizarra/recognize/'))return;
   if(!url.pathname.startsWith('/pizarra/'))return;
   if(request.mode==='navigate'){
+    if(url.pathname==='/pizarra/plantuml.html'){
+      event.respondWith(caches.open(CACHE).then(async cache=>(await cache.match(url.pathname))||fetch(request)));
+      return;
+    }
     // Keep the shell and its assets from the same installed version. A new
     // deployment must finish downloading before it replaces this worker.
     event.respondWith(caches.open(CACHE).then(async cache=>(await cache.match('/pizarra/index.html'))||fetch(request)));

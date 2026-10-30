@@ -6,5 +6,6 @@ import { offlineApp } from './scripts/pwa-build.ts'
 export default defineConfig({
   base: '/pizarra/',
   plugins: [react(),offlineApp()],
+  build: { rollupOptions: { input: { index: 'index.html', plantuml: 'plantuml.html' } } },
   server: { proxy: { '/pizarra/api': { target: process.env.PIZARRA_BACKEND_URL || 'http://127.0.0.1:8765', changeOrigin: true, rewrite: path => path.replace(/^\/pizarra/, '') }, '/pizarra/recognize': { target: process.env.PIZARRA_BACKEND_URL || 'http://127.0.0.1:8765', changeOrigin: true, rewrite: path => path.replace(/^\/pizarra/, '') } } },
 })

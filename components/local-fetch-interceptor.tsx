@@ -823,6 +823,9 @@ export function LocalFetchInterceptor() {
         if (token) headers.set("x-drive-config-token", token)
         return servicesFetch(new Request(request, { headers }))
       }
+      if (url.pathname === "/api/diagrams/plantuml" && request.method.toUpperCase() === "POST") {
+        return servicesFetch(input, init)
+      }
       if (isTtsServerRequest(url.pathname, request.method) || (url.pathname === "/api/synthesis-voice" && request.method.toUpperCase() === "POST")) {
         const headers = new Headers(request.headers)
         const token = getReadyInscreenConfigToken()

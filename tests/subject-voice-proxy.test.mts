@@ -13,6 +13,11 @@ const proxyModule = { exports: {} as { proxy?: (request: unknown) => Response } 
 new Function("require", "module", "exports", compiled.outputFiles[0].text)(require, proxyModule, proxyModule.exports)
 const proxy = proxyModule.exports.proxy!
 
+test("PlantUML reaches the server in local mode only through POST", () => {
+  assert.equal(proxy(new NextRequest('https://app.test/api/diagrams/plantuml', { method: 'POST' })).headers.get('x-middleware-next'), '1')
+  assert.equal(proxy(new NextRequest('https://app.test/api/diagrams/plantuml', { method: 'GET' })).status, 501)
+})
+
 test("board chat reaches the server with local workspace storage", () => {
   const response = proxy(new NextRequest("https://app.test/api/board-chat", { method: "POST" }))
   assert.equal(response.headers.get("x-middleware-next"), "1")
