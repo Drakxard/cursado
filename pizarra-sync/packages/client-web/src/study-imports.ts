@@ -39,8 +39,8 @@ export function parseStudyCsv(raw: string) {
   if ((value || row.length) && rows.length < 180) { row.push({ input: value }); rows.push(row.slice(0, 32)) }
   return rows
 }
-export async function* importStudyFiles(files: File[], point: { x: number; y: number }, status: (value: string) => void): AsyncGenerator<StudyObject> {
-  const upload = (file: File) => uploadImage(file, { reuseExisting: true, onWait: ms => status(ms ? `Pausa automática de ${Math.ceil(ms / 1000)} s; la subida continuará sola.` : `Subiendo ${file.name}…`) })
+export async function* importStudyFiles(files: File[], point: { x: number; y: number }, status: (value: string) => void, options: { preserveImageResolution?: boolean } = {}): AsyncGenerator<StudyObject> {
+  const upload = (file: File) => uploadImage(file, { reuseExisting: true, preserveResolution: options.preserveImageResolution, onWait: ms => status(ms ? `Pausa automática de ${Math.ceil(ms / 1000)} s; la subida continuará sola.` : `Subiendo ${file.name}…`) })
   let y = point.y
   for (const file of files) {
     status(`Importando ${file.name}…`)
@@ -74,7 +74,8 @@ export async function* importStudyFiles(files: File[], point: { x: number; y: nu
       const blob = /\.svg$/i.test(file.name) || file.type === 'image/svg+xml' ? await svgToPng(file) : file
       const type = blob.type || (/\.jpe?g$/i.test(file.name) ? 'image/jpeg' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/png')
       const uploaded = await upload(new File([blob], file.name, { type }))
-      yield { id: crypto.randomUUID(), type: 'image', authorId: 'estudio', src: uploaded.key, x: point.x, y, width: uploaded.width, height: uploaded.height }; y += uploaded.height + 30
+      const scale = options.preserveImageResolution ? Math.min(1, 4096 / Math.max(uploaded.width, uploaded.height)) : 1
+      yield { id: crypto.randomUUID(), type: 'image', authorId: 'estudio', src: uploaded.key, x: point.x, y, width: uploaded.width * scale, height: uploaded.height * scale }; y += uploaded.height * scale + 30
     } else throw new Error(`Formato no admitido: ${file.name}`)
   }
 }

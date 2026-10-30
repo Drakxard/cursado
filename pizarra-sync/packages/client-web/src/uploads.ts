@@ -60,7 +60,7 @@ async function decode(
 
 /** Validate, optionally downscale, and upload an image file to R2 via the worker. Returns the stored
  *  key + the image's intrinsic size. Throws UploadError with a user-facing message on any failure. */
-export async function uploadImage(file: File, options: { reuseExisting?: boolean; onWait?: (ms: number) => void } = {}): Promise<UploadResult> {
+export async function uploadImage(file: File, options: { reuseExisting?: boolean; preserveResolution?: boolean; onWait?: (ms: number) => void } = {}): Promise<UploadResult> {
   if (!ACCEPTED.has(file.type)) {
     throw new UploadError(t("toast.imageTypeUnsupported"));
   }
@@ -71,9 +71,11 @@ export async function uploadImage(file: File, options: { reuseExisting?: boolean
 
   let blob: Blob = file;
   let contentType = file.type;
-  const tooLarge = Math.max(width, height) > MAX_DIM || file.size > MAX_UPLOAD_BYTES;
+  const maxDimension = options.preserveResolution ? 8192 : MAX_DIM;
+  const pixelScale = options.preserveResolution ? Math.min(1, Math.sqrt(32_000_000 / (width * height))) : 1;
+  const tooLarge = Math.max(width, height) > maxDimension || pixelScale < 1 || file.size > MAX_UPLOAD_BYTES;
   if (!isGif && tooLarge) {
-    const scale = Math.min(1, MAX_DIM / Math.max(width, height));
+    const scale = Math.min(pixelScale, maxDimension / Math.max(width, height));
     const w = Math.max(1, Math.round(width * scale));
     const h = Math.max(1, Math.round(height * scale));
     const canvas = document.createElement("canvas");

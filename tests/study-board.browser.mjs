@@ -223,7 +223,7 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   assert.deepEqual(errors, [])
 })
 
-test('diagram chooser previews PlantUML, handles errors, cancels and imports into the board', { timeout: 60000 }, async t => {
+test('diagram chooser previews PlantUML, handles errors, cancels and imports into the board', { timeout: 90000 }, async t => {
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
   const context = await browser.newContext({ viewport: { width: 1366, height: 900 } }); await fixture(context)
   const page = await context.newPage()
@@ -286,6 +286,32 @@ test('diagram chooser previews PlantUML, handles errors, cancels and imports int
   await page.getByRole('button', { name: 'Volver a Estudio', exact: true }).click()
   await page.getByRole('button', { name: 'Reabrir', exact: true }).click(); await loaded(page)
   await expect.poll(() => engine(page).evaluate(() => [...window.__komuboard.doc.getMap('objects').values()].filter(map => map.get('type') === 'image').length)).toBe(1)
+  const diagramId = await engine(page).evaluate(() => {
+    window.__komuboard.canvas.setTool('select')
+    window.__komuboard.canvas.restoreStudyView({ x: 0, y: 0, zoom: 1 })
+    const image = [...window.__komuboard.doc.getMap('objects').values()].find(map => map.get('type') === 'image')
+    image.set('x',200); image.set('y',300)
+    return image.get('id')
+  })
+  const savedSource = '@startuml\nAlice -> Bob: Listo\n@enduml'
+  assert.equal(await engine(page).evaluate(id => window.__komuboard.doc.getMap('objects').get(id).get('plantumlSource'), diagramId), savedSource)
+  const imageBox = await engine(page).locator(`.komu-image[data-id="${diagramId}"]`).boundingBox()
+  await page.mouse.move(imageBox.x + imageBox.width / 2, imageBox.y + imageBox.height / 2)
+  await page.mouse.down()
+  await expect(code).toHaveValue(savedSource)
+  await page.mouse.up()
+  await code.fill('@startuml\nAlice -> Bob: Editado\n@enduml')
+  const replace = page.getByRole('button', { name: 'Reinsertar', exact: true })
+  await expect(replace).toBeEnabled()
+  await replace.click()
+  await expect(page.getByRole('dialog', { name: 'PlantUML', exact: true })).toHaveCount(0)
+  const updated = await engine(page).evaluate(id => {
+    const images = [...window.__komuboard.doc.getMap('objects').values()].filter(map => map.get('type') === 'image')
+    return { count:images.length, image:window.__komuboard.doc.getMap('objects').get(id).toJSON() }
+  }, diagramId)
+  assert.equal(updated.count,1)
+  assert.equal(updated.image.plantumlSource,'@startuml\nAlice -> Bob: Editado\n@enduml')
+  assert.equal(updated.image.x,200); assert.equal(updated.image.y,300)
   await page.setViewportSize({ width: 390, height: 844 })
   await engine(page).locator('komu-tool-dock').getByRole('button', { name: 'Diagramas', exact: true }).click()
   await page.getByRole('button', { name: /PlantUML/ }).click()

@@ -204,7 +204,21 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (data.type === 'study-board:import-files' && initialized && !busy) {
       busy = true
       void import('./study-imports').then(async ({ importStudyFiles }) => {
-        for await (const object of importStudyFiles(data.files, atCenter(), status => send('status', { status }))) doc.transact(() => insert(object))
+        const source = typeof data.diagramSource === 'string' && data.diagramSource.trim() && data.diagramSource.length <= 100000 ? data.diagramSource : undefined
+        if (data.diagramSource !== undefined && (!source || data.files?.length !== 1)) throw new Error('El código del diagrama no es válido.')
+        if (data.replaceDiagramId && !source) throw new Error('Falta el código del diagrama.')
+        for await (const object of importStudyFiles(data.files, atCenter(), status => send('status', { status }), { preserveImageResolution: data.preserveImageResolution === true })) doc.transact(() => {
+          if (source && object.type === 'image') object.plantumlSource = source
+          if (data.replaceDiagramId) {
+            const current = objectsMap(doc).get(data.replaceDiagramId)
+            if (!current || current.get('type') !== 'image' || typeof current.get('plantumlSource') !== 'string') throw new Error('El diagrama ya no está en la pizarra.')
+            if (current.get('locked') === true) throw new Error('El diagrama está bloqueado.')
+            const width = Number(current.get('width'))
+            current.set('src', object.src)
+            current.set('plantumlSource', source)
+            current.set('height', width * object.height / object.width)
+          } else insert(object)
+        })
         if (data.requestId) send('import-result', { requestId: data.requestId, ok: true })
       }).catch(error => send(data.requestId ? 'import-result' : 'error', { requestId: data.requestId, ok: false, error: String(error) })).finally(() => { busy = false; send('status', { status: '' }); checkpoint() })
     }
@@ -235,7 +249,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     card(id)?.classList.add('study-opening'); send('open', { id, study })
   }
   document.addEventListener('study-open-pdf', ((event: CustomEvent) => openPdf(event.detail.id)) as EventListener)
-  type CardPress = { id: string; pointer: number; x: number; y: number; held: boolean; textLink: boolean; timer?: ReturnType<typeof setTimeout> }
+  type CardPress = { id: string; pointer: number; x: number; y: number; held: boolean; textLink: boolean; diagram: boolean; timer?: ReturnType<typeof setTimeout> }
   let press: CardPress | undefined
   let lastTap: { id: string; at: number } | undefined
   const card = (id: string) => [...document.querySelectorAll<HTMLElement>('[data-study][data-id]')].find(el => el.dataset.id === id)
@@ -248,16 +262,26 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (press) { clearPress(); lastTap = undefined; return }
     if (event.button !== 0 || !event.isPrimary || (event.target as Element).closest('button,input,[contenteditable],.text-bar')) return
     const id = canvas.studyHitAt(event.clientX, event.clientY)
-    const study = id ? objectsMap(doc).get(id)?.get('study') as StudyAttachment : undefined
-    if (!id || !study || !['pdf', 'board'].includes(study.kind)) { lastTap = undefined; return }
-    const current = press = { id, pointer: event.pointerId, x: event.clientX, y: event.clientY, held: false, textLink: canvas.studyPdfLinkAt(event.clientX, event.clientY) === id } as CardPress
-    if (study.kind === 'pdf') {
+    const map = id ? objectsMap(doc).get(id) : undefined
+    const study = map?.get('study') as StudyAttachment | undefined
+    const diagram = map?.get('type') === 'image' && typeof map.get('plantumlSource') === 'string' && map.get('locked') !== true
+    if (!id || (!diagram && (!study || !['pdf', 'board'].includes(study.kind)))) { lastTap = undefined; return }
+    const current = press = { id, pointer: event.pointerId, x: event.clientX, y: event.clientY, held: false, diagram, textLink: canvas.studyPdfLinkAt(event.clientX, event.clientY) === id } as CardPress
+    if (diagram || study?.kind === 'pdf') {
       card(id)?.classList.add('study-holding')
       current.timer = setTimeout(() => {
         if (press !== current) return
         current.held = true; lastTap = undefined
         card(id)?.classList.remove('study-holding')
-        send('pin', { id })
+        if (diagram) {
+          // End the engine's press before the parent modal covers the iframe.
+          // Otherwise the physical pointerup can miss its drag/selection handlers.
+          const target = event.target as Element
+          target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: event.pointerId, pointerType: event.pointerType, clientX: current.x, clientY: current.y, button: 0, buttons: 0, isPrimary: true }))
+          if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId)
+          const latest = objectsMap(doc).get(id)
+          if (latest?.get('locked') !== true && typeof latest?.get('plantumlSource') === 'string') send('edit-diagram', { id, source: latest.get('plantumlSource') })
+        } else send('pin', { id })
       }, 600)
     }
   }, true)
@@ -268,6 +292,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (!press || press.pointer !== event.pointerId) return
     const current = press; clearPress()
     if (current.held) return
+    if (current.diagram) { lastTap = undefined; return }
     const study = objectsMap(doc).get(current.id)?.get('study') as StudyAttachment | undefined
     if (study?.kind === 'pdf') {
       lastTap = undefined

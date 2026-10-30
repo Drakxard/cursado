@@ -10,7 +10,7 @@ test('study dialog renders local mindmaps with separate KaTeX rows and inserts t
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
     import {createRoot} from 'react-dom/client';
     import {StudyDiagramsDialog} from './components/study-diagrams-dialog';
-    createRoot(document.getElementById('root')).render(<StudyDiagramsDialog onClose={()=>window.closedDialog=true} onInsert={async file=>{window.inserted={type:file.type,size:file.size,bytes:Array.from(new Uint8Array(await file.arrayBuffer()))}}}/>);
+    createRoot(document.getElementById('root')).render(<StudyDiagramsDialog onClose={()=>window.closedDialog=true} onInsert={async(file,source)=>{window.inserted={source,type:file.type,size:file.size,bytes:Array.from(new Uint8Array(await file.arrayBuffer()))}}}/>);
   `, loader: 'tsx' }, bundle: true, format: 'esm', write: false, jsx: 'automatic', loader: { '.css': 'empty' } })
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' })
   t.after(() => browser.close())
@@ -76,6 +76,9 @@ test('study dialog renders local mindmaps with separate KaTeX rows and inserts t
 ** Resultado: \(\frac{1}{2}\) y $$x^2$$
 @endmindmap`
   await code.fill(source)
+  const progressBar = page.getByRole('progressbar', { name: 'Renderizado del diagrama' })
+  await expect(progressBar).toBeVisible()
+  assert.equal(await progressBar.locator('div').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(34, 197, 94)')
   const insert = page.getByRole('button', { name: 'Insertar', exact: true })
   await expect.poll(async () => {
     if (await page.getByRole('alert').count()) throw new Error(await page.getByRole('alert').textContent())
@@ -87,9 +90,34 @@ test('study dialog renders local mindmaps with separate KaTeX rows and inserts t
   for (const label of rows) for (let i = 1; i < label.length; i++) assert.ok(label[i].top >= label[i - 1].bottom)
   const preview = page.getByRole('img', { name: 'Vista previa de PlantUML' })
   await expect.poll(() => preview.evaluate(image => image.naturalWidth)).toBeGreaterThan(100)
+  const fittedWidth = (await preview.boundingBox()).width
+  await page.getByRole('button', { name: 'Acercar vista previa', exact: true }).click()
+  await expect.poll(async () => (await preview.boundingBox()).width).toBeGreaterThan(fittedWidth * 1.3)
+  await page.getByRole('button', { name: 'Ver píxeles originales', exact: true }).click()
+  await expect.poll(async () => Math.round((await preview.boundingBox()).width)).toBe(await preview.evaluate(image => image.naturalWidth))
+  const region = page.getByRole('region', { name: 'Vista previa del diagrama' })
+  const initialWidth = (await region.boundingBox()).width
+  await page.getByRole('button', { name: 'Maximizar vista previa', exact: true }).click()
+  await expect.poll(async () => (await region.boundingBox()).width).toBeGreaterThan(initialWidth * 1.5)
+  await expect(code).toBeHidden()
+  await page.keyboard.press('Escape')
+  await expect(code).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'PlantUML', exact: true })).toBeVisible()
+  await page.setViewportSize({ width: 375, height: 667 })
+  await page.getByRole('button', { name: 'Maximizar vista previa', exact: true }).click()
+  await page.getByRole('button', { name: 'Ajustar', exact: true }).click()
+  const explorer = page.getByLabel('Explorar diagrama', { exact: true })
+  await explorer.hover(); await page.mouse.wheel(0,-300)
+  await page.getByRole('button', { name: 'Ver píxeles originales', exact: true }).click()
+  const exploreBounds = await explorer.boundingBox()
+  await page.mouse.move(exploreBounds.x + exploreBounds.width / 2, exploreBounds.y + exploreBounds.height / 2)
+  await page.mouse.down(); await page.mouse.move(exploreBounds.x + 20, exploreBounds.y + 20, { steps: 4 }); await page.mouse.up()
+  assert.ok(await explorer.evaluate(node => node.scrollTop > 0 || node.scrollLeft > 0))
+  await page.getByRole('button', { name: 'Restaurar vista previa', exact: true }).click()
   const bytes = await preview.evaluate(async image => Array.from(new Uint8Array(await (await fetch(image.src)).arrayBuffer())))
   await insert.click()
   assert.deepEqual(await page.evaluate(() => window.inserted.bytes), bytes)
+  assert.equal(await page.evaluate(() => window.inserted.source), source)
   assert.equal(await page.evaluate(() => window.closedDialog), true)
   assert.equal(apiCalls, 0)
   assert.equal(await page.locator('iframe').count(), 0)
@@ -99,8 +127,23 @@ test('exact variation of parameters map completes on mobile with an older board 
   const source = await readFile('tests/fixtures/variation-parameters-mindmap.txt', 'utf8')
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
     import {renderStudyMindmap} from './lib/client/study-plantuml';
-    window.render=source=>renderStudyMindmap(source,new AbortController().signal);
-  ` }, bundle: true, format: 'esm', write: false })
+    import {uploadImage} from './pizarra-sync/packages/client-web/src/uploads';
+    window.progress=[];
+    window.render=source=>renderStudyMindmap(source,new AbortController().signal,(percent,stage)=>window.progress.push({percent,stage}));
+    window.roundtrip=async(blob,preserveResolution)=>{
+      const file=new File([blob],'diagrama-plantuml.png',{type:'image/png'});
+      let posted;
+      const original=window.fetch;
+      window.fetch=async(url,options)=>{posted=options.body;return Response.json({key:'diagram.png'})};
+      try{
+        await uploadImage(file,{preserveResolution});
+        const bitmap=await createImageBitmap(posted);
+        const width=bitmap.width,height=bitmap.height;bitmap.close();
+        const hash=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await value.arrayBuffer()))).join(',');
+        return {width,height,unchanged:await hash(posted)===await hash(file)};
+      }finally{window.fetch=original}
+    };
+  ` }, bundle: true, format: 'esm', write: false, define: { 'import.meta.env.VITE_WORKER_HOST': '"127.0.0.1:8787"' } })
   const rewrites = (await nextConfig.rewrites()).beforeFiles
   const mime = { html: 'text/html', js: 'text/javascript', css: 'text/css', woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf' }
   const server = createServer(async (request, response) => {
@@ -172,13 +215,24 @@ test('exact variation of parameters map completes on mobile with an older board 
     await image.decode()
     document.body.append(image)
     image.style.width = '100%'
-    return { type: blob.type, size: blob.size, width: image.naturalWidth, height: image.naturalHeight }
+    const stored=await window.roundtrip(blob,true)
+    const photo=await window.roundtrip(blob,false)
+    return { type: blob.type, size: blob.size, width: image.naturalWidth, height: image.naturalHeight, stored, photo }
   }, source)
   t.diagnostic(`Exact map rendered in ${Date.now() - started} ms: ${JSON.stringify(result)}`)
   assert.equal(result.type, 'image/png')
   assert.ok(result.size > 10000)
   assert.ok(result.width > 100 && result.height > 100)
-  assert.ok(result.width <= 4096 && result.height <= 4096)
+  assert.ok(result.width <= 8192 && result.height <= 8192)
+  assert.ok(result.width * result.height <= 32_000_000)
+  assert.ok(Math.max(result.width, result.height) > 6000, 'large maps need extra resolution for zoom')
+  assert.deepEqual(result.stored, { width: result.width, height: result.height, unchanged: true })
+  assert.equal(Math.max(result.photo.width, result.photo.height), 2048, 'ordinary image uploads retain their existing limit')
+  const progress=await page.evaluate(() => window.progress)
+  assert.equal(progress.at(-1).percent,100)
+  assert.ok(progress.some(item=>item.percent>=35&&item.percent<=65))
+  assert.ok(progress.some(item=>item.percent>=70&&item.percent<=95))
+  assert.ok(progress.every((item,index)=>index===0||item.percent>=progress[index-1].percent))
   assert.equal(await page.evaluate(() => window.renderedLabels), source.split('\n').filter(line => /^\*+ /.test(line)).length)
   assert.equal(await page.evaluate(() => window.labelFrameWaits), 0, 'label conversion must not wait for throttled offscreen animation frames')
   const ink = await page.evaluate(() => window.labelInk)

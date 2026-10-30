@@ -10,6 +10,7 @@ export function plantumlLabelRows(text:string) {
 }
 
 export type PlantumlLabel={canvas:HTMLCanvasElement;width:number;height:number}
+export type PlantumlProgress=(percent:number,stage:string)=>void
 
 // html-to-image's toCanvas waits for requestAnimationFrame per label. Browsers
 // throttle frames in the offscreen renderer iframe, turning large maps into
@@ -43,7 +44,7 @@ async function labelCanvas(node:HTMLElement,width:number,height:number,ratio:num
 }
 
 /** Temporary labels belong only to image generation, never to the board's objects. */
-export async function rasterPlantumlLabels(texts:string[]):Promise<PlantumlLabel[]> {
+export async function rasterPlantumlLabels(texts:string[],pixelRatio=2,onProgress?:PlantumlProgress):Promise<PlantumlLabel[]> {
   const labels:PlantumlLabel[]=[]
   const nodes:HTMLDivElement[]=[]
   const atlas=document.createElement('div')
@@ -70,6 +71,7 @@ export async function rasterPlantumlLabels(texts:string[]):Promise<PlantumlLabel
       nodes.push(node)
     }
     if(!nodes.length)return labels
+    onProgress?.(35,'Cargando fuentes de las fórmulas…')
     // Mount every formula before waiting, so fonts load together rather than
     // starting a separate font/layout cycle for each node.
     document.body.getBoundingClientRect()
@@ -99,8 +101,10 @@ export async function rasterPlantumlLabels(texts:string[]):Promise<PlantumlLabel
     if(pixels>16000000||width>8192||height>8192)throw new Error('El mapa supera el tamaño admitido para generar la imagen.')
     Object.assign(atlas.style,{width:`${width}px`,height:`${height}px`})
     document.body.append(atlas)
+    onProgress?.(45,'Preparando texto y fórmulas…')
     const fontCSS=atlas.querySelector('.katex')?await getFontEmbedCSS(atlas,{preferredFontFormat:'woff2'}):''
-    const ratio=Math.min(2,8192/Math.max(width,height),Math.sqrt(16000000/(width*height)))
+    const ratio=Math.min(pixelRatio,8192/Math.max(width,height),Math.sqrt(16000000/(width*height)))
+    onProgress?.(55,'Renderizando las etiquetas…')
     sheet=await labelCanvas(atlas,width,height,ratio,fontCSS)
     const scaleX=sheet.width/width,scaleY=sheet.height/height
     for(const size of sizes) {
@@ -111,6 +115,7 @@ export async function rasterPlantumlLabels(texts:string[]):Promise<PlantumlLabel
       if(!context)throw new Error('No se pudo preparar una etiqueta del mapa.')
       context.drawImage(sheet,size.x*scaleX,size.y*scaleY,size.width*scaleX,size.height*scaleY,0,0,canvas.width,canvas.height)
     }
+    onProgress?.(65,'Fórmulas listas')
     return labels
   }catch(error){
     for(const label of labels)label.canvas.width=label.canvas.height=0

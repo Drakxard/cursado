@@ -1,7 +1,7 @@
 import engineUrl from '@plantuml/core/plantuml.js?url'
 import vizUrl from '@plantuml/core/viz-global.js?url'
 import type { MindmapNode } from './mindmap'
-import { rasterPlantumlLabels } from './plantumlLabel'
+import { rasterPlantumlLabels, type PlantumlProgress } from './plantumlLabel'
 
 type Engine = { renderToString:(lines:string[],success:(svg:string)=>void,error:(message:string)=>void)=>void }
 let engine:Promise<Engine>|undefined
@@ -19,20 +19,26 @@ function loadEngine() {
 }
 
 /** PlantUML lays out measured labels; KaTeX and text are baked into one PNG. */
-export function plantumlImage(root:MindmapNode):Promise<Blob> {
+export function plantumlImage(root:MindmapNode,onProgress?:PlantumlProgress):Promise<Blob> {
   const job=queue.catch(()=>{}).then(async()=>{
+    onProgress?.(15,'Cargando PlantUML…')
     const renderer=await loadEngine()
+    onProgress?.(28,'Preparando el árbol…')
+    await new Promise(resolve=>setTimeout(resolve,0))
     const entries:{text:string;depth:number}[]=[]
     function visit(node:MindmapNode,depth:number) {
       entries.push({text:node.text,depth})
       node.children.forEach(child=>visit(child,depth+1))
     }
     visit(root,0)
-    const labels=await rasterPlantumlLabels(entries.map(entry=>entry.text))
+    const pixelRatio=entries.length>32?4:entries.length>12?3:2
+    const labels=await rasterPlantumlLabels(entries.map(entry=>entry.text),pixelRatio,onProgress)
     let image:HTMLImageElement|undefined,url:string|undefined,canvas:HTMLCanvasElement|undefined
     try {
       let layoutScale=1,svg=''
       for(let attempt=0;attempt<4;attempt++) {
+        onProgress?.(70+attempt*3,'Distribuyendo las ramas…')
+        await new Promise(resolve=>setTimeout(resolve,0))
         // Only placeholder boxes reach PlantUML. Original text cannot inject directives.
         const lines=['@startmindmap','<style>','mindmapDiagram {','node {','FontName monospace','FontSize 17','Padding 12','Margin 12','RoundCorner 12','BackgroundColor #f5f5f5','LineColor #555555','}','}','</style>']
         entries.forEach((entry,index)=>{
@@ -64,13 +70,15 @@ export function plantumlImage(root:MindmapNode):Promise<Blob> {
       doc.querySelectorAll('text').forEach(node=>node.remove())
       const width=Number(doc.documentElement.getAttribute('width')),height=Number(doc.documentElement.getAttribute('height'))
       if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)throw new Error('El mapa no tiene dimensiones válidas.')
+      onProgress?.(84,'Generando la imagen en alta resolución…')
+      await new Promise(resolve=>setTimeout(resolve,0))
       url=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(doc)],{type:'image/svg+xml'}))
       image=new Image()
       image.src=url
       await image.decode()
-      const scale=Math.min(2,4096/Math.max(width,height),Math.sqrt(16000000/(width*height)))
+      const scale=Math.min(pixelRatio/layoutScale,8192/Math.max(width,height),Math.sqrt(32000000/(width*height)))
       canvas=document.createElement('canvas')
-      canvas.width=Math.max(1,Math.ceil(width*scale));canvas.height=Math.max(1,Math.ceil(height*scale))
+      canvas.width=Math.max(1,Math.floor(width*scale));canvas.height=Math.max(1,Math.floor(height*scale))
       const ctx=canvas.getContext('2d')
       if(!ctx)throw new Error('No se pudo preparar la imagen del mapa.')
       ctx.scale(scale,scale);ctx.fillStyle='white';ctx.fillRect(0,0,width,height);ctx.drawImage(image,0,0,width,height)
@@ -80,7 +88,10 @@ export function plantumlImage(root:MindmapNode):Promise<Blob> {
         if(box.width<labelWidth+23||box.height<labelHeight+23)throw new Error('Una etiqueta no cabe en el mapa generado.')
         ctx.drawImage(label.canvas,box.x+(box.width-labelWidth)/2,box.y+(box.height-labelHeight)/2,labelWidth,labelHeight)
       })
-      return await new Promise<Blob>((resolve,reject)=>canvas!.toBlob(blob=>blob?resolve(blob):reject(new Error('No se pudo generar el PNG del mapa.')),'image/png'))
+      onProgress?.(95,'Exportando PNG…')
+      const blob=await new Promise<Blob>((resolve,reject)=>canvas!.toBlob(blob=>blob?resolve(blob):reject(new Error('No se pudo generar el PNG del mapa.')),'image/png'))
+      onProgress?.(100,'Diagrama listo')
+      return blob
     }finally {
       if(url)URL.revokeObjectURL(url)
       if(image)image.src=''

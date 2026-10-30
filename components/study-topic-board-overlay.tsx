@@ -44,6 +44,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const [review, setReview] = useState<MigrationReport | null>(null), [attachment, setAttachment] = useState<{ id: string; study: StudyAttachment } | null>(null)
   const [closing, setClosing] = useState(false)
   const [diagrams, setDiagrams] = useState(false)
+  const [diagramEdit, setDiagramEdit] = useState<{ id: string; source: string } | null>(null)
   const diagramImport = useRef<{ id: string; resolve: () => void; reject: (error: Error) => void } | null>(null)
   const [readerLoading, setReaderLoading] = useState(false)
   const loadedReader = useRef<string | null>(null)
@@ -63,10 +64,10 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   }
   const initialize = () => { const value = live.current.initial; if (value) send('init', { ...value.record, name, snapshot: value.snapshot, pdfReferences, shared:!!sharedRoomId }) }
   const focusBoard = () => frame.current?.focus()
-  const insertDiagram = (file: File) => new Promise<void>((resolve, reject) => {
+  const insertDiagram = (file: File, source: string) => new Promise<void>((resolve, reject) => {
     const id = crypto.randomUUID()
     diagramImport.current = { id, resolve, reject }
-    send('import-files', { files: [file], requestId: id })
+    send('import-files', { files: [file], requestId: id, preserveImageResolution: true, diagramSource: source, replaceDiagramId: diagramEdit?.id })
   })
   const closeReader = () => {
     setReaderLoading(false); send('open-finished')
@@ -113,7 +114,10 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       const data = event.data
       if (event.origin !== location.origin || data?.session !== session || data?.boardId !== boardId) return
       if (event.source === frame.current?.contentWindow) {
-        if (data.type === 'study-board:diagrams') setDiagrams(true)
+        if (data.type === 'study-board:diagrams') { setDiagramEdit(null); setDiagrams(true) }
+        if (data.type === 'study-board:edit-diagram' && typeof data.id === 'string' && typeof data.source === 'string' && data.source.length <= 100000) {
+          setDiagramEdit({ id: data.id, source: data.source }); setDiagrams(true)
+        }
         if (data.type === 'study-board:import-result' && data.requestId === diagramImport.current?.id) {
           const pending = diagramImport.current; diagramImport.current = null
           if (pending) { if (data.ok) pending.resolve(); else pending.reject(new Error(data.error || 'No se pudo insertar el diagrama.')) }
@@ -250,7 +254,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     </div>}
     {urlInput && <form onSubmit={addVideo} className="absolute bottom-16 left-16 z-30 flex max-w-[85vw] gap-1 rounded-lg border bg-white p-2 shadow"><input autoFocus type="url" aria-label="Link YouTube" placeholder="Link de YouTube" value={url} onChange={event => setUrl(event.target.value)} className="min-w-0 rounded border px-2" /><button type="submit">Agregar</button><button type="button" aria-label="Cerrar enlace" onClick={() => setUrlInput(false)}>×</button></form>}
     <input ref={files} hidden type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.svg,.xlsx,.xlsm,.csv" onChange={event => { const selected = [...(event.target.files || [])]; event.target.value = ''; send('import-files', { files: selected }) }} />
-    {diagrams && <StudyDiagramsDialog onClose={() => { setDiagrams(false); focusBoard() }} onInsert={insertDiagram} />}
+    {diagrams && <StudyDiagramsDialog key={diagramEdit?.id || 'new'} initialSource={diagramEdit?.source} editing={!!diagramEdit} onClose={() => { setDiagrams(false); setDiagramEdit(null); focusBoard() }} onInsert={insertDiagram} />}
     {reader && <div aria-hidden={!readerVisible || readerLoading} inert={!readerVisible || readerLoading} role={readerVisible ? 'dialog' : undefined} aria-modal={readerVisible || undefined} aria-label={`Leer ${reader.fileName}`} className="absolute inset-0 z-40 bg-white" style={{ visibility: readerVisible && !readerLoading ? 'visible' : 'hidden', pointerEvents: readerVisible && !readerLoading ? 'auto' : 'none' }}>
       <iframe key={pdfKey(reader)} ref={readerFrame} title="Lector de PDF de la pizarra" className="h-full w-full border-0" src={`/biblioteca/pizarra?mode=reader&session=${session}&boardId=${encodeURIComponent(boardId)}&materialId=${reader.materialId}`} />
     </div>}
