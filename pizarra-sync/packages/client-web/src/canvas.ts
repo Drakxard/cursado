@@ -1942,6 +1942,12 @@ export class BoardCanvas {
     const rect = this.stage.container().getBoundingClientRect(), view = this.worldViewport()
     return this.textLayer.hitTest({ x: view.x + (clientX - rect.left) / rect.width * view.width, y: view.y + (clientY - rect.top) / rect.height * view.height })
   }
+  studyPdfLinkAt(clientX: number, clientY: number): string | null {
+    return this.tool === 'select' ? this.textLayer.studyPdfLinkAt(clientX, clientY) : null;
+  }
+  editStudyPdf(id: string): void {
+    if (this.tool === 'select') this.textLayer.editStudyPdf(id);
+  }
 
   worldViewport(): { x: number; y: number; width: number; height: number } {
     return this.viewport.worldViewport();

@@ -1,5 +1,6 @@
 // This converter deliberately has no dependency on either board engine.
 // Originals remain in progreso/pizarras; only the returned objects enter Yjs.
+import { parseBoardShortcutDrag } from './board-library-contract.ts'
 export const STUDY_CONVERTER_VERSION = 2
 export type StudyObject = Record<string, any>
 export type LegacyStudyBoard = { version: number; boardId: string; name: string; content: Record<string, any>; assets: Record<string, string> }
@@ -41,7 +42,8 @@ export function acceptMigrationTypes(approved: Record<string, number>, report: M
 }
 
 export function studyCard(id: string, label: string, study: StudyAttachment, x = 40, y = 40): StudyObject {
-  return { id, type: 'text', x, y, width: 320, height: 62, shape: 'rounded', runs: [{ text: label, color: '#1e40af' }], fontFamily: 'system-ui', fontSize: 18, align: 'left', bg: '#eff6ff', borderColor: '#2563eb', borderStyle: 'solid', authorId: 'estudio', study }
+  const link = study.kind === 'shortcut' ? parseBoardShortcutDrag(JSON.stringify(study.reference)) : null
+  return { id, type: 'text', x, y, width: 320, height: 62, shape: 'rounded', runs: [{ text: label, color: '#1e40af', ...(link ? { link: link.url } : {}) }], fontFamily: 'system-ui', fontSize: 18, align: 'left', bg: '#eff6ff', borderColor: '#2563eb', borderStyle: 'solid', authorId: 'estudio', ...(link ? {} : { study }) }
 }
 
 export async function convertStudyBoard(snapshot: LegacyStudyBoard, image: (item: any, data: string | undefined) => Promise<string>): Promise<{ objects: StudyObject[]; report: MigrationReport }> {

@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import { addObject, objectsMap, type BoardObject } from '@komuboard/shared'
+import { addObject, objectsMap, type BoardObject, type TextRun } from '@komuboard/shared'
 import type YProvider from 'y-partyserver/provider'
 import type { BoardCanvas } from './canvas'
 import { uploadImage, UploadError } from './uploads'
@@ -7,6 +7,7 @@ import { convertStudyBoard, repairStudyReviewMarker, migrationErrorSummary, stud
 import { BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, BOARD_SHORTCUT_MIME, parseBoardShortcutDrag, parseBoardPdfDrag, parseBoardLinkDrag, parseImportantDrag } from '../../../../lib/board-library-contract'
 import './study.css'
 import { disposeStudy } from './study-render'
+import { studyPdfRuns } from './study-pdf-link'
 
 function encode(bytes: Uint8Array) {
   let value = ''; for (let at = 0; at < bytes.length; at += 8192) value += String.fromCharCode(...bytes.subarray(at, at + 8192)); return btoa(value)
@@ -44,6 +45,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   const atCenter = () => { const view = canvas.worldViewport(); return { x: view.x + view.width / 2, y: view.y + view.height / 2 } }
   const insert = (object: StudyObject) => {
     if (objectsMap(doc).has(object.id)) return
+    if (object.study?.kind === 'pdf') object = { ...object, runs: studyPdfRuns(object.id, object.runs) }
     addObject(doc, object as BoardObject)
     const map = objectsMap(doc).get(object.id)!
     if (object.study) map.set('study', object.study)
@@ -134,6 +136,13 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
       // Repair v1 placeholders in place, including already accepted/checkpointed boards.
       doc.transact(() => {
         for (const map of objectsMap(doc).values()) {
+          const study = map.get('study') as StudyAttachment | undefined
+          if (study?.kind === 'pdf') map.set('runs', studyPdfRuns(String(map.get('id')), (map.get('runs') || []) as TextRun[]))
+          const link = study?.kind === 'shortcut' ? parseBoardShortcutDrag(JSON.stringify(study.reference)) : null
+          if (link) {
+            map.set('runs', ((map.get('runs') || []) as TextRun[]).map(run => ({ ...run, link: link.url })))
+            map.delete('study')
+          }
           const repaired = repairStudyReviewMarker(map.toJSON())
           if (repaired) for (const [key, value] of Object.entries(repaired)) map.set(key, value)
         }
@@ -221,7 +230,13 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     send(button!.dataset.studyAction === 'pin' ? 'pin' : 'open', { id: element.dataset.id, study })
   }, true)
   // Observe taps without consuming the engine's selection and drag events.
-  type CardPress = { id: string; pointer: number; x: number; y: number; held: boolean; timer?: ReturnType<typeof setTimeout> }
+  const openPdf = (id: string) => {
+    const study = objectsMap(doc).get(id)?.get('study') as StudyAttachment | undefined
+    if (study?.kind !== 'pdf') return
+    card(id)?.classList.add('study-opening'); send('open', { id, study })
+  }
+  document.addEventListener('study-open-pdf', ((event: CustomEvent) => openPdf(event.detail.id)) as EventListener)
+  type CardPress = { id: string; pointer: number; x: number; y: number; held: boolean; textLink: boolean; timer?: ReturnType<typeof setTimeout> }
   let press: CardPress | undefined
   let lastTap: { id: string; at: number } | undefined
   const card = (id: string) => [...document.querySelectorAll<HTMLElement>('[data-study][data-id]')].find(el => el.dataset.id === id)
@@ -235,8 +250,8 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (event.button !== 0 || !event.isPrimary || (event.target as Element).closest('button,input,[contenteditable],.text-bar')) return
     const id = canvas.studyHitAt(event.clientX, event.clientY)
     const study = id ? objectsMap(doc).get(id)?.get('study') as StudyAttachment : undefined
-    if (!id || !study || !['pdf', 'board', 'shortcut'].includes(study.kind)) { lastTap = undefined; return }
-    const current = press = { id, pointer: event.pointerId, x: event.clientX, y: event.clientY, held: false } as CardPress
+    if (!id || !study || !['pdf', 'board'].includes(study.kind)) { lastTap = undefined; return }
+    const current = press = { id, pointer: event.pointerId, x: event.clientX, y: event.clientY, held: false, textLink: canvas.studyPdfLinkAt(event.clientX, event.clientY) === id } as CardPress
     if (study.kind === 'pdf') {
       card(id)?.classList.add('study-holding')
       current.timer = setTimeout(() => {
@@ -254,16 +269,18 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (!press || press.pointer !== event.pointerId) return
     const current = press; clearPress()
     if (current.held) return
+    const study = objectsMap(doc).get(current.id)?.get('study') as StudyAttachment | undefined
+    if (study?.kind === 'pdf') {
+      lastTap = undefined
+      if (current.textLink && Math.hypot(event.clientX - current.x, event.clientY - current.y) <= 8) openPdf(current.id)
+      else if (!current.textLink) setTimeout(() => canvas.editStudyPdf(current.id), 0)
+      return
+    }
     if (lastTap?.id === current.id && Date.now() - lastTap.at < 450) {
       lastTap = undefined
       const study = objectsMap(doc).get(current.id)?.get('study') as StudyAttachment
-      if (study?.kind === 'shortcut') {
-        const reference = parseBoardShortcutDrag(JSON.stringify(study.reference))
-        if (reference) window.open(reference.url, '_blank', 'noopener,noreferrer')
-      } else {
-        card(current.id)?.classList.add('study-opening')
-        send('open', { id: current.id, study })
-      }
+      card(current.id)?.classList.add('study-opening')
+      send('open', { id: current.id, study })
     } else lastTap = { id: current.id, at: Date.now() }
   }, true)
   document.addEventListener('pointercancel', () => { clearPress(); lastTap = undefined }, true)

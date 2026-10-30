@@ -1,4 +1,5 @@
 import { paintStudy } from "./study-render";
+import { studyPdfRuns } from './study-pdf-link';
 // src/text-layer.ts — the board's text objects as an HTML overlay (display boxes + the editor).
 //
 // Why HTML, not Konva: rich, selectable, caret-aware text is far simpler in the DOM than painted
@@ -799,11 +800,12 @@ export class TextLayer {
   /** Render a text object's runs into its display element. */
   private paint(el: HTMLElement, obj: TextObject): void {
     if (paintStudy(el, obj)) return;
+    const runs = obj.study?.kind === 'pdf' ? studyPdfRuns(obj.id, obj.runs) : obj.runs;
     // A shape wraps its label in an inner `.komu-text-body` (matching the editor) so the centred
     // empty-state placeholder lines up with where the caret/text sits when you edit it.
     el.innerHTML = obj.shape
-      ? `<div class="komu-text-body">${runsToHtml(obj.runs)}</div>`
-      : runsToHtml(obj.runs);
+      ? `<div class="komu-text-body">${runsToHtml(runs)}</div>`
+      : runsToHtml(runs);
     el.style.color = INK; // default ink; per-run colours override via the rendered spans
     if (obj.shape)
       this.applyShape(el, obj.shape, obj.bg, obj.borderColor, obj.borderStyle, customOf(obj));
@@ -1874,7 +1876,7 @@ export class TextLayer {
   private beginEdit(id: string, selectAll = false, caretAt?: { x: number; y: number }): void {
     const m = this.objects.get(id);
     const obj = m ? readObject(m) : null;
-    if (obj?.type !== "text" || obj.locked || obj.study) return; // locked boxes aren't editable
+    if (obj?.type !== "text" || obj.locked || (obj.study && obj.study.kind !== 'pdf')) return;
     const session: Omit<EditSession, "el" | "editable"> = {
       id,
       x: obj.x,
@@ -2105,6 +2107,13 @@ export class TextLayer {
     }
     return null;
   }
+  studyPdfLinkAt(x: number, y: number): string | null {
+    const element = this.linkAtPoint(x, y)?.closest<HTMLElement>('[data-study="pdf"][data-id]');
+    return element?.dataset.id || null;
+  }
+  editStudyPdf(id: string): void {
+    if ((this.objects.get(id)?.get('study') as TextObject['study'])?.kind === 'pdf') this.beginEdit(id, true);
+  }
   private cancelCardHide(): void {
     clearTimeout(this.cardHideTimer);
     this.cardHideTimer = 0;
@@ -2144,7 +2153,14 @@ export class TextLayer {
     open.href = safeHref(href) || "#";
     open.target = "_blank";
     open.rel = "noopener noreferrer";
-    open.addEventListener("click", () => this.removeLinkCard());
+    open.addEventListener("click", event => {
+      const element = link.closest<HTMLElement>('[data-study="pdf"][data-id]');
+      if (element) {
+        event.preventDefault();
+        document.dispatchEvent(new CustomEvent('study-open-pdf', { detail: { id: element.dataset.id } }));
+      }
+      this.removeLinkCard();
+    });
     const edit = document.createElement("button");
     edit.className = "ctb-link-card-btn";
     edit.textContent = "Edit";
@@ -4538,7 +4554,8 @@ export class TextLayer {
       clearTimeout(this.editTimer);
       this.editTimer = null;
     }
-    const runs = elementToRuns(e.editable); // read the DOM before detaching it
+    const rawRuns = elementToRuns(e.editable); // read the DOM before detaching it
+    const runs = e.id && (this.objects.get(e.id)?.get('study') as TextObject['study'])?.kind === 'pdf' ? studyPdfRuns(e.id, rawRuns) : rawRuns;
     const hasText = runsToText(runs).trim().length > 0;
     const keep = hasText || e.bg != null || e.shape != null; // a sticky/shape persists when empty
     if (e.id) {

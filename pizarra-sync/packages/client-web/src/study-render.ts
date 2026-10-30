@@ -13,8 +13,16 @@ export function disposeStudy(element: HTMLElement) {
 // Study cards remain ordinary engine objects: its selection/transform/undo code is reused.
 export function paintStudy(el: HTMLElement, obj: TextObject): boolean {
   const study = obj.study
-  if (!study) return false
+  if (!study) {
+    if (el.dataset.study === 'shortcut') { delete el.dataset.study; el.removeAttribute('title'); el.removeAttribute('aria-label') }
+    return false
+  }
   el.dataset.study = study.kind
+  if (study.kind === 'pdf') {
+    el.dataset.pinned = String(!!study.pinned)
+    el.title = 'Clic en el nombre para abrir · Clic fuera del texto para editar · Mantener presionado para fijar'
+    return false
+  }
   el.style.overflow = 'hidden'
   el.style.background = obj.bg || '#eff6ff'
   el.style.color = '#1e293b'
