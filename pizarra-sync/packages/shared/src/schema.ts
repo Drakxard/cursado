@@ -1600,6 +1600,11 @@ export function randomGuestName(): string {
   return `${capitalize(pickWord(ADJECTIVES))} ${capitalize(pickWord(ANIMALS))}`;
 }
 
+export function isGeneratedGuestName(name: string): boolean {
+  const words = name.trim().toLowerCase().split(/\s+/);
+  return words.length === 2 && ADJECTIVES.includes(words[0]!) && ANIMALS.includes(words[1]!);
+}
+
 // --- Persistent user profiles ----------------------------------------------
 // Profiles live in the Yjs document (synced once via the CRDT, persisted), NOT
 // in awareness — awareness is re-broadcast on every cursor move, so a photo

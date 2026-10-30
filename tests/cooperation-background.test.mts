@@ -10,7 +10,9 @@ test('background sync is idle without events, batches saves, discovers invitatio
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const getReadyWorkspaceHandle=()=>globalThis.__backgroundRoot;export const loadWorkspaceHandle=async()=>globalThis.__backgroundRoot;export const queryWorkspacePermission=async()=>"granted";export const getReadyInscreenConfigToken=()=>"";export const loadServicesFile=async()=>null' }))
   } }] })
   const backend = authRuntime(), fs = memoryWorkspace()
-  const original = { fetch: globalThis.fetch, window: globalThis.window, storage: globalThis.localStorage, socket: globalThis.WebSocket, channel: globalThis.BroadcastChannel }
+  const original = { fetch: globalThis.fetch, window: globalThis.window, storage: globalThis.localStorage, socket: globalThis.WebSocket, channel: globalThis.BroadcastChannel, document: globalThis.document }
+  const visibility = Object.assign(new EventTarget(), { hidden: false, visibilityState: 'visible' })
+  globalThis.document = visibility as any
   globalThis.window = new EventTarget() as any
   globalThis.localStorage = { getItem: () => null, setItem: () => {} } as any
   ;(globalThis as any).__backgroundRoot = fs.root
@@ -18,7 +20,7 @@ test('background sync is idle without events, batches saves, discovers invitatio
   const sockets: any[] = [], requests: string[] = []
   globalThis.WebSocket = class { onmessage; onclose; onopen; onerror; url: string; constructor(url: string) { this.url = url; sockets.push(this) } close() { this.onclose?.() } } as any
   globalThis.BroadcastChannel = class { onmessage; close() {} } as any
-  t.after(() => { backend.close(); globalThis.fetch = original.fetch; globalThis.window = original.window; globalThis.localStorage = original.storage; globalThis.WebSocket = original.socket; globalThis.BroadcastChannel = original.channel; delete (globalThis as any).__backgroundRoot })
+  t.after(() => { backend.close(); globalThis.fetch = original.fetch; globalThis.window = original.window; globalThis.localStorage = original.storage; globalThis.WebSocket = original.socket; globalThis.BroadcastChannel = original.channel; globalThis.document = original.document; delete (globalThis as any).__backgroundRoot })
   const response = await backend.request('/api/auth/guest', { body: { name: 'Demand', password: 'test-only' } })
   const cookie = response.headers.get('set-cookie')!.split(';')[0]
   globalThis.fetch = (async (url, options = {}) => {
@@ -85,4 +87,21 @@ test('background sync is idle without events, batches saves, discovers invitatio
   await waitFor(() => snapshotCount() > soloSnapshots)
   await client.synchronizeCooperation()
   stopThird()
+  // Restart with current presence and verify both socket pushes and pending saves
+  // sleep while hidden, then catch up when the page returns.
+  const stopFourth = client.startCooperationBackground()
+  t.after(stopFourth)
+  await settle()
+  visibility.hidden = true; visibility.visibilityState = 'hidden'; visibility.dispatchEvent(new Event('visibilitychange'))
+  const hiddenSnapshots = snapshotCount()
+  const currentSocket = sockets.filter(socket => socket.url.includes(`/socket/${binding.id}`)).at(-1)
+  currentSocket.onmessage({ data: JSON.stringify({ type: 'changed', seq: client.cooperationState().mirrors[binding.id].baseline.seq + 1 }) })
+  window.dispatchEvent(new Event('cursado-workspace-saved'))
+  t.mock.timers.tick(3_600_000); await settle()
+  assert.equal(snapshotCount(), hiddenSnapshots, 'hidden pushes and pending saves do not scan the workspace')
+  visibility.hidden = false; visibility.visibilityState = 'visible'; visibility.dispatchEvent(new Event('visibilitychange'))
+  t.mock.timers.tick(250)
+  await waitFor(() => snapshotCount() > hiddenSnapshots)
+  await client.synchronizeCooperation()
+  stopFourth()
 })

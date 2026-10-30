@@ -71,6 +71,51 @@ async function rendered(pdf, number) {
   })
 }
 
+test('an inactive ordinary PDF releases offscreen canvases and resumes the same document and annotations', { timeout: 60000 }, async t => {
+  const {page,requests} = await setup(t)
+  await page.evaluate(url => window.openReader(url), viewerUrl(false).replace('&sharedBoardReader=1',''))
+  const pdf = page.frameLocator('iframe')
+  for (const number of [1,4,8,12]) {
+    await pdf.locator('body').evaluate((_body, number) => { PDFViewerApplication.pdfViewer.currentPageNumber=number },number)
+    await rendered(pdf,number)
+  }
+  const previousRequests = requests()
+  await pdf.locator('body').evaluate(() => {
+    const storage = PDFViewerApplication.pdfDocument.annotationStorage
+    storage.setValue('idle-annotation',{value:'keep this'})
+    const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(storage),'serializable')
+    window.annotationHashReads=0
+    Object.defineProperty(storage,'serializable',{configurable:true,get(){window.annotationHashReads++;return descriptor.get.call(storage)}})
+  })
+  await expect.poll(() => pdf.locator('body').evaluate(() => window.annotationHashReads)).toBeGreaterThan(0)
+  await pdf.locator('body').evaluate(() => {
+    window.retainedDocument = PDFViewerApplication.pdfDocument
+    window.retainedPage = PDFViewerApplication.pdfViewer.currentPageNumber
+    PDFViewerApplication.pdfDocument.annotationStorage.setValue('idle-annotation',{value:'keep this'})
+    window.simulatedHidden=true
+    Object.defineProperty(document,'hidden',{configurable:true,get:()=>window.simulatedHidden})
+    Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>window.simulatedHidden?'hidden':'visible'})
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(() => pdf.locator('body').evaluate(() => PDFViewerApplication.pdfViewer.boardReaderPaused)).toBe(true)
+  const sleeping = await pdf.locator('body').evaluate(() => ({
+    canvases:[...document.querySelectorAll('.page canvas')].filter(canvas=>canvas.width&&canvas.height).length,
+    visible:PDFViewerApplication.pdfViewer._getVisiblePages().ids.size,
+    retained:PDFViewerApplication.pdfDocument===window.retainedDocument,
+    annotation:PDFViewerApplication.pdfDocument.annotationStorage.getValue('idle-annotation',{}).value,
+  }))
+  assert.ok(sleeping.canvases<=sleeping.visible)
+  assert.equal(sleeping.retained,true); assert.equal(sleeping.annotation,'keep this')
+  const hiddenHashReads=await pdf.locator('body').evaluate(() => window.annotationHashReads)
+  await page.waitForTimeout(1200)
+  assert.equal(await pdf.locator('body').evaluate(() => window.annotationHashReads),hiddenHashReads,'annotation hashing stops completely while hidden')
+  await pdf.locator('body').evaluate(() => {window.simulatedHidden=false;document.dispatchEvent(new Event('visibilitychange'))})
+  await expect.poll(() => pdf.locator('body').evaluate(() => PDFViewerApplication.pdfViewer.boardReaderPaused)).toBe(false)
+  assert.equal(await pdf.locator('body').evaluate(() => PDFViewerApplication.pdfViewer.currentPageNumber===window.retainedPage),true)
+  await rendered(pdf,12)
+  assert.equal(requests(),previousRequests,'resuming does not download or recreate the document')
+})
+
 test('real PDF: bounded cache, retained document, twenty visibility cycles and worker disposal', { timeout: 120000 }, async t => {
   const { page, errors, sample, requests } = await setup(t)
   const reports = []

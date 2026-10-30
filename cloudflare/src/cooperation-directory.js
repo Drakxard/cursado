@@ -9,6 +9,7 @@ export function initializeCooperation(sql) {
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_members (group_id TEXT NOT NULL, user_id TEXT NOT NULL, accepted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(group_id,user_id))')
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_spheres (id TEXT PRIMARY KEY, group_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL, created_by TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0)')
   sql.exec('CREATE TABLE IF NOT EXISTS cooperation_sphere_groups (sphere_id TEXT NOT NULL, group_id TEXT NOT NULL, PRIMARY KEY(sphere_id,group_id))')
+  sql.exec('CREATE TABLE IF NOT EXISTS cooperation_publications (user_id TEXT NOT NULL, source_id TEXT NOT NULL, source_key TEXT NOT NULL, sphere_id TEXT NOT NULL, PRIMARY KEY(user_id,source_id,source_key))')
   if(!sql.exec('PRAGMA table_info(cooperation_spheres)').toArray().some(column=>column.name==='kind'))sql.exec("ALTER TABLE cooperation_spheres ADD COLUMN kind TEXT NOT NULL DEFAULT 'subject'")
   sql.exec('INSERT OR IGNORE INTO cooperation_sphere_groups SELECT id,group_id FROM cooperation_spheres')
 }
@@ -71,16 +72,30 @@ export async function cooperationRequest(directory,request) {
     const body=await request.json(), membership=directory.first('SELECT accepted FROM cooperation_members WHERE group_id=? AND user_id=?',body.groupId,user.id)
     if(!membership?.accepted)return json({detail:'Aceptá el grupo antes de compartir.'},403)
     if(typeof body.name!=='string' || !body.name.trim() || body.name.length>150 || !/^#[a-fA-F0-9]{6}$/.test(body.color || ''))return json({detail:'Esfera inválida.'},422)
+    const identity = typeof body.sourceId === 'string' && body.sourceId.length > 0 && body.sourceId.length <= 200 && typeof body.sourceKey === 'string' && body.sourceKey.length > 0 && body.sourceKey.length <= 200 && body.kind !== 'important'
+    if((body.sourceId !== undefined || body.sourceKey !== undefined) && !identity)return json({detail:'Origen de la esfera inválido.'},422)
     if(body.sphereId) {
       const source=directory.first('SELECT s.id FROM cooperation_spheres s JOIN cooperation_sphere_groups sg ON sg.sphere_id=s.id JOIN cooperation_members m ON m.group_id=sg.group_id WHERE s.id=? AND m.user_id=? AND m.accepted=1',body.sphereId,user.id)
       if(!source)return json({detail:'No ten\u00e9s acceso a esta esfera.'},403)
       sql.exec('INSERT OR IGNORE INTO cooperation_sphere_groups VALUES (?,?)',source.id,body.groupId)
+      if(identity && directory.first('SELECT id FROM cooperation_spheres WHERE id=? AND created_by=?',source.id,user.id)) sql.exec('INSERT OR IGNORE INTO cooperation_publications VALUES (?,?,?,?)',user.id,body.sourceId,body.sourceKey,source.id)
       await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',body.groupId).toArray().map(member=>member.user_id))
       return json({id:source.id})
+    }
+    // One publication per original subject, independent of its destination group.
+    // This also closes races between devices before either has saved its mirror.
+    if(identity) {
+      const existing=directory.first('SELECT s.id FROM cooperation_publications p JOIN cooperation_spheres s ON s.id=p.sphere_id WHERE p.user_id=? AND p.source_id=? AND p.source_key=? AND s.created_by=?',user.id,body.sourceId,body.sourceKey,user.id)
+      if(existing) {
+        sql.exec('INSERT OR IGNORE INTO cooperation_sphere_groups VALUES (?,?)',existing.id,body.groupId)
+        await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',body.groupId).toArray().map(member=>member.user_id))
+        return json({id:existing.id,reused:true})
+      }
     }
     const id=crypto.randomUUID()
     sql.exec('INSERT INTO cooperation_spheres(id,group_id,name,color,created_by,kind) VALUES (?,?,?,?,?,?)',id,body.groupId,body.name,body.color,user.id,body.kind==='important'?'important':'subject')
     sql.exec('INSERT INTO cooperation_sphere_groups VALUES (?,?)',id,body.groupId)
+    if(identity)sql.exec('INSERT OR REPLACE INTO cooperation_publications VALUES (?,?,?,?)',user.id,body.sourceId,body.sourceKey,id)
     await notifyUsers(env,sql.exec('SELECT user_id FROM cooperation_members WHERE group_id=?',body.groupId).toArray().map(member=>member.user_id))
     return json({id},201)
   }
@@ -97,6 +112,7 @@ export async function cooperationRequest(directory,request) {
     const recipients=sphereUsers()
     sql.exec('DELETE FROM cooperation_sphere_groups WHERE sphere_id=?',sphere.id)
     sql.exec('DELETE FROM cooperation_spheres WHERE id=?',sphere.id)
+    sql.exec('DELETE FROM cooperation_publications WHERE sphere_id=?',sphere.id)
     await notifyUsers(env,recipients)
     return json({ok:true})
   }
@@ -118,7 +134,8 @@ export async function cooperationRequest(directory,request) {
   if(parts[2]==='operations' && request.method==='POST') {
     const result=await room.commit(sphere.id,user.id,await request.json())
     if(!result.error) {
-      const {bytes,name,color,ready}=await room.summary()
+      const {bytes,name,color,ready,deleted}=await room.summary()
+      if(deleted)sql.exec('DELETE FROM cooperation_publications WHERE sphere_id=?',sphere.id)
       sql.exec('UPDATE cooperation_spheres SET bytes=?,name=?,color=? WHERE id=?',ready?bytes:0,typeof name==='string'&&name.length<=150?name:sphere.name,/^#[a-fA-F0-9]{6}$/.test(color || '')?color:sphere.color,sphere.id)
       if(Boolean(sphere.bytes)!==ready || typeof name==='string' && name!==sphere.name || typeof color==='string' && color!==sphere.color)await notifyUsers(env,sphereUsers())
     }

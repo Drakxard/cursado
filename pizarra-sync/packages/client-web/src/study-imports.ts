@@ -1,5 +1,5 @@
 import { uploadImage } from './uploads'
-import { studyCard, type StudyObject } from '../../../../lib/study-board-migration'
+import { migrationErrorSummary, studyCard, type StudyObject } from '../../../../lib/study-board-migration'
 import { svgToPng } from '../../../../lib/study-svg-import'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -41,41 +41,48 @@ export function parseStudyCsv(raw: string) {
 }
 export async function* importStudyFiles(files: File[], point: { x: number; y: number }, status: (value: string) => void, options: { preserveImageResolution?: boolean } = {}): AsyncGenerator<StudyObject> {
   const upload = (file: File) => uploadImage(file, { reuseExisting: true, preserveResolution: options.preserveImageResolution, onWait: ms => status(ms ? `Pausa automática de ${Math.ceil(ms / 1000)} s; la subida continuará sola.` : `Subiendo ${file.name}…`) })
+  const errors: string[] = []
   let y = point.y
   for (const file of files) {
-    status(`Importando ${file.name}…`)
-    if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
-      const { task, pdf } = await openPdf(file)
-      try {
-        for (let number = 1; number <= pdf.numPages; number++) {
-          status(`Importando PDF: página ${number} de ${pdf.numPages}`)
-          const page = await pageBlob(pdf, number), uploaded = await upload(new File([page.blob], `${file.name}-${number}.png`, { type: 'image/png' }))
-          yield { id: crypto.randomUUID(), type: 'image', authorId: 'estudio', src: uploaded.key, x: point.x, y, width: page.width, height: page.height }; y += page.height + 30
+    try {
+      status(`Importando ${file.name}…`)
+      if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+        const { task, pdf } = await openPdf(file)
+        try {
+          for (let number = 1; number <= pdf.numPages; number++) {
+            status(`Importando PDF: página ${number} de ${pdf.numPages}`)
+            const page = await pageBlob(pdf, number), uploaded = await upload(new File([page.blob], `${file.name}-${number}.png`, { type: 'image/png' }))
+            yield { id: crypto.randomUUID(), type: 'image', authorId: 'estudio', src: uploaded.key, x: point.x, y, width: page.width, height: page.height }; y += page.height + 30
+          }
+        } finally { await task.destroy() }
+      } else if (/\.(xlsx|xlsm|csv)$/i.test(file.name)) {
+        let sheets: { name: string; cells: any[][] }[]
+        if (/\.csv$/i.test(file.name)) sheets = [{ name: file.name.replace(/\.csv$/i, ''), cells: parseStudyCsv(await file.text()) }]
+        else {
+          if (file.size > 12 * 1024 * 1024) throw new Error('El Excel supera 12 MB.')
+          const response = await fetch('/pizarra/api/excel/import', { method: 'POST', headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: await file.arrayBuffer() })
+          const result = await response.json(); if (!response.ok) throw new Error(result.detail || `Error ${response.status}`)
+          sheets = result.sheets; if (!sheets?.length) throw new Error('No se encontraron hojas.')
         }
-      } finally { await task.destroy() }
-    } else if (/\.(xlsx|xlsm|csv)$/i.test(file.name)) {
-      let sheets: { name: string; cells: any[][] }[]
-      if (/\.csv$/i.test(file.name)) sheets = [{ name: file.name.replace(/\.csv$/i, ''), cells: parseStudyCsv(await file.text()) }]
-      else {
-        if (file.size > 12 * 1024 * 1024) throw new Error('El Excel supera 12 MB.')
-        const response = await fetch('/pizarra/api/excel/import', { method: 'POST', headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: await file.arrayBuffer() })
-        const result = await response.json(); if (!response.ok) throw new Error(result.detail || `Error ${response.status}`)
-        sheets = result.sheets; if (!sheets?.length) throw new Error('No se encontraron hojas.')
-      }
-      for (const sheet of sheets) {
-        const columns = Math.max(1, ...sheet.cells.map(row => row.length))
-        sheet.cells = sheet.cells.map(row => Array.from({ length: columns }, (_, index) => row[index] || { input: '' }))
-        if (!sheet.cells.length) sheet.cells = [[{ input: '' }]]
-        const table = { ...sheet, cellWidth: 114, cellHeight: 33 }, object = studyCard(crypto.randomUUID(), sheet.name, { kind: 'table', table }, point.x, y)
-        object.width = 38 + Math.max(1, ...sheet.cells.map(row => row.length)) * 114; object.height = 59 + sheet.cells.length * 33
-        yield object; y += object.height + 64
-      }
-    } else if (file.type.startsWith('image/') || /\.(svg|png|jpe?g|webp|gif)$/i.test(file.name)) {
-      const blob = /\.svg$/i.test(file.name) || file.type === 'image/svg+xml' ? await svgToPng(file) : file
-      const type = blob.type || (/\.jpe?g$/i.test(file.name) ? 'image/jpeg' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/png')
-      const uploaded = await upload(new File([blob], file.name, { type }))
-      const scale = options.preserveImageResolution ? Math.min(1, 4096 / Math.max(uploaded.width, uploaded.height)) : 1
-      yield { id: crypto.randomUUID(), type: 'image', authorId: 'estudio', src: uploaded.key, x: point.x, y, width: uploaded.width * scale, height: uploaded.height * scale }; y += uploaded.height * scale + 30
-    } else throw new Error(`Formato no admitido: ${file.name}`)
+        for (const sheet of sheets) {
+          const columns = Math.max(1, ...sheet.cells.map(row => row.length))
+          sheet.cells = sheet.cells.map(row => Array.from({ length: columns }, (_, index) => row[index] || { input: '' }))
+          if (!sheet.cells.length) sheet.cells = [[{ input: '' }]]
+          const table = { ...sheet, cellWidth: 114, cellHeight: 33 }, object = studyCard(crypto.randomUUID(), sheet.name, { kind: 'table', table }, point.x, y)
+          object.width = 38 + Math.max(1, ...sheet.cells.map(row => row.length)) * 114; object.height = 59 + sheet.cells.length * 33
+          yield object; y += object.height + 64
+        }
+      } else if (file.type.startsWith('image/') || /\.(svg|png|jpe?g|webp|gif)$/i.test(file.name)) {
+        const blob = /\.svg$/i.test(file.name) || file.type === 'image/svg+xml' ? await svgToPng(file) : file
+        const type = blob.type || (/\.jpe?g$/i.test(file.name) ? 'image/jpeg' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/png')
+        const uploaded = await upload(new File([blob], file.name, { type }))
+        const scale = options.preserveImageResolution ? Math.min(1, 4096 / Math.max(uploaded.width, uploaded.height)) : 1
+        yield { id: crypto.randomUUID(), type: 'image', authorId: 'estudio', src: uploaded.key, x: point.x, y, width: uploaded.width * scale, height: uploaded.height * scale }; y += uploaded.height * scale + 30
+      } else throw new Error(`Formato no admitido: ${file.name}`)
+    } catch (error) {
+      errors.push(`${file.name}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
+  // Report failures after draining the batch; already imported objects remain.
+  if (errors.length) throw new Error(migrationErrorSummary(errors))
 }

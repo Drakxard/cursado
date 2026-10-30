@@ -9,6 +9,8 @@ import { openStudyBoard, saveStudyBoard, confirmStudyMigration } from '@/lib/stu
 import { migrationNeedsReview, migrationErrorSummary, migrationTypeLabel, studyCard, type MigrationReport, type StudyAttachment } from '@/lib/study-board-migration'
 import { readImportantTasks, importantTaskProgress, importantCountdownStyle } from '@/lib/important-tasks'
 import { publishStudyPdf } from '@/lib/study-board-pdf'
+import { cooperationStudyRoomId } from '@/lib/client/cooperation'
+import { startVisibleTask } from '@/lib/client/visible-task'
 
 export type StudyTopicBoardProps = {
   boardId: string; name: string; rootHandle: FileSystemDirectoryHandle; onClose: () => void
@@ -34,7 +36,7 @@ export function StudyTopicBoardOverlay(props: StudyTopicBoardProps) {
     onNavigate={value => setStack(current => [...current, value])} onCancel={props.onClose} />
 }
 
-function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoomId, onClose, onNavigate, onCancel, backLabel = 'Volver a Estudio' }: StudyTopicBoardProps & { onNavigate: (value: Destination) => void; onCancel: () => void }) {
+function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoomId, cooperationSubjectId, onClose, onNavigate, onCancel, backLabel = 'Volver a Estudio' }: StudyTopicBoardProps & { onNavigate: (value: Destination) => void; onCancel: () => void }) {
   const [session] = useState(() => crypto.randomUUID())
   const frame = useRef<HTMLIFrameElement>(null), library = useRef<HTMLIFrameElement>(null), readerFrame = useRef<HTMLIFrameElement>(null)
   const [initial, setInitial] = useState<Awaited<ReturnType<typeof openStudyBoard>> | null>(null)
@@ -89,6 +91,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     close(() => onNavigate({ boardId: id, name: reference.name, ...reference.topic }))
   }
   const refreshTasks = async () => {
+    if (document.hidden) return
     try {
       const tasks = await readImportantTasks(rootHandle)
       send('countdowns', { tasks: Object.fromEntries(tasks.map(task => { const days = importantTaskProgress(task).remaining; return [task.id, { days, color: importantCountdownStyle(days).from }] })) })
@@ -97,7 +100,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   useEffect(() => {
     let active = true
     mounted.current = true
-    void openStudyBoard(rootHandle, boardId, sharedRoomId).then(value => { if (active) {
+    void cooperationStudyRoomId(cooperationSubjectId, boardId).then(roomId => openStudyBoard(rootHandle, boardId, sharedRoomId, roomId)).then(value => { if (active) {
       for(const key of value.record.localPdfReferences || []) localPdfs.current.add(key)
       for(const raw of [...(pdfReferences || []),...(value.snapshot?.content.shapes || []).filter((shape:any)=>shape.visualType === 'pdf-shortcut').map((shape:any)=>shape.pdfReference)]) {
         const reference = boardPdfReference(raw); if(reference) localPdfs.current.add(localPdfKey(reference))
@@ -105,7 +108,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       live.current.initial = value; setInitial(value)
     } }).catch(reason => { if (active) setError(String(reason)) })
     return () => { active = false; mounted.current = false; diagramImport.current?.reject(new Error('Se cerró la pizarra.')); diagramImport.current = null }
-  }, [rootHandle, boardId, sharedRoomId])
+  }, [rootHandle, boardId, sharedRoomId, cooperationSubjectId])
   useEffect(() => { if (initial) initialize() }, [initial])
   useEffect(() => {
     const previousOverflow = document.body.style.overflow, previousFocus = document.activeElement as HTMLElement | null
@@ -197,11 +200,11 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       if (event.key === '<') { event.preventDefault(); togglePdf() }
       if (event.key === 'Escape' && live.current.readerVisible) { event.preventDefault(); closeReader() }
     }
-    const timer = setInterval(() => void refreshTasks(), 5000)
+    const stopRefresh = startVisibleTask(refreshTasks, 5000)
     const refresh = () => void refreshTasks()
     window.addEventListener('message', receive); window.addEventListener('keydown', key); window.addEventListener('focus', refresh); window.addEventListener('cursado-workspace-saved', refresh)
     return () => {
-      clearInterval(timer); document.body.style.overflow = previousOverflow; previousFocus?.focus({ preventScroll: true })
+      stopRefresh(); document.body.style.overflow = previousOverflow; previousFocus?.focus({ preventScroll: true })
       window.removeEventListener('message', receive); window.removeEventListener('keydown', key); window.removeEventListener('focus', refresh); window.removeEventListener('cursado-workspace-saved', refresh)
     }
   }, [session, boardId, rootHandle])

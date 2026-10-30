@@ -2534,29 +2534,31 @@ function buildDefaultLocalSubjectContainers(storageKey: string, timestamp = nowI
 }
 
 async function ensureLocalDefaultContainersForSubjects(subjects: LocalSubjectCatalogEntry[]) {
-  const manifest = await readMaterialContainersManifest()
-  let changed = false
-  for (const subject of subjects) {
-    const current = manifest[subject.storageKey]
-    if (Array.isArray(current) && current.some((container) => container.kind === "theory") && current.some((container) => container.kind === "practice")) {
-      continue
-    }
-    const custom = Array.isArray(current) ? current.filter((container) => container.kind === "custom") : []
-    manifest[subject.storageKey] = [...buildDefaultLocalSubjectContainers(subject.storageKey), ...custom]
-    changed = true
-  }
-  if (changed) {
-    const latestManifest = await readMaterialContainersManifest()
+  return withWorkspaceFileLock('manifest:manifests/material-containers.json', async () => {
+    const manifest = await readMaterialContainersManifest()
+    let changed = false
     for (const subject of subjects) {
-      const current = latestManifest[subject.storageKey]
+      const current = manifest[subject.storageKey]
       if (Array.isArray(current) && current.some((container) => container.kind === "theory") && current.some((container) => container.kind === "practice")) {
         continue
       }
       const custom = Array.isArray(current) ? current.filter((container) => container.kind === "custom") : []
-      latestManifest[subject.storageKey] = [...buildDefaultLocalSubjectContainers(subject.storageKey), ...custom]
+      manifest[subject.storageKey] = [...buildDefaultLocalSubjectContainers(subject.storageKey), ...custom]
+      changed = true
     }
-    await writeMaterialContainersManifest(latestManifest)
-  }
+    if (changed) {
+      const latestManifest = await readMaterialContainersManifest()
+      for (const subject of subjects) {
+        const current = latestManifest[subject.storageKey]
+        if (Array.isArray(current) && current.some((container) => container.kind === "theory") && current.some((container) => container.kind === "practice")) {
+          continue
+        }
+        const custom = Array.isArray(current) ? current.filter((container) => container.kind === "custom") : []
+        latestManifest[subject.storageKey] = [...buildDefaultLocalSubjectContainers(subject.storageKey), ...custom]
+      }
+      await writeMaterialContainersManifest(latestManifest)
+    }
+  })
 }
 
 export async function listLocalSubjectMaterialContainers(subjectId: string) {
@@ -2606,60 +2608,64 @@ export async function listLocalSubjectMaterialContainers(subjectId: string) {
 }
 
 export async function createLocalSubjectMaterialContainer(subjectId: string, rawName: string) {
-  const storageKey = await resolveLocalSubjectStorageKey(subjectId)
-  const name = normalizeTagDisplayName(rawName)
-  const normalizedName = normalizeTagName(rawName)
-  if (!name || !normalizedName) throw new Error("El nombre es obligatorio.")
-  const containers = await listLocalSubjectMaterialContainers(subjectId)
-  if (containers.some((container) => container.normalizedName === normalizedName)) {
-    throw new Error("Ya existe un contenedor con ese nombre.")
-  }
-  const timestamp = nowIso()
-  const container: SubjectMaterialContainer = {
-    id: nextLocalId(),
-    subjectId: storageKey,
-    name,
-    normalizedName,
-    kind: "custom",
-    isPinned: false,
-    orderIndex: Math.max(1, ...containers.map((candidate) => candidate.orderIndex)) + 1,
-    materialCount: 0,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }
-  const manifest = await readMaterialContainersManifest()
-  manifest[storageKey] = [...containers.filter((candidate) => candidate.subjectId === storageKey), container]
-    .map((candidate) => ({ ...candidate, materialCount: 0 }))
-  await writeMaterialContainersManifest(manifest)
-  return container
-}
-
-export async function renameLocalSubjectMaterialContainer(containerId: number, rawName: string) {
-  const manifest = await readMaterialContainersManifest()
-  for (const [subjectId, stored] of Object.entries(manifest)) {
-    const containers = await listLocalSubjectMaterialContainers(subjectId)
-    const current = containers.find((container) => container.id === containerId)
-    if (!current) continue
-    if (current.kind !== "custom") throw new Error("Teoría y Práctica son contenedores fijos.")
+  return withWorkspaceFileLock('manifest:manifests/material-containers.json', async () => {
+    const storageKey = await resolveLocalSubjectStorageKey(subjectId)
     const name = normalizeTagDisplayName(rawName)
     const normalizedName = normalizeTagName(rawName)
     if (!name || !normalizedName) throw new Error("El nombre es obligatorio.")
-    if (containers.some((container) => container.id !== containerId && container.normalizedName === normalizedName)) {
+    const containers = await listLocalSubjectMaterialContainers(subjectId)
+    if (containers.some((container) => container.normalizedName === normalizedName)) {
       throw new Error("Ya existe un contenedor con ese nombre.")
     }
-    const updated = { ...current, name, normalizedName, updatedAt: nowIso() }
-    manifest[subjectId] = stored.map((container) => container.id === containerId ? updated : container)
+    const timestamp = nowIso()
+    const container: SubjectMaterialContainer = {
+      id: nextLocalId(),
+      subjectId: storageKey,
+      name,
+      normalizedName,
+      kind: "custom",
+      isPinned: false,
+      orderIndex: Math.max(1, ...containers.map((candidate) => candidate.orderIndex)) + 1,
+      materialCount: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+    const manifest = await readMaterialContainersManifest()
+    manifest[storageKey] = [...containers.filter((candidate) => candidate.subjectId === storageKey), container]
+      .map((candidate) => ({ ...candidate, materialCount: 0 }))
     await writeMaterialContainersManifest(manifest)
-    for (const sourceId of await resolveLocalSubjectSourceIds(subjectId)) {
-      for (const weekNumber of await listWeekNumbersForManifestKind(MATERIALS_DIR, sourceId)) {
-        for (const material of (await readMaterialManifest(sourceId, weekNumber)).materials.filter((candidate) => candidate.container_id === containerId)) {
-          await enqueueLocalMaterialDriveUpload(material, "", true)
+    return container
+  })
+}
+
+export async function renameLocalSubjectMaterialContainer(containerId: number, rawName: string) {
+  return withWorkspaceFileLock('manifest:manifests/material-containers.json', async () => {
+    const manifest = await readMaterialContainersManifest()
+    for (const [subjectId, stored] of Object.entries(manifest)) {
+      const containers = await listLocalSubjectMaterialContainers(subjectId)
+      const current = containers.find((container) => container.id === containerId)
+      if (!current) continue
+      if (current.kind !== "custom") throw new Error("Teoría y Práctica son contenedores fijos.")
+      const name = normalizeTagDisplayName(rawName)
+      const normalizedName = normalizeTagName(rawName)
+      if (!name || !normalizedName) throw new Error("El nombre es obligatorio.")
+      if (containers.some((container) => container.id !== containerId && container.normalizedName === normalizedName)) {
+        throw new Error("Ya existe un contenedor con ese nombre.")
+      }
+      const updated = { ...current, name, normalizedName, updatedAt: nowIso() }
+      manifest[subjectId] = stored.map((container) => container.id === containerId ? updated : container)
+      await writeMaterialContainersManifest(manifest)
+      for (const sourceId of await resolveLocalSubjectSourceIds(subjectId)) {
+        for (const weekNumber of await listWeekNumbersForManifestKind(MATERIALS_DIR, sourceId)) {
+          for (const material of (await readMaterialManifest(sourceId, weekNumber)).materials.filter((candidate) => candidate.container_id === containerId)) {
+            await enqueueLocalMaterialDriveUpload(material, "", true)
+          }
         }
       }
+      return updated
     }
-    return updated
-  }
-  return null
+    return null
+  })
 }
 
 function persistLocalCustomOrder(
@@ -2676,70 +2682,76 @@ function persistLocalCustomOrder(
 }
 
 export async function setLocalSubjectMaterialContainerPinned(containerId: number, isPinned: boolean) {
-  const manifest = await readMaterialContainersManifest()
-  const owner = Object.entries(manifest).find(([, stored]) => stored.some((container) => container.id === containerId))
-  if (!owner) return null
-  const [subjectId] = owner
-  const containers = await listLocalSubjectMaterialContainers(subjectId)
-  const current = containers.find((container) => container.id === containerId)
-  if (!current) return null
-  if (current.kind !== "custom") throw new Error("Teoría y Práctica son contenedores fijos.")
+  return withWorkspaceFileLock('manifest:manifests/material-containers.json', async () => {
+    const manifest = await readMaterialContainersManifest()
+    const owner = Object.entries(manifest).find(([, stored]) => stored.some((container) => container.id === containerId))
+    if (!owner) return null
+    const [subjectId] = owner
+    const containers = await listLocalSubjectMaterialContainers(subjectId)
+    const current = containers.find((container) => container.id === containerId)
+    if (!current) return null
+    if (current.kind !== "custom") throw new Error("Teoría y Práctica son contenedores fijos.")
 
-  for (const [key, stored] of Object.entries(manifest)) {
-    manifest[key] = stored.map((container) =>
-      container.id === containerId ? { ...container, isPinned, updatedAt: nowIso() } : container
-    )
-  }
-  const others = containers.filter((container) => container.kind === "custom" && container.id !== containerId)
-  const pinned = others.filter((container) => container.isPinned)
-  const unpinned = others.filter((container) => !container.isPinned)
-  const updated = { ...current, isPinned }
-  persistLocalCustomOrder(manifest, isPinned ? [...pinned, updated, ...unpinned] : [...pinned, ...unpinned, updated])
-  await writeMaterialContainersManifest(manifest)
-  for (const sourceId of await resolveLocalSubjectSourceIds(subjectId)) {
-    for (const weekNumber of await listWeekNumbersForManifestKind(MATERIALS_DIR, sourceId)) {
-      for (const material of (await readMaterialManifest(sourceId, weekNumber)).materials.filter((candidate) => candidate.container_id === containerId)) {
-        await enqueueLocalMaterialDriveUpload(material, "", true)
+    for (const [key, stored] of Object.entries(manifest)) {
+      manifest[key] = stored.map((container) =>
+        container.id === containerId ? { ...container, isPinned, updatedAt: nowIso() } : container
+      )
+    }
+    const others = containers.filter((container) => container.kind === "custom" && container.id !== containerId)
+    const pinned = others.filter((container) => container.isPinned)
+    const unpinned = others.filter((container) => !container.isPinned)
+    const updated = { ...current, isPinned }
+    persistLocalCustomOrder(manifest, isPinned ? [...pinned, updated, ...unpinned] : [...pinned, ...unpinned, updated])
+    await writeMaterialContainersManifest(manifest)
+    for (const sourceId of await resolveLocalSubjectSourceIds(subjectId)) {
+      for (const weekNumber of await listWeekNumbersForManifestKind(MATERIALS_DIR, sourceId)) {
+        for (const material of (await readMaterialManifest(sourceId, weekNumber)).materials.filter((candidate) => candidate.container_id === containerId)) {
+          await enqueueLocalMaterialDriveUpload(material, "", true)
+        }
       }
     }
-  }
-  return { ...updated, orderIndex: isPinned ? pinned.length + 2 : pinned.length + unpinned.length + 2 }
+    return { ...updated, orderIndex: isPinned ? pinned.length + 2 : pinned.length + unpinned.length + 2 }
+  })
 }
 
 export async function moveLocalSubjectMaterialContainer(containerId: number, direction: "up" | "down") {
-  const manifest = await readMaterialContainersManifest()
-  const owner = Object.entries(manifest).find(([, stored]) => stored.some((container) => container.id === containerId))
-  if (!owner) return null
-  const [subjectId] = owner
-  const custom = (await listLocalSubjectMaterialContainers(subjectId)).filter((container) => container.kind === "custom")
-  const current = custom.find((container) => container.id === containerId)
-  if (!current) return null
-  const pinned = custom.filter((container) => container.isPinned)
-  const unpinned = custom.filter((container) => !container.isPinned)
-  const group = current.isPinned ? pinned : unpinned
-  const currentIndex = group.findIndex((container) => container.id === containerId)
-  const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
-  if (currentIndex < 0 || nextIndex < 0 || nextIndex >= group.length) return current
-  const reordered = [...group]
-  ;[reordered[currentIndex], reordered[nextIndex]] = [reordered[nextIndex], reordered[currentIndex]]
-  persistLocalCustomOrder(manifest, current.isPinned ? [...reordered, ...unpinned] : [...pinned, ...reordered])
-  await writeMaterialContainersManifest(manifest)
-  return { ...current, orderIndex: nextIndex + (current.isPinned ? 2 : pinned.length + 2), updatedAt: nowIso() }
+  return withWorkspaceFileLock('manifest:manifests/material-containers.json', async () => {
+    const manifest = await readMaterialContainersManifest()
+    const owner = Object.entries(manifest).find(([, stored]) => stored.some((container) => container.id === containerId))
+    if (!owner) return null
+    const [subjectId] = owner
+    const custom = (await listLocalSubjectMaterialContainers(subjectId)).filter((container) => container.kind === "custom")
+    const current = custom.find((container) => container.id === containerId)
+    if (!current) return null
+    const pinned = custom.filter((container) => container.isPinned)
+    const unpinned = custom.filter((container) => !container.isPinned)
+    const group = current.isPinned ? pinned : unpinned
+    const currentIndex = group.findIndex((container) => container.id === containerId)
+    const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= group.length) return current
+    const reordered = [...group]
+    ;[reordered[currentIndex], reordered[nextIndex]] = [reordered[nextIndex], reordered[currentIndex]]
+    persistLocalCustomOrder(manifest, current.isPinned ? [...reordered, ...unpinned] : [...pinned, ...reordered])
+    await writeMaterialContainersManifest(manifest)
+    return { ...current, orderIndex: nextIndex + (current.isPinned ? 2 : pinned.length + 2), updatedAt: nowIso() }
+  })
 }
 
 export async function deleteLocalSubjectMaterialContainer(containerId: number) {
-  const manifest = await readMaterialContainersManifest()
-  for (const [subjectId, stored] of Object.entries(manifest)) {
-    const containers = await listLocalSubjectMaterialContainers(subjectId)
-    const current = containers.find((container) => container.id === containerId)
-    if (!current) continue
-    if (current.kind !== "custom") throw new Error("Teoría y Práctica son contenedores fijos.")
-    if (current.materialCount > 0) throw new Error(`El contenedor contiene ${current.materialCount} PDF${current.materialCount === 1 ? "" : "s"}.`)
-    manifest[subjectId] = stored.filter((container) => container.id !== containerId)
-    await writeMaterialContainersManifest(manifest)
-    return { deleted: true, materialCount: 0 }
-  }
-  return null
+  return withWorkspaceFileLock('manifest:manifests/material-containers.json', async () => {
+    const manifest = await readMaterialContainersManifest()
+    for (const [subjectId, stored] of Object.entries(manifest)) {
+      const containers = await listLocalSubjectMaterialContainers(subjectId)
+      const current = containers.find((container) => container.id === containerId)
+      if (!current) continue
+      if (current.kind !== "custom") throw new Error("Teoría y Práctica son contenedores fijos.")
+      if (current.materialCount > 0) throw new Error(`El contenedor contiene ${current.materialCount} PDF${current.materialCount === 1 ? "" : "s"}.`)
+      manifest[subjectId] = stored.filter((container) => container.id !== containerId)
+      await writeMaterialContainersManifest(manifest)
+      return { deleted: true, materialCount: 0 }
+    }
+    return null
+  })
 }
 
 export async function listLocalMaterialTagRegions(materialId: number, tagId: number) {
@@ -3288,39 +3300,41 @@ export async function completeLocalMaterialUpload(input: {
       ? input.weekNumber
       : getWeekNumberForDate(parsedDate)
   const weekdayIndex = getWeekdayIndexFromDateKey(input.sessionDate)
-  const manifest = await readMaterialManifest(storageKey, weekNumber)
-  const existing = manifest.materials.find((candidate) => candidate.drive_file_id === input.driveFileId)
-  if (existing) return existing
+  return withWorkspaceFileLock(`manifest:${materialManifestPath(storageKey, weekNumber).join('/')}`, async () => {
+    const manifest = await readMaterialManifest(storageKey, weekNumber)
+    const existing = manifest.materials.find((candidate) => candidate.drive_file_id === input.driveFileId)
+    if (existing) return existing
 
-  const containers = await listLocalSubjectMaterialContainers(input.subjectId)
-  const container = Number.isInteger(input.containerId)
-    ? containers.find((candidate) => candidate.id === input.containerId)
-    : containers.find((candidate) => candidate.kind === input.materialType)
-  if (!container) throw new Error("El contenedor no existe.")
-  const siblings = manifest.materials.filter(
-    (candidate) => candidate.session_date === input.sessionDate && candidate.container_id === container.id
-  )
-  const timestamp = nowIso()
-  const nextMaterial: SubjectDayMaterial = {
-    id: nextLocalId(),
-    subject_id: storageKey,
-    week_number: weekNumber,
-    session_date: input.sessionDate,
-    weekday_index: weekdayIndex,
-    material_type: input.materialType,
-    container_id: container.id,
-    order_index: siblings.length,
-    file_name: normalizePdfFileName(input.fileName),
-    drive_file_id: input.driveFileId,
-    drive_mime_type: "application/pdf",
-    drive_web_view_link: "",
-    is_checkup_done: false,
-    created_at: timestamp,
-    updated_at: timestamp,
-  }
-  await writeMaterialManifest(storageKey, weekNumber, [...manifest.materials, nextMaterial])
-  await enqueueLocalMaterialDriveUpload(nextMaterial, input.subjectName)
-  return nextMaterial
+    const containers = await listLocalSubjectMaterialContainers(input.subjectId)
+    const container = Number.isInteger(input.containerId)
+      ? containers.find((candidate) => candidate.id === input.containerId)
+      : containers.find((candidate) => candidate.kind === input.materialType)
+    if (!container) throw new Error("El contenedor no existe.")
+    const siblings = manifest.materials.filter(
+      (candidate) => candidate.session_date === input.sessionDate && candidate.container_id === container.id
+    )
+    const timestamp = nowIso()
+    const nextMaterial: SubjectDayMaterial = {
+      id: nextLocalId(),
+      subject_id: storageKey,
+      week_number: weekNumber,
+      session_date: input.sessionDate,
+      weekday_index: weekdayIndex,
+      material_type: input.materialType,
+      container_id: container.id,
+      order_index: siblings.length,
+      file_name: normalizePdfFileName(input.fileName),
+      drive_file_id: input.driveFileId,
+      drive_mime_type: "application/pdf",
+      drive_web_view_link: "",
+      is_checkup_done: false,
+      created_at: timestamp,
+      updated_at: timestamp,
+    }
+    await writeMaterialManifest(storageKey, weekNumber, [...manifest.materials, nextMaterial])
+    await enqueueLocalMaterialDriveUpload(nextMaterial, input.subjectName)
+    return nextMaterial
+  })
 }
 
 const LOCAL_WEEK_MATERIAL_CACHE_MS = 1_500
@@ -3415,24 +3429,28 @@ export async function updateLocalMaterial(
 ) {
   const material = await findMaterialById(materialId)
   if (!material) return null
-  const manifest = await readMaterialManifest(material.subject_id, material.week_number)
-  const updatedMaterial: SubjectDayMaterial = {
-    ...material,
-    file_name: patch.file_name ?? material.file_name,
-    is_checkup_done: patch.is_checkup_done ?? material.is_checkup_done,
-    container_id: patch.container_id === undefined ? material.container_id : patch.container_id,
-    material_type: patch.material_type ?? material.material_type,
-    updated_at: nowIso(),
-  }
-  await writeMaterialManifest(
-    material.subject_id,
-    material.week_number,
-    manifest.materials.map((candidate) => (candidate.id === materialId ? updatedMaterial : candidate))
-  )
-  if (patch.container_id !== undefined || patch.material_type !== undefined || patch.file_name !== undefined) {
-    await enqueueLocalMaterialDriveUpload(updatedMaterial, "", true)
-  }
-  return updatedMaterial
+  return withWorkspaceFileLock(`manifest:${materialManifestPath(material.subject_id, material.week_number).join('/')}`, async () => {
+    const manifest = await readMaterialManifest(material.subject_id, material.week_number)
+    const current = manifest.materials.find(candidate => candidate.id === materialId)
+    if (!current) return null
+    const updatedMaterial: SubjectDayMaterial = {
+      ...current,
+      file_name: patch.file_name ?? current.file_name,
+      is_checkup_done: patch.is_checkup_done ?? current.is_checkup_done,
+      container_id: patch.container_id === undefined ? current.container_id : patch.container_id,
+      material_type: patch.material_type ?? current.material_type,
+      updated_at: nowIso(),
+    }
+    await writeMaterialManifest(
+      material.subject_id,
+      material.week_number,
+      manifest.materials.map((candidate) => (candidate.id === materialId ? updatedMaterial : candidate))
+    )
+    if (patch.container_id !== undefined || patch.material_type !== undefined || patch.file_name !== undefined) {
+      await enqueueLocalMaterialDriveUpload(updatedMaterial, "", true)
+    }
+    return updatedMaterial
+  })
 }
 
 async function deleteEntryFiles(entries: SubjectDayEntry[]) {
@@ -3446,42 +3464,44 @@ async function deleteEntryFiles(entries: SubjectDayEntry[]) {
 export async function deleteLocalMaterial(materialId: number) {
   const material = await findMaterialById(materialId)
   if (!material) return null
+  return withWorkspaceFileLock(`manifest:${materialManifestPath(material.subject_id, material.week_number).join('/')}`, async () => {
 
-  await enqueueLocalMaterialDriveDelete(materialId)
-  const materialManifest = await readMaterialManifest(material.subject_id, material.week_number)
-  await writeMaterialManifest(
-    material.subject_id,
-    material.week_number,
-    materialManifest.materials.filter((candidate) => candidate.id !== materialId)
-  )
-
-  const entryManifest = await readEntryManifest(material.subject_id, material.week_number)
-  const removedEntries = entryManifest.entries.filter((entry) => entry.subject_day_material_id === materialId)
-  if (removedEntries.length > 0) {
-    await deleteEntryFiles(removedEntries)
-    await writeEntryManifest(
+    await enqueueLocalMaterialDriveDelete(materialId)
+    const materialManifest = await readMaterialManifest(material.subject_id, material.week_number)
+    await writeMaterialManifest(
       material.subject_id,
       material.week_number,
-      entryManifest.entries.filter((entry) => entry.subject_day_material_id !== materialId)
+      materialManifest.materials.filter((candidate) => candidate.id !== materialId)
     )
-  }
 
-  if (material.drive_file_id && isWorkspaceFileId(material.drive_file_id)) {
-    await deleteWorkspaceBlob(material.drive_file_id)
-  }
+    const entryManifest = await readEntryManifest(material.subject_id, material.week_number)
+    const removedEntries = entryManifest.entries.filter((entry) => entry.subject_day_material_id === materialId)
+    if (removedEntries.length > 0) {
+      await deleteEntryFiles(removedEntries)
+      await writeEntryManifest(
+        material.subject_id,
+        material.week_number,
+        entryManifest.entries.filter((entry) => entry.subject_day_material_id !== materialId)
+      )
+    }
 
-  const tagManifest = await readTagManifest()
-  const assignments = { ...tagManifest.assignments }
-  delete assignments[String(materialId)]
-  await writeTagManifest({
-    ...tagManifest,
-    assignments,
-    regions: Object.fromEntries(
-      Object.entries(tagManifest.regions).filter(([key]) => !key.startsWith(`${materialId}:`))
-    ),
+    if (material.drive_file_id && isWorkspaceFileId(material.drive_file_id)) {
+      await deleteWorkspaceBlob(material.drive_file_id)
+    }
+
+    const tagManifest = await readTagManifest()
+    const assignments = { ...tagManifest.assignments }
+    delete assignments[String(materialId)]
+    await writeTagManifest({
+      ...tagManifest,
+      assignments,
+      regions: Object.fromEntries(
+        Object.entries(tagManifest.regions).filter(([key]) => !key.startsWith(`${materialId}:`))
+      ),
+    })
+
+    return material
   })
-
-  return material
 }
 
 export async function createLocalEntryUploadSession(input: {

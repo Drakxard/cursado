@@ -28,6 +28,28 @@ async function register(backend, name) {
   assert.equal(response.status, 200)
   return { cookie: response.headers.get('set-cookie').split(';')[0], user: await response.json() }
 }
+
+test('one source shared concurrently with two groups keeps the same publication and R2 namespace', async t => {
+  const backend = authRuntime(); t.after(() => backend.close())
+  const a = await register(backend, 'Publisher'), b = await register(backend, 'GroupX'), c = await register(backend, 'GroupY')
+  const api = (actor, path, body?) => backend.request(`/api/cooperation/${path}`, { cookie: actor.cookie, ...(body === undefined ? {} : { body }) })
+  const x = await (await api(a, 'groups', { names: 'GroupX' })).json(), y = await (await api(a, 'groups', { names: 'GroupY' })).json()
+  const source = { name: 'Prog 3', color: '#ff6600', sourceId: 'prog3', sourceKey: 'Prog3' }
+  const [first, second] = await Promise.all([api(a, 'spheres', { ...source, groupId: x.id }), api(a, 'spheres', { ...source, groupId: y.id })])
+  const published = await first.json(), linked = await second.json()
+  assert.equal(published.id, linked.id)
+  const directory = await (await api(a, 'groups')).json()
+  assert.equal(new Set(directory.groups.flatMap(group => group.spheres).map(sphere => sphere.id)).size, 1)
+  const before = await (await api(a, `spheres/${published.id}/snapshot`)).json()
+  assert.equal((await (await api(a, 'spheres', { ...source, groupId: y.id })).json()).id, published.id)
+  assert.deepEqual(await (await api(a, `spheres/${published.id}/snapshot`)).json(), before)
+  const different = await (await api(a, 'spheres', { ...source, sourceId: 'other-course', sourceKey: 'OtherCourse', groupId: x.id })).json()
+  assert.notEqual(different.id, published.id, 'the display name cannot merge unrelated courses')
+  await api(c, `groups/${y.id}/accept`, {})
+  const otherOwner = await (await api(c, 'spheres', { ...source, groupId: y.id })).json()
+  assert.notEqual(otherOwner.id, published.id, 'origin identities are scoped to their publisher')
+  assert.equal((await api(b, 'spheres', { ...source, groupId: y.id, sphereId: published.id })).status, 403)
+})
 test('three participants, invitations, isolation, durable operation deduplication, offline merges and verified files', async t => {
   const backend = authRuntime(); t.after(() => backend.close())
   const a = await register(backend, 'PersonaA'), b = await register(backend, 'PersonaB'), c = await register(backend, 'PersonaC'), stranger = await register(backend, 'Extra')

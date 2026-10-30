@@ -7,12 +7,32 @@ const object = (v: unknown): v is Record<string, Json> => !!v && typeof v === 'o
 const keyed = (v: Json[]): boolean => v.every(x => object(x) && (typeof x.id === 'string' || typeof x.id === 'number')) && new Set(v.map(x => (x as Record<string, Json>).id)).size === v.length
 export function mergeCooperation(base: Json | undefined, local: Json | undefined, remote: Json | undefined,
   conflicts: Conflict[] = [], path: string[] = []): Json | undefined {
+  if (Array.isArray(local) && Array.isArray(remote) && (local.some(row => object(row) && (row.kind === 'theory' || row.kind === 'practice')) || remote.some(row => object(row) && (row.kind === 'theory' || row.kind === 'practice')))) {
+    // Teoría/Práctica are fixed containers. A device may have created its local
+    // defaults before receiving the original ids; this is not a delete + add.
+    const defaults = new Map<string, Json>()
+    for (const row of [...(Array.isArray(base) ? base : []), ...remote, ...local]) if (object(row) && (row.kind === 'theory' || row.kind === 'practice') && !defaults.has(row.kind)) defaults.set(row.kind, row.id)
+    if (defaults.size) {
+      const normalize = (rows: Json[]) => {
+        const seen = new Set<string>()
+        return rows.flatMap(row => {
+          if (!object(row) || (row.kind !== 'theory' && row.kind !== 'practice')) return [row]
+          if (seen.has(row.kind)) return []
+          seen.add(row.kind)
+          return [{ ...row, id: defaults.get(row.kind)! }]
+        })
+      }
+      local = normalize(local); remote = normalize(remote)
+      if (Array.isArray(base)) base = normalize(base)
+    }
+  }
   if (equal(base, local)) return remote
   if (equal(base, remote) || equal(local, remote)) return local
   if (['updatedAt', 'updated_at', 'revision'].includes(path.at(-1) || '')) {
     if (typeof local === 'number' && typeof remote === 'number') return Math.max(local, remote)
     if (typeof local === 'string' && typeof remote === 'string') return local > remote ? local : remote
   }
+  if (['createdAt', 'created_at'].includes(path.at(-1) || '') && typeof local === 'string' && typeof remote === 'string') return local < remote ? local : remote
   // A committed deletion cannot be undone by a stale edit.
   if (base !== undefined && (local === undefined || remote === undefined)) return undefined
   // Synthesis stores a heading and its body as adjacent Tiptap blocks. Merge
@@ -31,9 +51,9 @@ export function mergeCooperation(base: Json | undefined, local: Json | undefined
     const merged = mergeCooperation(sections(base), sections(local), sections(remote), conflicts, [...path, 'sections']) as { id: string; blocks: Json[] }[]
     return { ...remote, ...local, content: merged.flatMap(section => section.blocks) }
   }
-  if (Array.isArray(local) && Array.isArray(remote) && Array.isArray(base) && keyed(base) && keyed(local) && keyed(remote)) {
+  if (Array.isArray(local) && Array.isArray(remote) && (base === undefined || Array.isArray(base) && keyed(base)) && keyed(local) && keyed(remote)) {
     const index = (rows: Json[]) => new Map(rows.map(row => [String((row as Record<string, Json>).id), row]))
-    const b = index(base), l = index(local), r = index(remote), result: Json[] = []
+    const b = index(base || []), l = index(local), r = index(remote), result: Json[] = []
     for (const id of new Set([...r.keys(), ...l.keys()])) {
       const before = conflicts.length
       const value = mergeCooperation(b.get(id), l.get(id), r.get(id), conflicts, [...path, `@${id}`])

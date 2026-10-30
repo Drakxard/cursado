@@ -100,6 +100,15 @@ function stripPersonal(value: Json): Json {
 }
 type ScanResource = { key: string; deleted?: boolean; blob?: { hash: string; size: number; mime: string } }
 type ScanOptions = { resources?: Record<string, ScanResource>; restore?: (resource: ScanResource, path: string) => Promise<void> }
+function scopedContainers(all: Record<string, Json[]>, b: SphereBinding): Json[] {
+  const rows = new Map<string, Json>()
+  for (const id of new Set([b.subjectId, b.storageKey])) for (const raw of all[id] || []) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const row = { ...raw, subjectId: b.storageKey, materialCount: 0 }
+    rows.set(raw.kind === 'theory' || raw.kind === 'practice' ? String(raw.kind) : String(raw.id), row)
+  }
+  return [...rows.values()]
+}
 export class MissingCooperationFileError extends Error {
   constructor(path: string) {
     super(`No se encuentra el archivo referenciado «${path}». No se publicaron eliminaciones. Revisá su ubicación en la carpeta de Estudio y reintentá.`)
@@ -240,7 +249,7 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
     if (explicitSubject ? ids.has(String(explicitSubject)) : [...ids].some(id => text.includes(`"subjectId":"${id}"`)) || String(board.name || '').startsWith(`${b.name} - `)) await add(path)
   }
   const containers = await readJson<Record<string, Json[]>>(root, 'manifests/material-containers.json', {})
-  output.push({ key: 'scope/containers.json', value: mapBindingJson([...ids].flatMap(id => containers[id] || []), b, false) })
+  output.push({ key: 'scope/containers.json', value: mapBindingJson(scopedContainers(containers, b), b, false) })
   const shortcuts = await readJson<Record<string, Json>>(root, 'manifests/subject-shortcuts.json', {})
   const shortcut = shortcuts[b.storageKey] || shortcuts[b.subjectId]
   if (shortcut) output.push({ key: 'scope/shortcuts.json', value: mapBindingJson(shortcut, b, false) })
@@ -255,7 +264,10 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
   output.push({ key: 'scope/tags.json', value: { tags: (tags.tags || []).filter(t => tagIds.has(String(t.id))), assignments, regions: Object.fromEntries(Object.entries(tags.regions || {}).filter(([key]) => materialIds.has(key.split(':')[0]))) } })
   return output
 }
-export async function applyMirrorFile(root: FileSystemDirectoryHandle, b: SphereBinding, key: string, value: Json | Blob) {
+export async function applyMirrorFile(root: FileSystemDirectoryHandle, b: SphereBinding, key: string, value: Json | Blob, expected?: { value: Json | undefined }) {
+  const assertUnchanged = (current: Json | undefined) => {
+    if (expected && JSON.stringify(current === undefined ? undefined : mapBindingJson(current, b, false)) !== JSON.stringify(expected.value)) throw Object.assign(new Error('El contenido local cambió durante la sincronización; se volverá a combinar.'), { name: 'NotReadableError' })
+  }
   if (key === 'sphere.json') return
   if (/^scope\/board-assets\/[a-f0-9]{64}$/.test(key) && value instanceof Blob) { await writeFile(root, `.cooperation/assets/${b.id}/${key.split('/').at(-1)}`, value); return }
   const mapped = value instanceof Blob ? value : mapBindingJson(value, b, true)
@@ -263,7 +275,11 @@ export async function applyMirrorFile(root: FileSystemDirectoryHandle, b: Sphere
     const path = key.includes('containers') ? 'manifests/material-containers.json' : 'manifests/subject-shortcuts.json'
     return withWorkspaceFileLock(`manifest:${path}`, async () => {
       const all = await readJson<Record<string, Json>>(root, path, {})
-      all[b.storageKey] = mapped as Json
+      assertUnchanged(key === 'scope/containers.json' ? scopedContainers(all as Record<string, Json[]>, b) : all[b.storageKey] || all[b.subjectId])
+      // Local container operations are scoped by storage folder, even when the
+      // original publication used its logical subject id in each row.
+      all[b.storageKey] = key === 'scope/containers.json' && Array.isArray(mapped) ? mapped.map(row => row && typeof row === 'object' && !Array.isArray(row) ? { ...row, subjectId: b.storageKey, materialCount: 0 } : row) : mapped as Json
+      if (b.subjectId !== b.storageKey && key === 'scope/containers.json') delete all[b.subjectId]
       await writeJson(root, path, all)
     })
   }
@@ -300,10 +316,15 @@ export async function applyMirrorFile(root: FileSystemDirectoryHandle, b: Sphere
     }
     if (path.startsWith('manifests/sintesis/') && 'workspace' in mapped) mapped.r2 = previous?.r2 || { etag: null, baseline: null }
   }
+  const persist = async () => {
+    if (expected) assertUnchanged(await readJson<Json | undefined>(root, path, undefined))
+    await writeJson(root, path, mapped)
+  }
   if (/^manifests\/subject-voice\/[^/]+\/audios\.json$/.test(path)) {
     validateAudioWorkspace(mapped, b.subjectId)
-    await withWorkspaceFileLock(`manifest:${path}`, () => writeJson(root, path, mapped))
-  } else await writeJson(root, path, mapped)
+    await withWorkspaceFileLock(`manifest:${path}`, persist)
+  } else if (expected || /^manifests\/(?:materials|entries)\//.test(path)) await withWorkspaceFileLock(`manifest:${path}`, persist)
+  else await persist()
 }
 
 export async function isFileReferenced(root: FileSystemDirectoryHandle, path: string) {

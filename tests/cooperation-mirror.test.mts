@@ -145,6 +145,13 @@ test('local mirrors download exact files, isolate subjects, synchronize independ
   await use(a, () => a.client.synchronizeCooperation()); await use(b, () => b.client.synchronizeCooperation()); await use(a, () => a.client.synchronizeCooperation())
   assert.equal((await a.fs.json(pathA)).materials.length, 3)
   assert.equal((await b.fs.json(pathB)).materials.length, 3)
+  assert.equal(a.client.cooperationState().deletions.length, 0, 'adding PDFs does not create deletion notices')
+  assert.equal(b.client.cooperationState().deletions.length, 0, 'independent additions preserve both collections')
+  const stale = { id: 'stale-notice', sphereId: binding.id, key: pathA, selector: ['materials', '@100'], label: 'Elemento', decision: 'wait' }
+  b.client.cooperationState().deletions.push(stale)
+  await b.fs.put(`.cooperation/${b.client.cooperationState().userId}/state.json`, b.client.cooperationState())
+  await use(b, () => b.client.synchronizeCooperation())
+  assert.equal(b.client.cooperationState().deletions.some(row => row.id === stale.id), false, 'old notices disappear when the element still exists in cooperation')
   const deleted = await a.fs.json(pathA); deleted.materials = deleted.materials.filter(row => row.id !== 100)
   await a.fs.put(pathA, deleted); await use(a, () => a.client.synchronizeCooperation()); await use(b, () => b.client.synchronizeCooperation())
   let pending = b.client.cooperationState().deletions.find(d => d.selector.includes('@100'))

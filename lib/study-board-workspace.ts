@@ -37,18 +37,26 @@ async function cachedOriginal(boardId: string): Promise<LegacyStudyBoard | null>
     return { version: 1, boardId, name: board.name, content, assets }
   } finally { db.close() }
 }
-export async function openStudyBoard(root: FileSystemDirectoryHandle, boardId: string, sharedRoomId?: string) {
+export async function openStudyBoard(root: FileSystemDirectoryHandle, boardId: string, sharedRoomId?: string, cooperationRoomId?: string) {
   if (sharedRoomId && !/^study-[a-f0-9-]{36}$/.test(sharedRoomId)) throw new Error('Sala compartida inválida.')
+  if (cooperationRoomId && !/^study-[a-f0-9-]{36}$/.test(cooperationRoomId)) throw new Error('Sala cooperativa inválida.')
   return withWorkspaceFileLock(`study-sync:${boardId}`, async () => {
     let record = await readWorkspaceJson<StudyBoardRecord | null>(root, path(boardId), null)
     if (!record) {
-      record = { version: 1, boardId, roomId: sharedRoomId || `study-${crypto.randomUUID()}`, status: sharedRoomId ? 'accepted' : 'pending' }
+      record = { version: 1, boardId, roomId: sharedRoomId || cooperationRoomId || `study-${crypto.randomUUID()}`, status: sharedRoomId ? 'accepted' : 'pending' }
       await writeWorkspaceJson(root, path(boardId), record)
     }
     if (record.version !== 1 || record.boardId !== boardId || !/^study-[a-f0-9-]{36}$/.test(record.roomId)) throw new Error('La asociación de la sala no es válida.')
     if(sharedRoomId) {
       if(record.roomId !== sharedRoomId) throw new Error('La sala compartida no coincide.')
       return {record,snapshot:null,approved:{}}
+    }
+    if (cooperationRoomId && record.roomId !== cooperationRoomId) {
+      // Keep the previous binding and checkpoint for recovery. Applying the local
+      // Yjs draft to the common room carries existing work into cooperation.
+      await writeWorkspaceJson(root, `progreso/pizarra-sync/${boardId}.recovery-${record.roomId}.json`, record)
+      record = { ...record, roomId: cooperationRoomId }
+      await writeWorkspaceJson(root, path(boardId), record)
     }
     // A single immutable source makes simultaneous deterministic Yjs imports agree.
     // Completed boards need only their small room binding + Yjs checkpoint, not PDF/image originals.

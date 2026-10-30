@@ -3,7 +3,7 @@ import test from 'node:test'
 import { build } from 'esbuild'
 import { chromium } from '@playwright/test'
 
-test('cooperative UI accepts username lists, keeps declined spheres gray and offers deletion review and personal copies', async () => {
+test('cooperative UI keeps invitations separate and resolves named deletions inline without dialogs', async () => {
   const fixture = `
     const sphere={id:'sphere-1',group_id:'group-1',name:'Álgebra',color:'#2563eb',created_by:'a',bytes:2500000,ready:false};
     const state={version:1,userId:'b',groups:[{id:'group-1',accepted:false,members:[{id:'a',display_name:'PersonaA'},{id:'b',display_name:'PersonaB'}],spheres:[sphere]},{id:'empty-group',accepted:false,members:[{id:'c',display_name:'PersonaC'}],spheres:[]}],mirrors:{},deletions:[]};
@@ -23,10 +23,11 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     export const createCooperationGroup=async names=>{window.createdNames=names;return 'group-1'};
     export const dismissCooperationSphere=async id=>{state.dismissedSpheres=[id];changed()};
     export const notifyCooperationDeletion=async id=>{state.deletions.find(d=>d.id===id).notified=true;changed()};
-    export const decideCooperationDeletion=async(id,decision)=>{state.deletions.find(d=>d.id===id).decision=decision;changed()};
+    export const decideCooperationDeletion=async(id,decision)=>{if(window.failDecision)throw new Error('Sin conexión. Reintentá.');state.deletions.find(d=>d.id===id).decision=decision;changed()};
     export const acceptCooperationSphere=async(_sphere,options)=>{window.downloadOptions=options;window.downloads=(window.downloads||0)+1;state.mirrors[sphere.id]={binding:{id:sphere.id,name:sphere.name,subjectId:'coop-subject',groupId:'group-1'},baseline:{conflicts:[]},downloading:true,metadataReady:true,transfer:{phase:'downloading',completed:0,total:2}};changed()};
     export const startCooperationBackground=()=>{queueMicrotask(changed);return ()=>{}};
     window.prepareDeletion=()=>{state.deletions.push({id:'delete-1',sphereId:sphere.id,key:'sphere.json',selector:[],label:'Álgebra',decision:'wait'});changed()};
+    window.preparePdfDeletion=()=>{state.deletions.push({id:'delete-pdf',sphereId:sphere.id,key:'manifests/materials/algebra/week-1.json',selector:['materials','@1'],label:'Elemento',value:{id:1,file_name:'Práctica 3.pdf'},decision:'wait'});changed()};
   `
   const bundled = await build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {CooperationPanel,CooperationRuntime,CooperationSyncStatus} from './components/cooperation';function App(){const [visible,setVisible]=React.useState(true);window.showCooperationPanel=setVisible;return <><CooperationSyncStatus subjectId="coop-subject"/><CooperationRuntime/>{visible&&<CooperationPanel onOpen={id=>window.openedSubject=id}/>}</>};createRoot(document.getElementById('root')).render(<App/>)`, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, platform: 'browser', format: 'iife', define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'cooperation-ui', setup(builder) {
     builder.onResolve({ filter: /^@\/lib\/client\/cooperation$/ }, () => ({ path: 'cooperation', namespace: 'fixture' }))
@@ -86,15 +87,28 @@ test('cooperative UI accepts username lists, keeps declined spheres gray and off
     assert.doesNotMatch(await sphere.getAttribute('class'), /grayscale/)
     await sphere.click()
     assert.equal(await page.evaluate(() => (window as any).openedSubject), 'coop-subject')
-    await page.evaluate(() => (window as any).prepareDeletion())
+    await page.evaluate(() => { (window as any).showCooperationPanel(false); (window as any).prepareDeletion() })
     const deletion = page.getByRole('dialog', { name: 'Elemento eliminado' })
-    await deletion.getByRole('button', { name: 'Esperar' }).click()
-    assert.match(await sphere.getAttribute('class'), /grayscale/)
+    await page.getByRole('region', { name: 'Estudio cooperativo' }).waitFor({ state: 'detached' })
+    assert.equal(await deletion.count(), 0, 'background deletions do not interrupt other screens')
+    assert.equal(await page.evaluate(() => document.querySelector('[aria-modal="true"]')), null)
+    await page.evaluate(() => (window as any).showCooperationPanel(true))
+    await page.getByText('¿Conservar?', { exact: true }).waitFor()
+    assert.doesNotMatch(await sphere.getAttribute('class'), /grayscale/)
     await sphere.click()
-    await deletion.getByRole('button', { name: 'Ver', exact: true }).waitFor()
-    await deletion.getByRole('button', { name: 'Guardar', exact: true }).click()
+    assert.equal(await deletion.count(), 0, 'opening pending content never prompts')
+    await page.evaluate(() => (window as any).failDecision=true)
+    await page.getByRole('button', { name: 'Conservar Álgebra', exact: true }).click()
+    await page.getByRole('alert').getByText('Sin conexión. Reintentá.', { exact: true }).waitFor()
+    await page.evaluate(() => (window as any).failDecision=false)
+    await page.getByRole('button', { name: 'Conservar Álgebra', exact: true }).click()
     await page.getByText('Personal', { exact: true }).waitFor()
     assert.doesNotMatch(await sphere.getAttribute('class'), /grayscale/)
+    await page.evaluate(() => (window as any).preparePdfDeletion())
+    await page.getByText('Práctica 3.pdf', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Descartar copia local de Práctica 3.pdf', exact: true }).click()
+    await page.getByText('Práctica 3.pdf', { exact: true }).waitFor({ state: 'detached' })
+    assert.equal(await deletion.count(), 0)
     await page.evaluate(() => (window as any).resetInvitation())
     await page.getByRole('dialog', { name: 'Nuevo contenido cooperativo' }).getByRole('button', { name: 'Elegir', exact: true }).click()
     assert.equal(await page.evaluate(() => (window as any).downloadOptions.choose), true)

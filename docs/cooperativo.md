@@ -14,6 +14,10 @@ vuelve a publicar si se elige su grupo original. Si se perdieron la asociación
 del catálogo y el estado de sincronización, se buscan primero las publicaciones
 accesibles y se comprueban sus identificadores y los hashes/contenidos locales
 antes de crear otra esfera. Coincidir en el nombre no basta para unir materias.
+La carpeta local identifica también los accesos con otro identificador de interfaz.
+El servidor asocia cada publicación a su usuario y materia de origen para que
+dos grupos o dispositivos reutilicen la misma esfera y sus archivos R2 existentes,
+incluso si se perdieron los checkpoints locales mientras se agregaban PDF.
 
 La primera descarga requiere Confirmar y muestra el tamaño en MB. Cancelar
 deja la esfera gris. Aceptar una esfera también acepta participar en su grupo.
@@ -25,13 +29,19 @@ transferencia larga no bloquea el descubrimiento de nuevas invitaciones.
 Después, los agregados y cambios se guardan localmente y se sincronizan sin
 preguntar. Se comparten PDF, explicaciones, síntesis e imágenes, contenedores,
 conjuntos del micrófono, apuntes y pizarras asociadas. No hay llamada de voz.
+Las pizarras de un mismo contenedor cooperativo abren una sala común, aunque
+cada participante tenga una ruta local distinta o abra antes que el propietario.
+Las asociaciones anteriores se conservan como recuperación y sus trazos guardados
+se incorporan a la sala común al abrirla.
 
-Una eliminación completa remota conserva el elemento local hasta que se elija
-Confirmar/Eliminar o Guardar. Esperar permite revisarlo más tarde; Guardar lo
-conserva como personal y evita que vuelva a publicarse. Las decisiones quedan
-en la carpeta local. Editar contenido o borrar trazos no pide confirmación.
-Los conflictos conservan versiones recuperables; Cooperativo permite
-descargarlas. Los cambios independientes se combinan por elemento o sección.
+Una eliminación remota conserva el elemento local hasta que se decida en
+Cooperativo. Junto al nombre aparece «¿Conservar?» con ✓ para guardar una copia
+personal y × para descartar esa copia local. No se abren carteles al sincronizar
+ni al abrir el elemento. Los avisos antiguos se retiran si el elemento sigue
+existiendo en la esfera compartida. Las decisiones quedan en la carpeta local.
+Los agregados independientes se combinan sin crear versiones recuperadas.
+Cooperativo muestra las recuperaciones de conflictos reales entre ediciones;
+las diferencias automáticas de fechas y contadores no requieren revisión.
 
 ## Almacenamiento y API
 

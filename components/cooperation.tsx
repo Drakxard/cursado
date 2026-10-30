@@ -3,10 +3,11 @@ import { useEffect, useState, lazy, Suspense } from 'react'
 const ShareImportantTasksDialog = lazy(() => import('./share-important-tasks-dialog'))
 import { cooperationUndoStatus } from '@/lib/client/cooperation'
 import { ListChecks, RefreshCw, X } from 'lucide-react'
-import { undoCooperationSphere, acceptCooperationGroup, acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, notifyCooperationDeletion, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
+import { undoCooperationSphere, acceptCooperationGroup, acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
 import { isNativeReadOnly } from '@/lib/native-workspace'
 import { cooperationSubjectSyncDetails, cooperationSubjectSyncLabel } from '@/lib/client/cooperation'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { cooperationDeletionName, hasMeaningfulCooperationRecovery } from '@/lib/cooperation-review'
 
 export function CooperationSyncStatus({ subjectId }: { subjectId: string }) {
   const state = useCooperation()
@@ -111,6 +112,25 @@ function CooperationGroupInvitation({ groupId }: { groupId: string }) {
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
   </div>
 }
+function CooperationDeletionChoice({ pending }: { pending: PendingDeletion }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const name = cooperationDeletionName(pending)
+  const decide = async (decision: 'keep' | 'delete') => {
+    setBusy(true); setError('')
+    try { await decideCooperationDeletion(pending.id, decision) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
+    finally { setBusy(false) }
+  }
+  return <div className="mt-2 text-left text-sm" data-cooperation-deletion={pending.id}>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="min-w-0 break-words" title={name}>{name}</span>
+      <span className="text-muted-foreground">¿Conservar?</span>
+      <button type="button" disabled={busy} aria-label={`Conservar ${name}`} title="Conservar una copia personal" className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => void decide('keep')}>✓</button>
+      <button type="button" disabled={busy} aria-label={`Descartar copia local de ${name}`} title="Descartar la copia local" className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => void decide('delete')}>×</button>
+    </div>
+    {error && <p role="alert" className="text-red-600">{error}</p>}
+  </div>
+}
 export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, groupId: string) => void }) {
   const state = useCooperation(), [invite, setInvite] = useState<CooperativeSphere | null>(null), [error, setError] = useState('')
   const [sharingImportant, setSharingImportant] = useState(false)
@@ -138,10 +158,10 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
         const mirror = state.mirrors[sphere.id], ready = mirror && !mirror.copySource && (!mirror.downloading || mirror.metadataReady)
         const deleted = state.deletions.find(d => d.sphereId === sphere.id && d.key === 'sphere.json')
         if (deleted?.decision === 'delete') return null
-        return <div key={sphere.id} className="max-w-48 text-center">
-          <button className={`min-h-20 min-w-28 rounded-[50%] border-2 p-4 ${!ready || deleted?.decision === 'wait' ? 'opacity-40 grayscale' : ''}`} style={{ borderColor: sphere.color }} onClick={() => {
+        const recovered = mirror?.baseline.conflicts.filter(entry => hasMeaningfulCooperationRecovery(entry)) || []
+        return <div key={sphere.id} className="max-w-sm text-center">
+          <button className={`min-h-20 min-w-28 rounded-[50%] border-2 p-4 ${!ready ? 'opacity-40 grayscale' : ''}`} style={{ borderColor: sphere.color }} onClick={() => {
             if (!ready) { if (!mirror?.copySource && sphere.ready !== false) setInvite(sphere); return }
-            else if (deleted?.decision === 'wait') window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending: deleted, open: () => onOpen(mirror.binding.subjectId, group.id) } }))
             else onOpen(mirror.binding.subjectId, group.id)
           }}>{sphere.name}</button>
           {mirror?.transfer && <p role="status">{mirror.transfer.phase==='copying'?'Preparando acceso':mirror.transfer.phase==='uploading'?'Subiendo':mirror.transfer.phase==='checking'?'Validando archivos locales':'Sincronizando'} {mirror.transfer.total?Math.min(100,Math.floor(100*mirror.transfer.completed/mirror.transfer.total)):0}%</p>}
@@ -150,7 +170,8 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
           {deleted?.decision === 'keep' && <p className="text-xs">Personal</p>}
           {mirror?.transfer && <p role="status" className="mt-1 text-xs">{mirror.transfer.phase === 'copying' ? 'Preparando acceso' : mirror.transfer.phase === 'uploading' ? 'Subiendo' : mirror.transfer.phase === 'checking' ? 'Validando' : 'Sincronizando'} archivos en segundo plano: {mirror.transfer.completed}/{mirror.transfer.total}</p>}
           {mirror?.error && <div role="alert" className="text-xs text-red-600">{mirror.error} <button className="underline" onClick={()=>void synchronizeCooperation()}>Reintentar</button>{mirror.binding.owner&&<UndoCooperationButton sphereId={sphere.id}/>}</div>}
-          {mirror && mirror.baseline.conflicts.length > 0 && <details className="mt-2 text-left text-xs"><summary>Versiones recuperadas ({mirror.baseline.conflicts.length})</summary>{mirror.baseline.conflicts.map((entry, index) => <button key={index} className="mt-2 block underline" onClick={async () => {
+          {state.deletions.filter(d => d.sphereId === sphere.id && d.decision === 'wait').map(pending => <CooperationDeletionChoice key={pending.id} pending={pending} />)}
+          {recovered.length > 0 && <details className="mt-2 text-left text-xs"><summary>Versiones recuperadas ({recovered.length})</summary>{recovered.map((entry, index) => <button key={index} className="mt-2 block underline" onClick={async () => {
             const item = entry as { key?: string; blob?: { hash: string } }
             let blob: Blob
             if (item.blob) {
@@ -163,46 +184,22 @@ export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, group
           }}>Descargar versión {index + 1}</button>)}</details>}
         </div>
       })}</div>
-      {state.deletions.filter(d => d.decision === 'wait' && group.spheres.some(sphere => sphere.id === d.sphereId)).map(pending => <button key={pending.id} className="block text-sm text-muted-foreground underline" onClick={() => window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending, open: () => onOpen(state.mirrors[pending.sphereId].binding.subjectId, group.id) } }))}>{pending.label} · eliminación pendiente</button>)}
     </section>)}
     {invite && <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><CooperationInvitation sphere={invite} onClose={() => setInvite(null)} onAccepted={() => setInvite(null)} /></div>}
   </section>
 }
 export function CooperationRuntime() {
   const state = useCooperation()
-  const [review, setReview] = useState<{ pending: PendingDeletion; open?: () => void } | null>(null)
-  const [error, setError] = useState('')
   const [invitation, setInvitation] = useState<CooperativeSphere | null>(null)
   useEffect(() => {
     if (isNativeReadOnly()) return
-    const reviewElement = (event: Event) => { setError(''); setReview((event as CustomEvent).detail) }
-    window.addEventListener('cursado-cooperation-review', reviewElement)
-    const stop = startCooperationBackground()
-    return () => { stop(); window.removeEventListener('cursado-cooperation-review', reviewElement) }
+    return startCooperationBackground()
   }, [])
   useEffect(() => {
-    if (review) return
-    const pending = state.deletions.find(d => d.decision === 'wait' && !d.notified)
-    if (pending) { setReview({ pending }); void notifyCooperationDeletion(pending.id) }
-  }, [state, review])
-  useEffect(() => {
-    if (invitation || review) return
+    if (invitation) return
     const sphere = state.groups.flatMap(g => g.spheres).find(s => s.ready !== false && s.created_by !== state.userId && !state.mirrors[s.id] && !(state.dismissedSpheres || []).includes(s.id))
-    if (sphere) { setError(''); setInvitation(sphere) }
-  }, [state, invitation, review])
-  if (invitation && !review) return <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><CooperationInvitation sphere={invitation} onClose={() => { void dismissCooperationSphere(invitation.id); setInvitation(null) }} onAccepted={() => setInvitation(null)} /></div>
-  if (!review) return null
-  const decide = async (decision: 'wait' | 'keep' | 'delete') => {
-    try { await decideCooperationDeletion(review.pending.id, decision); setReview(null); setError('') } catch (reason) { setError((reason as Error).message) }
-  }
-  return <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><section role="dialog" aria-modal="true" aria-label="Elemento eliminado" className="w-full max-w-md space-y-4 rounded-xl border bg-background p-6 text-foreground shadow-xl">
-    <p>Se eliminó {review.pending.label}. ¿Querés confirmarlo?</p>
-    {error && <p role="alert" className="text-red-600">{error}</p>}
-    <div className="flex flex-wrap gap-4">
-      <button onClick={() => void decide('wait')}>Esperar</button>
-      {review.open && <button onClick={() => { const open = review.open; setReview(null); open?.() }}>Ver</button>}
-      <button onClick={() => void decide('keep')}>Guardar</button>
-      <button onClick={() => void decide('delete')}>{review.open ? 'Eliminar' : 'Confirmar'}</button>
-    </div>
-  </section></div>
+    if (sphere) setInvitation(sphere)
+  }, [state, invitation])
+  if (!invitation) return null
+  return <div className="fixed inset-0 z-[250] grid place-items-center bg-black/30 p-4"><CooperationInvitation sphere={invitation} onClose={() => { void dismissCooperationSphere(invitation.id); setInvitation(null) }} onAccepted={() => setInvitation(null)} /></div>
 }

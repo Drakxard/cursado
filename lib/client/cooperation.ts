@@ -3,6 +3,8 @@ import { createIdleSync } from './idle-sync.ts'
 import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
 import { uploadCooperationFile } from './cooperation-upload.ts'
 import { cooperationRequest } from './cooperation-request.ts'
+import { cooperativeStudyRoomId } from '../study-board-room.ts'
+import { cooperationDeletionName } from '../cooperation-review.ts'
 import { cooperationResourceBytes, cooperationSyncLabel } from '../cooperation-sync-status.ts'
 import { projectSelectionTags, selectionResources, type WeekSelection } from './cooperation-selection.ts'
 import { COOPERATIVE_TAB_ID, mergeCooperation, type Json } from '../cooperation-model.ts'
@@ -262,7 +264,8 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
   // The catalogue is the durable identity of an installed sphere, even when
   // its sync checkpoint was lost. Reattach it before considering publication.
   const localCatalog = await readJson<{ subjects: Record<string, { cooperationId?: string; storageKey?: string }> }>(await root(), 'manifests/subject-catalog.json', { subjects: {} })
-  const installedId = localCatalog.subjects[subject.id]?.cooperationId
+  const localKey = subject.storageKey || localCatalog.subjects[subject.id]?.storageKey || subject.id
+  const installedId = localCatalog.subjects[subject.id]?.cooperationId || Object.values(localCatalog.subjects).find(item => item.storageKey === localKey && item.cooperationId)?.cooperationId
   if (installedId && !state.mirrors[installedId]) {
     let installed = state.groups.flatMap(group => group.spheres).find(sphere => sphere.id === installedId)
     if (!installed) {
@@ -275,7 +278,7 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
   // A different device (or a restored workspace) may have the subject's files
   // without either local checkpoint. Search the user's accessible publications
   // before allocating a new room/R2 namespace. Names alone are not identity.
-  if (!installedId && !Object.values(state.mirrors).some(m => m.binding.subjectId === subject.id)) {
+  if (!installedId && !Object.values(state.mirrors).some(m => m.binding.subjectId === subject.id || m.binding.storageKey === localKey)) {
     const key = subject.storageKey || localCatalog.subjects[subject.id]?.storageKey || subject.id
     const accessible = [...new Map(state.groups.filter(g => g.accepted).flatMap(g => g.spheres).map(s => [s.id, s])).values()]
     for (const sphere of accessible) {
@@ -297,28 +300,35 @@ export async function shareCooperationSphere(groupId: string, subject: { id: str
     }
   }
   const publication = await withStateLock(async () => {
-  const sharedElsewhere = Object.values(state.mirrors).find(m => !m.copiedFrom && m.binding.subjectId === subject.id)
-    || Object.values(state.mirrors).find(m => m.binding.subjectId === subject.id)
+  const sameSource = (m: Mirror) => m.binding.subjectId === subject.id || m.binding.storageKey === localKey
+  const sharedElsewhere = Object.values(state.mirrors).find(m => !m.copiedFrom && sameSource(m))
+    || Object.values(state.mirrors).find(sameSource)
   if (sharedElsewhere) {
-    await cooperationApi('spheres', { groupId, sphereId: sharedElsewhere.binding.id, name: sharedElsewhere.binding.name, color: sharedElsewhere.binding.color })
+    await cooperationApi('spheres', { groupId, sphereId: sharedElsewhere.binding.id, name: sharedElsewhere.binding.name, color: sharedElsewhere.binding.color, sourceId: sharedElsewhere.binding.sourceId, sourceKey: sharedElsewhere.binding.sourceKey })
     await installSubject(sharedElsewhere.binding, groupId)
     await save()
     return { binding:sharedElsewhere.binding, linked:true }
   }
-  const result = await cooperationApi('spheres', { groupId, name: subject.name, color: subject.color })
   const catalog = await readJson<{ subjects: Record<string, { storageKey: string }> }>(await root(), 'manifests/subject-catalog.json', { subjects: {} })
   const key = subject.storageKey || catalog.subjects[subject.id]?.storageKey || subject.id
+  const result = await cooperationApi('spheres', { groupId, name: subject.name, color: subject.color, sourceId: subject.id, sourceKey: key })
   const subjectId=subject.id,storageKey=key
   const binding: SphereBinding = { id: result.id, groupId, subjectId, storageKey, sourceId: subjectId, sourceKey: storageKey, name: subject.name, color: subject.color, owner: true }
-  state.mirrors[result.id] = { binding, baseline: { seq: 0, resources: {}, conflicts: [] } }
+  state.mirrors[result.id] = { binding, baseline: { seq: 0, resources: {}, conflicts: [] }, ...(result.reused ? { downloading: true, metadataReady: true } : {}) }
   await installSubject(binding)
   await save()
-  return { binding, linked:false }
+  return { binding, linked:false, reused: !!result.reused }
   })
   const { binding } = publication
   // Linking is complete even when this is the publication's original group.
   // Do not enter the publication/upload pipeline for an existing room.
   if(publication.linked) { await refreshCooperation(); return binding }
+  if (publication.reused) {
+    await refreshCooperation()
+    if (options.background) synchronizeInBackground()
+    else await synchronizeCooperation()
+    return binding
+  }
   await withStateLock(async()=>{
     const mirror=state.mirrors[binding.id]
     try{await prepareCooperationCopy(mirror)}catch(reason){mirror.error=reason instanceof Error?reason.message:String(reason);await save();throw reason}
@@ -480,7 +490,7 @@ function protectDeletions(sphereId: string, key: string, base: Json | undefined,
     if (selector.length && !selector.at(-1)!.startsWith('@')) return
     const id = JSON.stringify([sphereId, key, selector])
     if (!state.deletions.some(d => d.id === id)) {
-      const label = record(local) ? String(local.file_name || local.name || local.custom_title || 'Elemento') : key.split('/').at(-1)!
+      const label = cooperationDeletionName({ label: '', key, value: local })
       state.deletions.push({ id, sphereId, key, selector, value: local, label, decision: 'wait' })
     }
     return
@@ -497,6 +507,14 @@ function protectDeletions(sphereId: string, key: string, base: Json | undefined,
 function withoutPersonal(sphereId: string, key: string, value: Json | undefined) {
   for (const pending of state.deletions.filter(d => d.sphereId === sphereId && d.key === key)) value = setSelected(value, pending.selector, undefined)
   return value
+}
+function discardRestoredDeletionNotices(sphereId: string, resources: Record<string, Resource>) {
+  state.deletions = state.deletions.filter(pending => {
+    if (pending.sphereId !== sphereId || pending.decision !== 'wait') return true
+    const resource = resources[pending.key]
+    if (pending.key === 'scope/containers.json' && record(pending.value) && ['theory', 'practice'].includes(String(pending.value.kind)) && !resource?.deleted && Array.isArray(resource?.value) && resource.value.some(row => record(row) && row.kind === (pending.value as Record<string, Json>).kind)) return false
+    return !resource || resource.deleted || (pending.selector.length ? select(resource.value, pending.selector) === undefined : resource.value === undefined && !resource.blob)
+  })
 }
 async function preserveUnavailableMirror(mirror: Mirror): Promise<boolean> {
   // A rejected request alone can mean an expired session. Only detach after
@@ -554,6 +572,7 @@ async function scanCooperationMirror(handle: FileSystemDirectoryHandle, mirror: 
 async function synchronizeMirror(mirror: Mirror) {
   const revision = syncRevision
   const handle = await root(), b = mirror.binding
+  discardRestoredDeletionNotices(b.id, mirror.baseline.resources)
   let moreChanges = false
   if (isUndoPending(b.id) || state.removedSpheres?.includes(b.id)) return
   if (state.deletions.some(d => d.sphereId === b.id && d.key === 'sphere.json' && d.decision !== 'wait')) return
@@ -680,6 +699,7 @@ async function synchronizeMirror(mirror: Mirror) {
     // Do not clear the durable outbox until the corresponding snapshot is local.
   }
   const remote = mirror.incoming || await cooperationApi(`spheres/${b.id}/snapshot`) as Snapshot
+  discardRestoredDeletionNotices(b.id, remote.resources)
   await prepareBinding(b, remote.resources)
   for (const key of Object.keys(remote.resources)) if (/^(?:teoria|practica)\/.+\.pdf$/i.test(key)) {
     const canonical = `workspace://${key}`, local = mapBindingText(canonical, b, true)
@@ -794,7 +814,7 @@ async function synchronizeMirror(mirror: Mirror) {
       let merged = mirror.downloading && (!mirror.metadataReady || localValue === undefined) ? resource.value : mergeCooperation(prior?.value, localValue, resource.value, conflicts)
       for (const pending of state.deletions.filter(d => d.sphereId === b.id && d.key === key && d.decision !== 'delete')) merged = setSelected(merged, pending.selector, select(localValue, pending.selector))
       if (conflicts.length) await writeJson(handle, `.cooperation/${state.userId}/recovery/${b.id}-${remote.seq}-${await digest(new Blob([key]))}.json`, { key, conflicts })
-      if (merged !== undefined) await applyMirrorFile(handle, b, key, merged)
+      if (merged !== undefined) await applyMirrorFile(handle, b, key, merged, (!mirror.downloading || mirror.metadataReady) && (key === 'scope/containers.json' || key === 'scope/shortcuts.json' || !key.startsWith('scope/') && key !== 'sphere.json') ? { value: localValue } : undefined)
       mirror.incomingApplied.push(key)
     }
   }
@@ -941,7 +961,10 @@ async function connectMirror(id: string) {
 }
 let syncing: Promise<void> | null = null
 let syncAgain = false
+let deferredBackgroundSync = false
 function synchronizeInBackground() {
+  if (typeof document !== 'undefined' && document.hidden) { deferredBackgroundSync = true; return }
+  deferredBackgroundSync = false
   void synchronizeCooperation().catch(error => {
     state.error = error instanceof Error ? error.message : String(error); cooperationChanged(); retryBackground?.()
   })
@@ -1045,6 +1068,10 @@ export function localCooperationBoardId(subjectId: string, id: string) {
   const b = Object.values(state.mirrors).find(m => m.binding.subjectId === subjectId)?.binding
   return b && !b.owner ? `${id}-${b.id.slice(0, 8)}` : id
 }
+export async function cooperationStudyRoomId(subjectId: string | undefined, boardId: string) {
+  const binding = Object.values(state.mirrors).find(m => m.binding.subjectId === subjectId)?.binding
+  return binding ? cooperativeStudyRoomId(binding, boardId) : undefined
+}
 export function cooperationPresence(subjectId: string) {
   const b = Object.values(state.mirrors).find(m => m.binding.subjectId === subjectId)?.binding
   return presences.get(subjectId.startsWith('important-share:')?subjectId.slice(16):b?.id||'')
@@ -1054,10 +1081,9 @@ export function sendCooperationEditor(subjectId: string, document: string, paylo
   const socket = sockets.get(subjectId.startsWith('important-share:')?subjectId.slice(16):b?.id||'')
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'editor', document: b?mapBindingText(document, b, false):document, payload }))
 }
-export async function guardCooperationElement(subjectId: string, elementId: string | number | undefined, open: () => void, fileKey?: string) {
-  const pending = cooperationDeletionFor(subjectId, elementId, fileKey)
-  if (!pending) { open(); return }
-  window.dispatchEvent(new CustomEvent('cursado-cooperation-review', { detail: { pending, open } }))
+export async function guardCooperationElement(_subjectId: string, _elementId: string | number | undefined, open: () => void, _fileKey?: string) {
+  // Deletions are resolved inline in Cooperativo; opening local content never prompts.
+  open()
 }
 export async function notifyCooperationDeletion(id: string) { await withStateLock(async () => { const pending = state.deletions.find(d => d.id === id); if (pending) { pending.notified = true; await save() } }) }
 export async function dismissCooperationSphere(id: string) { await withStateLock(async () => { state.dismissedSpheres = [...new Set([...(state.dismissedSpheres || []), id])]; await save() }) }
@@ -1083,11 +1109,11 @@ export function startCooperationBackground() {
   })
   const presenceChanged = () => scheduler.refresh()
   const scheduleRetry = () => {
-    if (stopped || retry || !state.userId || navigator.onLine === false) return
+    if (stopped || retry || !state.userId || navigator.onLine === false || typeof document !== 'undefined' && document.hidden) return
     retry = setTimeout(() => { retry = undefined; void refresh() }, Math.min(30_000, 1000 * 2 ** Math.min(attempts++, 5)))
   }
   const refresh = async () => {
-    if (stopped || navigator.onLine === false) return
+    if (stopped || navigator.onLine === false || typeof document !== 'undefined' && document.hidden) return
     if (busy) { refreshAgain = true; return }
     busy = true
     try {
@@ -1114,6 +1140,11 @@ export function startCooperationBackground() {
     finally { busy = false }
   }
   const saved = () => { invalidateSyncStatus(); scheduler.request() }
+  const visibilityChanged = () => {
+    if (document.hidden) { clearTimeout(retry); retry = undefined; return }
+    void refresh()
+    if (deferredBackgroundSync) synchronizeInBackground()
+  }
   requestDiscovery = () => { void refresh() }
   retryBackground = scheduleRetry
   connectedBackground = () => { attempts = 0 }
@@ -1129,6 +1160,7 @@ export function startCooperationBackground() {
   window.addEventListener('offline', invalidateSyncStatus)
   window.addEventListener('cursado-cooperation-changed', sessionChanged)
   window.addEventListener('cursado-cooperation-presence', presenceChanged)
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', visibilityChanged)
   if (navigator.onLine === false) void restoreCooperationOffline().catch(() => {})
   else void refresh()
   stopBackground = () => {
@@ -1140,6 +1172,7 @@ export function startCooperationBackground() {
     window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); window.removeEventListener('cursado-workspace-saved', saved); window.removeEventListener('offline', invalidateSyncStatus)
     window.removeEventListener('cursado-cooperation-changed', sessionChanged)
     window.removeEventListener('cursado-cooperation-presence', presenceChanged)
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visibilityChanged)
   }
   return release
 }

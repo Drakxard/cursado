@@ -9,6 +9,8 @@
 
   const state = {
     app: null,
+    readerVisible: true,
+    annotationPollingEnabled: false,
     query: null,
     selectionMode: false,
     selections: [],
@@ -292,6 +294,7 @@
   }
 
   function monitorAnnotationChanges() {
+    if (document.hidden || !state.readerVisible) return;
     const currentHash = getAnnotationContentHash();
     const unsynced = hasUnsyncedAnnotations(currentHash);
     refreshSyncButtons(unsynced);
@@ -4307,8 +4310,27 @@
   }
 
   function handleInscreenVisibilityChange() {
+    updateViewerActivity();
     if (document.visibilityState !== "visible") {
       saveInscreenReadingPosition(state.inscreenCurrentPage, true);
+    }
+  }
+
+  function updateViewerActivity() {
+    const active = !document.hidden && state.readerVisible;
+    state.app?.pdfViewer?.setBoardReaderVisible(active);
+    if (state.syncStatePoller) {
+      window.clearInterval(state.syncStatePoller);
+      state.syncStatePoller = null;
+    }
+    if (!active) {
+      // These are reconstructible extraction caches, not annotation storage or
+      // the open PDF worker/document. Keep the visible page and reading position.
+      state.sourcePdfBytes = null;
+      state.sourcePdfLibDoc = null;
+    } else if (state.annotationPollingEnabled) {
+      monitorAnnotationChanges();
+      state.syncStatePoller = window.setInterval(monitorAnnotationChanges, 400);
     }
   }
 
@@ -4755,10 +4777,13 @@
     await app.initializedPromise;
     state.app = app;
     state.query = parseQuery();
+    document.addEventListener("visibilitychange", handleInscreenVisibilityChange);
+    app.eventBus.on("pagesinit", updateViewerActivity);
+    updateViewerActivity();
     if (state.query.boardReader) {
       window.addEventListener("message", event => {
         if (event.origin !== location.origin || event.source !== parent || typeof event.data?.visible !== "boolean") return;
-        if (event.data.type === "board-reader:visibility") app.pdfViewer.setBoardReaderVisible(event.data.visible);
+        if (event.data.type === "board-reader:visibility") { state.readerVisible = event.data.visible; updateViewerActivity(); }
       });
       postToParent({type:"board-reader:ready"});
     }
@@ -4897,7 +4922,6 @@
     }, true);
     window.addEventListener("beforeunload", handleBeforeUnload);
     window.addEventListener("pagehide", handlePageHide);
-    document.addEventListener("visibilitychange", handleInscreenVisibilityChange);
     window.addEventListener("message", handleParentMessage);
 
     if (isLocalWorkspaceMode() && state.query?.workspaceFileId) {
@@ -4918,9 +4942,8 @@
 
     postToParent({ type: "viewerReady" });
 
-    if (!state.syncStatePoller) {
-      state.syncStatePoller = window.setInterval(monitorAnnotationChanges, 400);
-    }
+    state.annotationPollingEnabled = true;
+    updateViewerActivity();
 
     if (!window.PDFLib?.PDFDocument) {
       showToast("No se pudo cargar pdf-lib localmente. Ctrl+M no estara disponible.", "error", 5000);

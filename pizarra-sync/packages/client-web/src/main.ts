@@ -1,4 +1,6 @@
 import { installStudyBridge } from "./study-bridge";
+import { loadBoardIdentity, saveBoardIdentity, PROFILE_KEY } from "./identity";
+import { startVisibleTask } from '../../../../lib/client/visible-task';
 import "./styles.css";
 import * as Y from "yjs";
 import YProvider from "y-partyserver/provider";
@@ -9,9 +11,6 @@ import {
   CONNECTOR_KINDS as CONNECTOR_KIND_LIST,
   DEFAULT_STICKY_COLOR,
   PARTY,
-  pickUserColor,
-  randomGuestName,
-  randomId,
   randomRoomId,
   roomIdFromUrl,
   setUserProfile,
@@ -155,36 +154,15 @@ const ydoc = new Y.Doc();
 const provider = new YProvider(host, room, ydoc, { party: PARTY, protocol: serverUrl.startsWith("https:") ? "wss" : "ws" });
 // Stable per-browser identity: multiple tabs read as the same person; open a
 // private/incognito window (separate storage) to appear as a new user.
-interface Identity {
-  id: string;
-  name: string;
-  color: string;
-  photo?: string;
-  /** True when the name was auto-generated this visit (never customized) — drives the first-run nudge. */
-  fresh: boolean;
+const identity = loadBoardIdentity();
+// The old Pizarra account is also used by Cooperativo. Recover its display name
+// when this engine has only an automatic guest profile; custom names take priority.
+if (!identity.customized && new URLSearchParams(location.search).has('topicBoard') && localStorage.getItem('cursado-cooperation-user')) {
+  try {
+    const response = await fetch('/pizarra/api/auth/me', { credentials: 'include', signal: AbortSignal.timeout(1500) });
+    if (response.ok) Object.assign(identity, loadBoardIdentity(localStorage, await response.json()));
+  } catch { /* The saved local profile remains usable offline. */ }
 }
-function loadIdentity(): Identity {
-  let id = localStorage.getItem("komuboard-uid");
-  if (!id) {
-    id = randomId("u");
-    localStorage.setItem("komuboard-uid", id);
-  }
-  let name = localStorage.getItem("komuboard-name");
-  let fresh = false;
-  if (!name) {
-    name = randomGuestName();
-    localStorage.setItem("komuboard-name", name);
-    fresh = true;
-  }
-  let color = localStorage.getItem("komuboard-color");
-  if (!color) {
-    const seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
-    color = pickUserColor(seed);
-    localStorage.setItem("komuboard-color", color);
-  }
-  return { id, name, color, photo: localStorage.getItem("komuboard-photo") ?? undefined, fresh };
-}
-const identity = loadIdentity();
 const user: PresenceState = { name: identity.name, color: identity.color };
 window.__komuboard = { doc: ydoc, provider, awareness: provider.awareness };
 
@@ -1517,18 +1495,37 @@ const profile = createProfileDialog({
     identity.photo = p.photo;
     user.name = identity.name;
     user.color = identity.color;
-    localStorage.setItem("komuboard-name", identity.name);
-    localStorage.setItem("komuboard-color", identity.color);
-    if (identity.photo) localStorage.setItem("komuboard-photo", identity.photo);
-    else localStorage.removeItem("komuboard-photo");
+    identity.customized = true;
+    identity.fresh = false;
+    saveBoardIdentity(identity);
     provider.awareness.setLocalStateField("user", identity.name);
     provider.awareness.setLocalStateField("color", identity.color);
     publishProfile();
+    if (appMenu) paintProfile(appMenu, identity);
     renderPresenceRow();
     if (drawer)
       drawer.profile = { name: identity.name, color: identity.color, photo: identity.photo };
     wheel?.setProfile({ name: identity.name, color: identity.color, photo: identity.photo });
   },
+});
+// Keep already open boards on the same saved profile when another tab edits it.
+window.addEventListener('storage', event => {
+  if (event.key !== PROFILE_KEY || !event.newValue) return;
+  // Read without writing again, so two tabs cannot echo storage events forever.
+  try {
+    const next = JSON.parse(event.newValue);
+    if (next.version !== 1 || typeof next.name !== 'string' || !next.name.trim() || typeof next.color !== 'string' || !/^#[a-f0-9]{6}$/i.test(next.color)) return;
+    identity.name = next.name.trim().slice(0, 40); identity.color = next.color;
+    identity.photo = typeof next.photo === 'string' ? next.photo : undefined;
+    identity.customized = next.customized === true; identity.fresh = false;
+    user.name = identity.name; user.color = identity.color;
+    provider.awareness.setLocalStateField('user', identity.name);
+    provider.awareness.setLocalStateField('color', identity.color);
+    publishProfile(); renderPresenceRow();
+    if (appMenu) paintProfile(appMenu, identity);
+    if (drawer) drawer.profile = identity;
+    wheel?.setProfile(identity);
+  } catch { /* Ignore incomplete records from older or interrupted writes. */ }
 });
 // Clicking your own avatar (the row's `rename` intent) opens the profile editor.
 presenceRowEl?.addEventListener("rename", () => profile.open());
@@ -1622,7 +1619,7 @@ provider.awareness.on("change", () => {
   lastConnCount = n;
   store.getState().setConnections(n);
 });
-window.setInterval(updateConn, 1000);
+startVisibleTask(updateConn, 1000);
 updateConn();
 
 // Connection state drives the room-pill dot inside <komu-topbar> (setStatus).

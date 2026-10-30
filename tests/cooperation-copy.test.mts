@@ -72,6 +72,10 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   assert.equal(groups.find(g=>g.id===second).spheres[0].id,firstBinding.id)
   assert.equal(groups.find(g=>g.id===first).spheres[0].id,firstBinding.id)
   assert.deepEqual(await(await api(actors[0],`spheres/${linked.id}/snapshot`)).json(),beforeSnapshot)
+  const aliasLink = await client.shareCooperationSphere(second, { ...source, id: 'restored-ui-alias' })
+  assert.equal(aliasLink.id, firstBinding.id, 'a different UI id for the same storage folder must link the original')
+  assert.equal(Object.keys(client.cooperationState().mirrors).length, 1)
+  assert.deepEqual(await(await api(actors[0],`spheres/${linked.id}/snapshot`)).json(),beforeSnapshot)
   // Re-linking the original group must also avoid the publishing pipeline,
   // including when there are unrelated pending local edits.
   await fs.put('teoria/Ecu/uno.pdf',new Blob(['Pending local edit'],{type:'application/pdf'}))
@@ -139,6 +143,36 @@ test('sharing across groups reuses one sphere, local files and remote content',a
   assert.equal(client.cooperationState().mirrors[firstBinding.id].binding.subjectId,'ecu')
   assert.equal(downloads,0)
   assert.equal((await fs.json('manifests/materials/Ecu/week-1.json')).materials[0].id,100)
+
+  // Reuse the existing server publication after losing local associations,
+  // even if an added PDF makes an exact snapshot comparison fail.
+  const reconnectSource = { id:'reconnect', name:'Reconnect', storageKey:'Reconnect', color:'#123456' }
+  await fs.put('manifests/materials/Reconnect/week-1.json',{materials:[{id:910,file_name:'Existing.pdf',drive_file_id:'workspace://teoria/Reconnect/existing.pdf'}]})
+  await fs.put('teoria/Reconnect/existing.pdf',new Blob(['existing bytes'],{type:'application/pdf'}))
+  const reconnect = await client.shareCooperationSphere(first,reconnectSource)
+  const reconnectState = await fs.json(`.cooperation/${saved.userId}/state.json`)
+  delete reconnectState.mirrors[reconnect.id]
+  await fs.put(`.cooperation/${saved.userId}/state.json`,reconnectState)
+  const reconnectCatalog = await fs.json('manifests/subject-catalog.json')
+  delete reconnectCatalog.subjects.reconnect.cooperationId
+  await fs.put('manifests/subject-catalog.json',reconnectCatalog)
+  const reconnectManifest = await fs.json('manifests/materials/Reconnect/week-1.json')
+  reconnectManifest.materials.push({id:911,file_name:'Added.pdf',drive_file_id:'workspace://teoria/Reconnect/added.pdf'})
+  await fs.put('manifests/materials/Reconnect/week-1.json',reconnectManifest)
+  await fs.put('teoria/Reconnect/added.pdf',new Blob(['new bytes'],{type:'application/pdf'}))
+  const uploadedHashes:string[]=[]
+  const fetchBeforeReconnect=globalThis.fetch
+  globalThis.fetch=(async(url,options={})=>{
+    if(String(url)==='/pizarra/upload-session')uploadedHashes.push(JSON.parse(String(options.body)).hash)
+    return fetchBeforeReconnect(url,options)
+  }) as typeof fetch
+  assert.equal((await client.shareCooperationSphere(second,reconnectSource)).id,reconnect.id)
+  await client.synchronizeCooperation()
+  globalThis.fetch=fetchBeforeReconnect
+  const existingHash=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('existing bytes'))).toString('hex')
+  assert.equal(uploadedHashes.includes(existingHash),false,'existing R2 files are not uploaded again')
+  assert.equal((await fs.json('manifests/materials/Reconnect/week-1.json')).materials.length,2)
+  assert.equal(client.cooperationState().deletions.some(row=>row.sphereId===reconnect.id),false)
 
   const otherSubject={id:'different-course',name:source.name,storageKey:'DifferentCourse',color:source.color}
   await fs.put('manifests/materials/DifferentCourse/week-1.json',{version:1,subjectId:'DifferentCourse',weekNumber:1,materials:[]})

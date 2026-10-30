@@ -9,12 +9,19 @@ const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   import {createRoot} from 'react-dom/client';
   import {TopicBoardOverlay} from './components/topic-board-overlay';
   import {StudyBoardNavigationContext} from './components/study-board-navigation';
+  import {cooperationState} from './lib/client/cooperation';
   const fs=await navigator.storage.getDirectory();
   const dir=await(await fs.getDirectoryHandle('progreso',{create:true})).getDirectoryHandle('pizarras',{create:true});
   const root=createRoot(document.getElementById('root'));
   window.delegateBoard=()=>root.render(<StudyBoardNavigationContext.Provider value={reference=>{window.delegatedBoard=reference}}><TopicBoardOverlay boardId="target" name="Destino" rootHandle={fs} onClose={()=>{}} /></StudyBoardNavigationContext.Provider>);
   window.read=async path=>{let directory=fs;const parts=path.split('/');for(const part of parts.slice(0,-1))directory=await directory.getDirectoryHandle(part);return JSON.parse(await(await(await directory.getFileHandle(parts.at(-1))).getFile()).text())};
   window.openBoard=id=>root.render(<TopicBoardOverlay key={id} boardId={id} name={id} rootHandle={fs} pdfReferences={[{materialId:1,subjectId:'subject',fileName:'Uno.pdf',workspaceFileId:'workspace://teoria/uno.pdf'},{materialId:2,subjectId:'subject',fileName:'Dos.pdf',workspaceFileId:'workspace://teoria/dos.pdf'}]} onClose={()=>{window.boardClosed=true;root.render(<button onClick={()=>window.openBoard(id)}>Reabrir</button>)}}/>);
+  window.openCooperativeBoard=({sphereId,owner})=>{
+    const subjectId=owner?'algebra':'coop-'+sphereId;
+    cooperationState().mirrors[sphereId]={binding:{id:sphereId,groupId:'group',subjectId,storageKey:owner?'Algebra':'Cooperativo',sourceId:'algebra',sourceKey:'Algebra',name:'Álgebra',color:'#123456',owner},baseline:{seq:0,resources:{},conflicts:[]}};
+    const id='study-cooperative'+(owner?'':'-'+sphereId.slice(0,8));
+    root.render(<TopicBoardOverlay key={id} boardId={id} cooperationSubjectId={subjectId} name="Contenedor cooperativo" rootHandle={fs} onClose={()=>root.render(null)} />);
+  };
   const taskWriter=await(await(await fs.getDirectoryHandle('progreso')).getFileHandle('importantes.json',{create:true})).createWritable();await taskWriter.write(JSON.stringify({version:1,tasks:[{id:'task',text:'Examen',startDate:'2026-01-01',dueDate:'2099-12-31',url:'',topics:[]}]}));await taskWriter.close();
   for(const id of ['first','second','image','target','upload-failure','review']){
     let present=false;try{await dir.getFileHandle(id+'.json');present=true}catch{}
@@ -473,6 +480,91 @@ test('simultaneous first migration converges without duplicate objects or z-orde
   await expect.poll(() => snapshot(a)).toEqual(await snapshot(b))
   const result = await snapshot(a)
   assert.equal(result.order.length, 4); assert.equal(new Set(result.order).size, 4); assert.equal(Object.keys(result.objects).length, 4)
+})
+
+test('the saved Pizarra profile persists through board changes, reloads and edits in another tab', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext(); await fixture(context)
+  await context.addInitScript(() => {
+    if (!localStorage.getItem('pizarra-perfil-copia')) {
+      localStorage.setItem('pizarra-perfil-copia', JSON.stringify({id:'previous-account',display_name:'Rafa',color:'#123456'}))
+      localStorage.setItem('komuboard-name','Auburn Gecko')
+      localStorage.setItem('komuboard-grid','lines')
+    }
+  })
+  const page = await context.newPage()
+  await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openBoard)
+  await page.evaluate(() => window.openBoard('profile-first')); await loaded(page)
+  const openProfile = async page => {
+    await engine(page).locator('#nav-toggle').click()
+    await engine(page).locator('.app-menu [data-act=profile]').click()
+    await expect(engine(page).locator('#profile-name')).toBeVisible()
+  }
+  await openProfile(page)
+  await expect(engine(page).locator('#profile-name')).toHaveValue('Rafa')
+  await engine(page).locator('#profile-name').fill('Rafael')
+  const selectedColor = await engine(page).locator('#profile-swatches button').first().getAttribute('data-color')
+  await engine(page).locator('#profile-swatches button').first().click()
+  await engine(page).locator('#profile-save').click()
+  await page.evaluate(() => window.openBoard('profile-second')); await loaded(page, 'profile-second')
+  await openProfile(page)
+  await expect(engine(page).locator('#profile-name')).toHaveValue('Rafael')
+  assert.equal(await engine(page).evaluate(() => document.getElementById('board').dataset.grid), 'lines')
+  await engine(page).locator('#profile-save').click()
+  await page.reload(); await page.waitForFunction(() => window.openBoard)
+  await page.evaluate(() => window.openBoard('profile-second')); await loaded(page)
+  await openProfile(page)
+  await expect(engine(page).locator('#profile-name')).toHaveValue('Rafael')
+  assert.equal(await engine(page).locator('#profile-swatches button.on').getAttribute('data-color'),selectedColor)
+  await engine(page).locator('#profile-save').click()
+  const peer = await context.newPage()
+  await peer.goto(origin + '/study-fixture?defer=1'); await peer.waitForFunction(() => window.openBoard)
+  await peer.evaluate(() => window.openBoard('profile-peer')); await loaded(peer)
+  await engine(peer).locator('#nav-toggle').click()
+  await openProfile(page)
+  await engine(page).locator('#profile-name').fill('Rafa persistente')
+  await engine(page).locator('#profile-save').click()
+  await expect(engine(peer).locator('.app-menu [data-profile-name]')).toHaveText('Rafa persistente')
+})
+
+test('cooperative container opens the same live room across independent devices', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const ownerContext = await browser.newContext(), receiverContext = await browser.newContext()
+  await fixture(ownerContext); await fixture(receiverContext)
+  const a = await ownerContext.newPage(), b = await receiverContext.newPage(), sphereId = crypto.randomUUID()
+  for (const page of [a,b]) { await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openCooperativeBoard) }
+  await b.evaluate(sphereId => window.openCooperativeBoard({sphereId,owner:false}), sphereId)
+  await loaded(b)
+  await a.evaluate(sphereId => window.openCooperativeBoard({sphereId,owner:true}), sphereId)
+  await loaded(a)
+  assert.equal(new URL(engine(a).url()).searchParams.get('room'), new URL(engine(b).url()).searchParams.get('room'))
+  await send(a, 'insert', {object:{type:'text',runs:[{text:'Trabajo compartido'}],width:200,height:50,x:100,y:100}})
+  await expect.poll(() => engine(b).evaluate(() => window.__komuboard.doc.getMap('objects').size)).toBe(1)
+  const objectId = await engine(b).evaluate(() => [...window.__komuboard.doc.getMap('objects').keys()][0])
+  await engine(b).evaluate(id => window.__komuboard.doc.getMap('objects').get(id).set('x',450), objectId)
+  await expect.poll(() => engine(a).evaluate(id => window.__komuboard.doc.getMap('objects').get(id).get('x'),objectId)).toBe(450)
+  await b.reload(); await b.waitForFunction(() => window.openCooperativeBoard)
+  await b.evaluate(sphereId => window.openCooperativeBoard({sphereId,owner:false}), sphereId)
+  await loaded(b)
+  await expect.poll(() => engine(b).evaluate(id => window.__komuboard.doc.getMap('objects').get(id)?.get('x'),objectId)).toBe(450)
+})
+
+test('a mixed file batch imports later PDFs and releases the importer after reporting failures', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext(); await fixture(context)
+  const page = await context.newPage()
+  await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openBoard)
+  await page.evaluate(() => window.openBoard('mixed-import')); await loaded(page)
+  await page.locator('input[type=file]').setInputFiles([
+    {name:'before.pdf',mimeType:'application/pdf',buffer:onePagePdf()},
+    {name:'unsupported.txt',mimeType:'text/plain',buffer:Buffer.from('no compatible')},
+    {name:'broken.pdf',mimeType:'application/pdf',buffer:Buffer.from('dañado')},
+    {name:'after.pdf',mimeType:'application/pdf',buffer:onePagePdf()},
+  ])
+  await expect.poll(() => engine(page).evaluate(() => [...window.__komuboard.doc.getMap('objects').values()].filter(map=>map.get('type')==='image').length),{timeout:30000}).toBe(2)
+  await expect(page.getByText(/unsupported\.txt[\s\S]*broken\.pdf/)).toBeVisible()
+  await page.locator('input[type=file]').setInputFiles({name:'next.csv',mimeType:'text/csv',buffer:Buffer.from('a,b\n1,2')})
+  await expect.poll(() => engine(page).evaluate(() => [...window.__komuboard.doc.getMap('objects').values()].filter(map=>map.get('study')?.kind==='table').length)).toBe(1)
 })
 
 test('failed migration has one compact notice and retries uploads without losing successes; 429 recovers automatically', { timeout: 60000 }, async t => {

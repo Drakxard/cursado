@@ -10,6 +10,21 @@ El cliente se compila con `npm run build:study-board`, incluido en `predev` y
 publica los recursos generados en `public/study-board`. No necesita la carpeta
 hermana original. `STUDY_BOARD_WORKER_HOST` permite cambiar el hostname del Worker.
 
+El nombre, color y avatar se conservan en el perfil local del navegador, común
+a todas las pizarras, igual que las preferencias del menú. Al actualizar desde
+la pizarra anterior se recupera su usuario guardado en vez de asignar otro nombre
+aleatorio. Un perfil elegido en la pizarra nueva tiene prioridad; cambiarlo se
+refleja también en las otras pestañas abiertas.
+
+Al pasar a otra pestaña se detienen las consultas periódicas de la interfaz y
+se aplazan los nuevos escaneos y sincronizaciones de fondo. Los cambios locales
+siguen guardándose y las transferencias ya iniciadas pueden terminar. Al volver,
+se actualiza la información pendiente sin reconstruir la pizarra.
+El lector PDF pausa el renderizado y la revisión periódica de anotaciones,
+libera las páginas fuera de vista y conserva el documento, las anotaciones y
+la posición de lectura. También descarta las copias temporales de extracción
+que puede volver a obtener del documento abierto.
+
 ## Guardado y migración
 
 Los documentos se sincronizan mediante las salas Yjs del Worker existente y las
@@ -25,6 +40,15 @@ La conversión prepara objetos con identificadores estables y actualizaciones Yj
 deterministas, divididas según el límite del Worker. Reabrir o migrar desde dos
 ventanas no duplica los objetos ni el orden. Los accesos de los contenedores se
 agregan por referencia sin cargar sus PDF.
+
+En Cooperativo, la sala se obtiene de la esfera y del identificador original de
+la pizarra: las rutas locales de los participantes no crean salas distintas.
+Si había una asociación anterior, se guarda como `<boardId>.recovery-<roomId>.json`
+y su checkpoint se aplica a la sala común para conservar el trabajo guardado.
+
+Al importar varios archivos, cada error se limita a su archivo. Los PDF y demás
+archivos posteriores se siguen procesando; al finalizar se muestra un resumen
+de los fallos y se conserva lo importado correctamente.
 
 La pregunta de migración aparece en la esquina inferior izquierda y permite
 seguir usando la pizarra. Aceptar valida los tipos convertidos completamente para

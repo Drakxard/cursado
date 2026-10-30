@@ -15104,10 +15104,12 @@ class PDFViewer {
     return this.scroll.down;
   }
   setBoardReaderVisible(visible) {
-    if (!this.boardReaderMemory || this.boardReaderPaused === !visible) return;
-    const pages = this._getVisiblePages();
+    if (this.boardReaderPaused === !visible) return;
     this.boardReaderPaused = !visible;
-    this.#buffer.resize(visible ? BOARD_PDF_CACHE_PAGES : 0, pages.ids);
+    if (!this.#buffer) return;
+    const pages = this._getVisiblePages();
+    const activeSize = this.boardReaderMemory ? BOARD_PDF_CACHE_PAGES : DEFAULT_CACHE_SIZE;
+    this.#buffer.resize(visible ? activeSize : this.boardReaderMemory ? 0 : pages.ids.size, pages.ids);
     if (!visible) {
       // Preserve finished visible pages (and annotation storage). A reset of an
       // unfinished render cancels its task and lets it restart on resumption.
@@ -15131,7 +15133,7 @@ class PDFViewer {
     if (pageView) {
       const pdfDocument = this.pdfDocument;
       this.#ensurePdfPageLoaded(pageView).then(() => {
-        if (this.boardReaderMemory && (this.boardReaderPaused || pdfDocument !== this.pdfDocument || !this._getVisiblePages().ids.has(pageView.id))) return;
+        if (this.boardReaderPaused || pdfDocument !== this.pdfDocument || this.boardReaderMemory && !this._getVisiblePages().ids.has(pageView.id)) return;
         this.renderingQueue.renderView(pageView);
       });
       return true;

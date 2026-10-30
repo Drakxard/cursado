@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { createIdleSync } from '@/lib/client/idle-sync'
+import { startVisibleTask } from '@/lib/client/visible-task'
 import QRCode from 'qrcode'
 import { Share2, X, RefreshCw, QrCode, FolderOpen } from 'lucide-react'
 import { R2SetupGuide } from '@/components/r2-setup-guide'
@@ -130,8 +131,7 @@ export function WorkspaceLibraryButton() {
   }, [open, choice])
   useEffect(() => {
     if (!open || choice !== 'devices') return
-    const interval = setInterval(() => { setNow(Date.now()); if (workspaceId) void refreshDevices(workspaceId).catch(() => {}) }, 5000)
-    return () => clearInterval(interval)
+    return startVisibleTask(async () => { setNow(Date.now()); if (workspaceId) await refreshDevices(workspaceId).catch(() => {}) }, 5000)
   }, [open, workspaceId, choice])
   useEffect(() => {
     if (!open || choice !== 'devices' || screen !== 'devices' || !workspaceId) return

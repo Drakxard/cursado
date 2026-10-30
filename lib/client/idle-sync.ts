@@ -10,6 +10,7 @@ export function createIdleSync(options: {
   target?: EventTarget
   storageKey?: string
   storage?: Pick<Storage, 'getItem' | 'setItem'>
+  visibility?: Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>
 }) {
   let pending = false, running = false, stopped = false
   let activityAt = Date.now(), requestedAt = activityAt
@@ -32,6 +33,7 @@ export function createIdleSync(options: {
   let retryAt = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   const target = options.target ?? (typeof window !== 'undefined' ? window : undefined)
+  const visibility = options.visibility ?? (typeof document !== 'undefined' ? document : undefined)
   const events = ['pointerdown', 'pointermove', 'keydown', 'input', 'wheel', 'touchstart']
   const delay = () => options.isLive?.()
     ? Math.max(0, requestedAt + LIVE_SYNC_DELAY_MS - Date.now())
@@ -39,11 +41,11 @@ export function createIdleSync(options: {
   const remaining = () => Math.max(delay(), retryAt - Date.now())
   const arm = () => {
     clearTimeout(timer)
-    if (!stopped && pending && !running) timer = setTimeout(check, remaining())
+    if (!stopped && pending && !running && visibility?.visibilityState !== 'hidden') timer = setTimeout(check, remaining())
   }
   const check = async () => {
     timer = undefined
-    if (stopped || !pending || running) return
+    if (stopped || !pending || running || visibility?.visibilityState === 'hidden') return
     if (remaining() > 0) { arm(); return }
     const live = options.isLive?.()
     if (recovery) {
@@ -67,6 +69,7 @@ export function createIdleSync(options: {
   }
   const activity = () => { activityAt = Date.now() }
   for (const event of events) target?.addEventListener(event, activity, { passive: true })
+  visibility?.addEventListener('visibilitychange', arm)
   if (pending) arm()
   return {
     request() {
@@ -81,6 +84,7 @@ export function createIdleSync(options: {
     stop() {
       stopped = true; clearTimeout(timer)
       for (const event of events) target?.removeEventListener(event, activity)
+      visibility?.removeEventListener('visibilitychange', arm)
     },
   }
 }
