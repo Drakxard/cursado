@@ -20,6 +20,7 @@ const nextConfig = {
     }
     return {
       beforeFiles: [
+        { source: '/plantuml-renderer.html', destination: '/pizarra/plantuml.html' },
         { source: '/pizarra/api/:path*', destination: backend ? `${backend}/api/:path*` : '/api/pizarra-unavailable' },
         { source: '/pizarra/recognize/:path*', destination: backend ? `${backend}/recognize/:path*` : '/api/pizarra-unavailable' },
         { source: '/pizarra', destination: '/pizarra/index.html' },

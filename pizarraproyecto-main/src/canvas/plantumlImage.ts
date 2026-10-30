@@ -31,19 +31,32 @@ export function plantumlImage(root:MindmapNode):Promise<Blob> {
     const labels=await rasterPlantumlLabels(entries.map(entry=>entry.text))
     let image:HTMLImageElement|undefined,url:string|undefined,canvas:HTMLCanvasElement|undefined
     try {
-      // Only placeholder boxes reach PlantUML. Original text cannot inject directives.
-      const lines=['@startmindmap','<style>','mindmapDiagram {','node {','FontName monospace','FontSize 17','Padding 12','Margin 12','RoundCorner 12','BackgroundColor #f5f5f5','LineColor #555555','}','}','</style>']
-      entries.forEach((entry,index)=>{
-        const label=labels[index]
-        // The pinned engine measures monospace M at 9.347 px and rows at 20 px.
-        const row='M'.repeat(Math.ceil(label.width/9.34))
-        lines.push(`${'*'.repeat(entry.depth+1)} ${Array.from({length:Math.ceil(label.height/20)},()=>row).join('\\n')}`)
-      })
-      lines.push('@endmindmap')
-      const svg=await new Promise<string>((resolve,reject)=>{
-        const timer=setTimeout(()=>reject(new Error('PlantUML tardó demasiado en distribuir el mapa.')),30000)
-        renderer.renderToString(lines,value=>{clearTimeout(timer);resolve(value)},message=>{clearTimeout(timer);reject(new Error(message))})
-      })
+      let layoutScale=1,svg=''
+      for(let attempt=0;attempt<4;attempt++) {
+        // Only placeholder boxes reach PlantUML. Original text cannot inject directives.
+        const lines=['@startmindmap','<style>','mindmapDiagram {','node {','FontName monospace','FontSize 17','Padding 12','Margin 12','RoundCorner 12','BackgroundColor #f5f5f5','LineColor #555555','}','}','</style>']
+        entries.forEach((entry,index)=>{
+          const label=labels[index]
+          // The pinned engine measures monospace M at 9.347 px and rows at 20 px.
+          const row='M'.repeat(Math.ceil(label.width*layoutScale/9.34))
+          lines.push(`${'*'.repeat(entry.depth+1)} ${Array.from({length:Math.ceil(label.height*layoutScale/20)},()=>row).join('\\n')}`)
+        })
+        lines.push('@endmindmap')
+        try {
+          svg=await new Promise<string>((resolve,reject)=>{
+            const timer=setTimeout(()=>reject(new Error('PlantUML tardó demasiado en distribuir el mapa.')),30000)
+            try {
+              renderer.renderToString(lines,value=>{clearTimeout(timer);resolve(value)},message=>{clearTimeout(timer);reject(new Error(message))})
+            }catch(error){clearTimeout(timer);reject(error)}
+          })
+          break
+        }catch(error) {
+          // The browser engine rejects layouts over 4096 px before PNG scaling.
+          // Retry measured boxes at a smaller scale, preserving every label.
+          if(attempt===3||!/Diagram too large for browser rendering/i.test(String(error)))throw error
+          layoutScale*=0.8
+        }
+      }
       const doc=new DOMParser().parseFromString(svg,'image/svg+xml')
       const boxes=Array.from(doc.querySelectorAll('rect[rx]'),rect=>({x:Number(rect.getAttribute('x')),y:Number(rect.getAttribute('y')),width:Number(rect.getAttribute('width')),height:Number(rect.getAttribute('height'))}))
       if(doc.querySelector('parsererror')||doc.documentElement.localName!=='svg'||boxes.length!==labels.length||boxes.some(box=>!Object.values(box).every(Number.isFinite)))
@@ -63,8 +76,9 @@ export function plantumlImage(root:MindmapNode):Promise<Blob> {
       ctx.scale(scale,scale);ctx.fillStyle='white';ctx.fillRect(0,0,width,height);ctx.drawImage(image,0,0,width,height)
       labels.forEach((label,index)=>{
         const box=boxes[index]
-        if(box.width<label.width+23||box.height<label.height+23)throw new Error('Una etiqueta no cabe en el mapa generado.')
-        ctx.drawImage(label.canvas,box.x+(box.width-label.width)/2,box.y+(box.height-label.height)/2,label.width,label.height)
+        const labelWidth=label.width*layoutScale,labelHeight=label.height*layoutScale
+        if(box.width<labelWidth+23||box.height<labelHeight+23)throw new Error('Una etiqueta no cabe en el mapa generado.')
+        ctx.drawImage(label.canvas,box.x+(box.width-labelWidth)/2,box.y+(box.height-labelHeight)/2,labelWidth,labelHeight)
       })
       return await new Promise<Blob>((resolve,reject)=>canvas!.toBlob(blob=>blob?resolve(blob):reject(new Error('No se pudo generar el PNG del mapa.')),'image/png'))
     }finally {

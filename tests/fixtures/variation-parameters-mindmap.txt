@@ -1,0 +1,56 @@
+@startmindmap
+* Método de Variación de Parámetros
+** Fundamentos y Alcance
+*** Propósito: Obtener solución particular $y_p$ en ED lineales no homogéneas
+*** Comparación con Coeficientes Indeterminados
+**** Sin restricción en la clase de función $f(x)$
+***** Implicación: Admite funciones como $\sec x$, $\tan x$, $\frac{1}{x}$, $\ln x$
+**** Aplicabilidad a ecuaciones con coeficientes variables
+***** Implicación: Resuelve problemas tipo Cauchy-Euler con base conocida
+** ED Lineal de Primer Orden (Motivación)
+*** Forma estándar: $y' + P(x)y = f(x)$
+*** Solución complementaria: $y_c = c_1 y_1(x)$
+*** Propuesta de Lagrange: $y_p = u_1(x) y_1(x)$
+**** Sustitución en la ED
+***** Implicación: $y_1 u_1' = f(x)$
+***** Implicación: $u_1(x) = \int \frac{f(x)}{y_1(x)} \, dx$
+** ED Lineal de Segundo Orden
+*** Forma estándar: $y'' + P(x)y' + Q(x)y = f(x)$
+**** Implicación crítica: Requiere dividir entre el coeficiente principal $a_2(x)$
+**** Implicación: $f(x) = \frac{g(x)}{a_2(x)}$
+*** Conjunto fundamental de la homogénea: $\{y_1(x), y_2(x)\}$
+**** Condición: Linealmente independientes ($W(y_1, y_2) \neq 0$)
+*** Propuesta: $y_p(x) = u_1(x)y_1(x) + u_2(x)y_2(x)$
+*** Deducción del sistema para derivadas $u_1', u_2'$
+**** Condición auxiliar: $y_1 u_1' + y_2 u_2' = 0$
+***** Implicación: Elimina derivadas de segundo orden $u_1'', u_2''$
+**** Segunda ecuación: $y_1' u_1' + y_2' u_2' = f(x)$
+*** Solución por Regla de Cramer
+**** Determinante principal: $W = \det \begin{pmatrix} y_1 & y_2 \\ y_1' & y_2' \end{pmatrix}$
+**** Determinantes auxiliares
+***** $W_1 = -y_2(x) f(x)$
+***** $W_2 = y_1(x) f(x)$
+**** Fórmulas de parámetros
+***** $u_1' = \frac{W_1}{W} \implies u_1(x) = \int \frac{-y_2(x) f(x)}{W} \, dx$
+***** $u_2' = \frac{W_2}{W} \implies u_2(x) = \int \frac{y_1(x) f(x)}{W} \, dx$
+** Propiedades Operativas y Casos Especiales
+*** Constantes de integración en $u_1, u_2$
+**** Implicación: Omitir constantes ($+C$) no genera error
+**** Implicación: $C_1 y_1 + C_2 y_2$ se absorbe en $y_c$
+*** Funciones definidas por integrales (No elementales)
+**** Condición: Integrando sin primitiva elemental (ej. $\frac{e^t}{t}$)
+**** Implicación: $y_p$ se expresa mediante integrales definidas en $[x_0, x]$
+** Generalización a Orden Superior ($n$-ésimo orden)
+*** Ecuación estándar: $y^{(n)} + P_{n-1}(x)y^{(n-1)} + \dots + P_0(x)y = f(x)$
+*** Propuesta: $y_p(x) = \sum_{k=1}^n u_k(x) y_k(x)$
+*** Sistema de $n$ ecuaciones
+**** $n-1$ condiciones auxiliares: $\sum_{k=1}^n y_k^{(m)} u_k' = 0$ para $m = 0, \dots, n-2$
+**** Ecuación no homogénea: $\sum_{k=1}^n y_k^{(n-1)} u_k' = f(x)$
+*** Solución de Cramer: $u_k' = \frac{W_k}{W}$
+**** Implicación: $W_k$ reemplaza la $k$-ésima columna por $(0, 0, \dots, f(x))^T$
+** Resolución de Problemas con Valores Iniciales (PVI)
+*** Construcción de la solución general completa: $y(x) = y_c(x) + y_p(x)$
+*** Derivación de la solución general completa: $y'(x)$
+*** Imposición de condiciones iniciales en $x_0$
+**** Implicación: Despeje unívoco de las constantes $c_1, c_2, \dots, c_n$
+@endmindmap
