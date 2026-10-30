@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type DragEvent, type Ref } from "react"
+import { SubjectAudios, type SubjectAudiosHandle } from "./subject-audios"
 import { HandDrawnBubble } from "@/components/hand-drawn-bubble"
 import { loadVoiceImageGroups, readVoiceImage, regroupVoiceImages, saveVoiceImages, validateVoiceImageFiles, VOICE_IMAGE_COLORS, type VoiceImage, type VoiceImageWorkspace } from "@/lib/subject-voice-images"
-import { isManualTopicsQuery, searchVoiceImages, voiceGroupDiameter, voiceImageName } from "@/lib/subject-voice-search"
+import { searchVoiceImages, voiceGroupDiameter } from "@/lib/subject-voice-search"
 import { getCurrentWeekNumber } from "@/lib/subject-utils"
 import { SubjectWeekTopics, type WeekTopicsHandle } from "@/components/subject-week-topics"
 import { useSubjectPdfSearch } from "@/hooks/use-subject-pdf-search"
@@ -18,12 +19,15 @@ import { needsDatalabConfiguration } from "@/lib/client/datalab-config"
 import { LoaderCircle } from "lucide-react"
 import { cooperationDeletionFor, guardCooperationElement } from '@/lib/client/cooperation'
 
-export type VoiceImagesHandle = { escape: () => boolean; dictate: (final: string, interim: string) => void }
+export type VoiceImagesHandle = { focusSearch: () => void; escape: () => boolean; dictate: (final: string, interim: string) => void }
 type Target = { groupId: string } | { name: string; color: string }
 const control = "rounded-lg border border-neutral-300 px-4 py-2 text-base hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-black disabled:opacity-50"
 const colorNames = ["Verde", "Azul", "Amarillo", "Rosa", "Violeta", "Naranja"]
 
-export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumber(), ref, onPdfViewing }: { subjectId: string; weekNumber?: number; ref?: Ref<VoiceImagesHandle>; onPdfViewing?: (viewing: boolean) => void }) {
+export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumber(), ref, onPdfViewing, onEditorChange }: { subjectId: string; weekNumber?: number; ref?: Ref<VoiceImagesHandle>; onPdfViewing?: (viewing: boolean) => void; onEditorChange?: (open: boolean) => void }) {
+  const audiosRef = useRef<SubjectAudiosHandle>(null)
+  const [legacy, setLegacy] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(false)
   const [workspace, setWorkspace] = useState<VoiceImageWorkspace | null>(null)
   const [groupId, setGroupId] = useState<string | null>(null)
   const [pending, setPending] = useState<File[] | null>(null)
@@ -33,7 +37,7 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
   queryValue.current = query
   const dictated = useRef<{start: number; text: string} | null>(null)
   const editedDictation = useRef(false)
-  const manualTopics = isManualTopicsQuery(query)
+  const manualTopics = false
   const topicsRef = useRef<WeekTopicsHandle>(null)
   const [topicsViewing, setTopicsViewing] = useState(false)
   const pdf = useSubjectPdfSearch(subjectId, query)
@@ -74,6 +78,7 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
     (item.pdfs ?? []).filter(result => !isDiscarded(history, `group:${item.id}`, "pdf", pdfDiscardId(result))).length
   const formOpen = pending !== null || selection !== null
   const pdfViewing = Boolean(pdfViewer && workspace && !formOpen)
+  useEffect(() => { onEditorChange?.(editorOpen); return () => onEditorChange?.(false) }, [editorOpen, onEditorChange])
   useEffect(() => {
     onPdfViewing?.(pdfViewing)
     return () => onPdfViewing?.(false)
@@ -127,7 +132,7 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
 
   useEffect(() => {
     const capture = (event: KeyboardEvent) => {
-      if (!workspace || formOpen || viewer || pdfViewer || (manualTopics && topicsRef.current?.blocksInput()) || locked.current || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.key.length !== 1) return
+      if (editorOpen || !workspace || formOpen || viewer || pdfViewer || (manualTopics && topicsRef.current?.blocksInput()) || locked.current || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.key.length !== 1 || event.key === "+") return
       if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]")) return
       if (event.key === " " && event.target instanceof Element && event.target.closest("button")) return
       event.preventDefault()
@@ -136,7 +141,7 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
     }
     window.addEventListener("keydown", capture)
     return () => window.removeEventListener("keydown", capture)
-  }, [workspace, formOpen, viewer, pdfViewer, manualTopics])
+  }, [workspace, formOpen, viewer, pdfViewer, manualTopics, editorOpen])
 
   async function refresh() {
     setError("")
@@ -160,7 +165,7 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
 
   useEffect(() => () => { if (viewer) URL.revokeObjectURL(viewer.url) }, [viewer])
 
-  useImperativeHandle(ref, () => ({ dictate: (final, interim) => {
+  useImperativeHandle(ref, () => ({ focusSearch: () => { if (editorOpen) return; setPdfViewer(null); setViewer(null); requestAnimationFrame(() => searchInput.current?.focus()) }, dictate: (final, interim) => {
     if (formOpen || viewer || pdfViewer || locked.current) return
     if (editedDictation.current) {
       if (!final && interim) return
@@ -182,15 +187,18 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
     setQuery(next)
     if (document.activeElement === searchInput.current) queueMicrotask(() => searchInput.current?.setSelectionRange(head.length + confirmed.length + temporary.length, head.length + confirmed.length + temporary.length))
   }, escape: () => {
+    if (editorOpen && audiosRef.current?.escape()) return true
     if (locked.current) return true
     if (manualTopics && topicsRef.current?.escape()) { focusCanvas(); return true }
     if (pdfViewer) { setPdfViewer(null); focusCanvas(); return true }
     if (viewer) { setViewer(null); focusCanvas(); return true }
     if (formOpen) { cancelForm(); return true }
     if (query.length) { setQuery(""); focusCanvas(); return true }
+    if (!legacy && audiosRef.current?.escape()) return true
     if (groupId) { setGroupId(null); focusCanvas(); return true }
+    if (legacy) { setLegacy(false); return true }
     return false
-  } }), [viewer, pdfViewer, formOpen, query, groupId, manualTopics])
+  } }), [viewer, pdfViewer, formOpen, query, groupId, manualTopics, editorOpen, legacy])
 
   function message(failure: unknown) { return failure instanceof Error ? failure.message : "No se pudo completar la operación." }
 
@@ -212,6 +220,8 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
   }
 
   async function receive(files: File[], targetGroup: string | null) {
+    // New image uploads are retired; existing attachments remain readable.
+    if (files.length) { setError("Usá + para grabar o importar audio en AudioMass."); return }
     if (manualTopics) { await topicsRef.current?.receive(files); return }
     if (locked.current || !workspace || formOpen || viewer || pdfViewer) return
     locked.current = true
@@ -236,21 +246,14 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
     void receive(Array.from(event.dataTransfer.files), targetGroup)
   }
 
-  function choose(targetGroup: string | null) {
-    inputTarget.current = targetGroup
-    input.current?.click()
+  function choose(_targetGroup: string | null) {
+    setError("Usá + para grabar o importar audio en AudioMass.")
   }
 
-  function newGroup() {
-    if (locked.current || formOpen || viewer || pdfViewer) return
-    if (manualTopics) { if (!topicsRef.current?.blocksInput()) topicsRef.current?.choose(); return }
-    if (!searching) { choose(null); return }
-    if (!matches.length && !visiblePdfs.length) return
-    setSelection({ images: matches.map((match) => match.image), pdfs: structuredClone(visiblePdfs), destinationId: crypto.randomUUID() })
-    setName(query.trim())
-    setColor(VOICE_IMAGE_COLORS[0])
-    setRetry(null)
-    setError("")
+  function openAudioEditor() {
+    setQuery("")
+    setLegacy(false)
+    audiosRef.current?.openEditor()
   }
 
   async function runRegroup() {
@@ -298,9 +301,11 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
     onDragEnter={(event) => { if (!manualTopics && event.dataTransfer.types.includes("Files")) setDragging(true) }}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }}
     onDrop={(event) => drop(event, null)} data-subject-voice-images>
-    <input ref={input} type="file" accept="image/*" multiple className="hidden" aria-label="Seleccionar imágenes"
+    <input disabled ref={input} type="file" accept="image/*" multiple className="hidden" aria-label="Seleccionar imágenes"
       onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void receive(files, inputTarget.current) }} />
 
+    <SubjectAudios subjectId={subjectId} ref={audiosRef} hidden={searching || legacy || !!pdfViewer || !!viewer} onEditorChange={setEditorOpen} />
+    {!editorOpen && !searching && !pdfViewer && !viewer && workspace && workspace.groups.length > 0 && <button type="button" onClick={() => setLegacy(value => !value)} className="absolute left-5 bottom-20 z-30 rounded bg-white/95 px-3 py-2 text-sm underline">{legacy ? "Volver a audios" : "Material guardado anteriormente"}</button>}
     {!workspace && <div className="flex flex-1 items-center justify-center text-xl">{error ? "No se pudieron cargar los conjuntos." : "Cargando conjuntos…"}</div>}
 
     {workspace && formOpen && <form className="mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col gap-5 overflow-y-auto px-5 pt-28 pb-8 sm:pt-32" aria-label="Crear conjunto"
@@ -330,8 +335,8 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
       onBack={() => { setPdfViewer(null); focusCanvas() }} onUndo={() => void undo()}
       onSearchAgain={() => { setPdfViewer(null); pdf.retry(); focusCanvas() }} />}
 
-    {workspace && !formOpen && !viewer && !pdfViewer && <>
-      {manualTopics ? <SubjectWeekTopics key={`${subjectId}:${weekNumber}`} subjectId={subjectId} weekNumber={weekNumber}
+    {workspace && !editorOpen && !formOpen && !viewer && !pdfViewer && <>
+      {!searching && !legacy ? null : manualTopics ? <SubjectWeekTopics key={`${subjectId}:${weekNumber}`} subjectId={subjectId} weekNumber={weekNumber}
         ref={topicsRef} onBusy={setBusy} onViewing={setTopicsViewing} history={history} historyReady={historyReady}
         remove={image => removeItem({ scope: `topics:${weekNumber}`, kind: "topic", itemId: image.id })} /> : <>
       {workspace.groups.length === 0 && !searching ? <button type="button" disabled={busy} onClick={() => choose(null)} className="flex min-h-48 flex-1 flex-col items-center justify-center gap-2 px-2 py-10 text-center text-xl leading-relaxed sm:text-2xl">
@@ -371,7 +376,7 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
         }} aria-label="Buscar imágenes y PDF" data-voice-search
           size={1} autoComplete="off" spellCheck={false} disabled={busy} className="col-start-1 row-start-1 w-full min-w-0 border-0 bg-transparent px-3 py-2 text-center text-2xl outline-none focus-visible:underline focus-visible:decoration-neutral-300 focus-visible:underline-offset-8" />
         </div>
-        <button type="button" onClick={newGroup} disabled={busy || (!manualTopics && searching && (pdf.searching || pdf.preparing || matches.length + visiblePdfs.length === 0))} aria-label={manualTopics ? "Subir imágenes de temas" : "Nuevo conjunto"} title={manualTopics ? "Subir imágenes de temas" : "Nuevo conjunto"}
+        <button type="button" onClick={openAudioEditor} disabled={busy} aria-label="Nuevo audio" title="Nuevo audio (+)"
           className="pointer-events-auto absolute right-0 flex h-12 w-12 items-center justify-center rounded-full border-[3px] border-dotted border-[#f08c00] bg-white/95 text-3xl text-[#f08c00] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#f08c00] disabled:opacity-30">+</button>
       </div>}
     </>}

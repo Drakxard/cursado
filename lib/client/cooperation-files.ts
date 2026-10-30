@@ -2,6 +2,7 @@
 import { safeCooperationPath, type Json } from '../cooperation-model.ts'
 import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
 import { readWorkspaceJson, writeWorkspaceJson, writeWorkspaceJsonIfUnchanged } from '../workspace-json.ts'
+import { validateAudioWorkspace } from '../subject-audio-model.ts'
 
 export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; reuseLocalIds?: boolean; legacyStorageKeys?: string[]; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
 export type MirrorFile = { key: string; value?: Json; blob?: Blob }
@@ -223,7 +224,7 @@ export async function scanSphere(root: FileSystemDirectoryHandle, b: SphereBindi
     else if (value && typeof value === 'object') { for (const [key, v] of Object.entries(value)) await references(v, shortcut || value.visualType === 'pdf-shortcut' && key === 'pdfReference') }
   }
   for (const id of ids) {
-    for (const base of ['teoria', 'practica', 'audio', 'sintesis', 'manifests/materials', 'manifests/entries', 'manifests/synthesis', 'manifests/sintesis', 'manifests/subject-voice', 'manifests/subject-voice/topics', 'manifests/subject-voice/search-history', 'subject-voice/topics', 'subject-voice/images', 'subject-voice/pdf-sources']) {
+    for (const base of ['teoria', 'practica', 'audio', 'sintesis', 'manifests/materials', 'manifests/entries', 'manifests/synthesis', 'manifests/sintesis', 'manifests/subject-voice', 'manifests/subject-voice/topics', 'manifests/subject-voice/search-history', 'subject-voice/topics', 'subject-voice/images', 'subject-voice/audio', 'subject-voice/pdf-sources']) {
       for (const path of await walk(root, `${base}/${id}`)) await add(path)
     }
   }
@@ -299,7 +300,10 @@ export async function applyMirrorFile(root: FileSystemDirectoryHandle, b: Sphere
     }
     if (path.startsWith('manifests/sintesis/') && 'workspace' in mapped) mapped.r2 = previous?.r2 || { etag: null, baseline: null }
   }
-  await writeJson(root, path, mapped)
+  if (/^manifests\/subject-voice\/[^/]+\/audios\.json$/.test(path)) {
+    validateAudioWorkspace(mapped, b.subjectId)
+    await withWorkspaceFileLock(`manifest:${path}`, () => writeJson(root, path, mapped))
+  } else await writeJson(root, path, mapped)
 }
 
 export async function isFileReferenced(root: FileSystemDirectoryHandle, path: string) {

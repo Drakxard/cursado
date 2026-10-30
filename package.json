@@ -22,7 +22,7 @@
     "test:synthesis-image": "node --test tests/synthesis-image.browser.mjs",
     "test:inscreen-reader": "node --test --experimental-strip-types tests/inscreen-synthesis-reader.browser.mts",
     "test:board-chat": "node --test --experimental-strip-types tests/board-chat.test.mts tests/board-api-chat.browser.mjs",
-    "test:voice": "node --test tests/subject-voice.browser.mjs",
+    "test:voice": "node --test tests/subject-audio.browser.mjs",
     "test:tts": "node --test tests/tts-test.browser.mjs",
     "test:synthesis-paste": "node --test tests/synthesis-math.browser.mjs",
     "test:pdf-search": "node --test tests/subject-pdf.browser.mjs",
@@ -34,7 +34,8 @@
     "cloudflare:check": "npx --yes wrangler@4.151.0 deploy --dry-run --config cloudflare/wrangler.jsonc",
     "cloudflare:deploy": "npx --yes wrangler@4.151.0 deploy --config cloudflare/wrangler.jsonc",
     "build:study-board": "node scripts/build-study-board.mjs",
-    "test:study-board": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/study-board-migration.test.mts tests/study-upload.test.mts tests/study-board-pdf.test.mts && node scripts/test-study-board.mjs"
+    "test:study-board": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/study-board-migration.test.mts tests/study-upload.test.mts tests/study-board-pdf.test.mts && node scripts/test-study-board.mjs",
+    "test:audio": "node --test --experimental-strip-types tests/subject-audio.test.mts tests/subject-audio-cooperation.test.mts && node --test tests/subject-audio.browser.mjs"
   },
   "dependencies": {
     "@ai-sdk/azure": "^4.0.100",

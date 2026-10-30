@@ -7645,7 +7645,7 @@ export function SubjectWheel({
           <div className="pointer-events-auto ml-auto shrink-0">
             {!isNativeReadOnly() && <VoiceModeButton
               active={isVoiceModeEnabled}
-              label={isVoiceModeEnabled ? "Desactivar modo de voz" : "Activar modo de voz"}
+              label={isVoiceModeEnabled ? "Desactivar búsqueda en esferas" : "Activar búsqueda en esferas"}
               onClick={() => setIsVoiceModeEnabled((enabled) => !enabled)}
               onLongPress={() => setIsTtsTestOpen(true)}
             />}

@@ -788,7 +788,7 @@ async function synchronizeMirror(mirror: Mirror) {
         const latest = await readJson<Json | undefined>(handle, mapBindingText(key, b, true), undefined)
         localValue = latest === undefined ? undefined : mapBindingJson(latest, b, false)
       }
-      const protect = key.startsWith('manifests/materials/') || key.startsWith('manifests/entries/') || key === 'scope/containers.json' || /^manifests\/subject-voice\/[^/]+\/workspace\.json$/.test(key) || key.startsWith('manifests/subject-voice/topics/')
+      const protect = key.startsWith('manifests/materials/') || key.startsWith('manifests/entries/') || key === 'scope/containers.json' || /^manifests\/subject-voice\/[^/]+\/(?:workspace|audios)\.json$/.test(key) || key.startsWith('manifests/subject-voice/topics/')
       if (protect) protectDeletions(b.id, key, prior?.value, resource.value, localValue)
       const conflicts: Parameters<typeof mergeCooperation>[3] = []
       let merged = mirror.downloading && (!mirror.metadataReady || localValue === undefined) ? resource.value : mergeCooperation(prior?.value, localValue, resource.value, conflicts)

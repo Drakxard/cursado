@@ -1,0 +1,5 @@
+/* Cursado integration: light theme; upstream tokens preserved. */
+:root{color-scheme:light;--bg-0:#fff;--bg-1:#f8fafc;--bg-2:#f1f5f9;--bg-3:#e2e8f0;--bg-4:#cbd5e1;--fg-0:#17212b;--fg-1:#475569;--fg-2:#64748b;--fg-3:#94a3b8;--ac:#087e8b;--ac-2:#23666f;--ac-soft:rgba(8,126,139,.1);--ac-glow:rgba(8,126,139,.15);--ac-ink:#fff;--bd:rgba(15,23,42,.15);--bd-s:rgba(15,23,42,.08);--bd-h:rgba(8,126,139,.5);--warn:#926000;--ok:#20733c;--solo:#087e8b}
+.pk_modal_back{background:rgba(255,255,255,.75)}
+
+.pk_sloop{background:#fff}

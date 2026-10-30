@@ -1,0 +1,6 @@
+Upstream: https://github.com/pkalogiros/AudioMass
+Commit: 21f5ee1362a47be6f0dbe6e4969a15e43d21b044
+Modifications: index loads cursado-light.css, cursado-speech.js and cursado-bridge.js.
+Full src vendored; no upstream tools removed.
+WaveSurfer canvas background, waveform and timeline colors adapted for light theme.
+The recording modal emits CursadoRecordingStart/Stop events to coordinate browser dictation, including pause/resume.
