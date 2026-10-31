@@ -8,6 +8,9 @@ import { BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, BOARD_SHORTCUT_M
 import './study.css'
 import { disposeStudy } from './study-render'
 import { studyPdfRuns } from './study-pdf-link'
+// Keep insertion available in an open board after a deployment replaces hashed lazy chunks.
+// PDF.js itself remains lazy inside openPdf; diagrams do not need to fetch another module.
+import { importStudyFiles, renderPdfPage } from './study-imports'
 
 function encode(bytes: Uint8Array) {
   let value = ''; for (let at = 0; at < bytes.length; at += 8192) value += String.fromCharCode(...bytes.subarray(at, at + 8192)); return btoa(value)
@@ -86,7 +89,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (!uploaded.has(key)) uploaded.set(key, (async () => {
       let blob = await (await fetch(data)).blob()
       if (item.pdfSource) {
-        const { renderPdfPage } = await import('./study-imports'); blob = await renderPdfPage(blob, item.pageNumber || 1)
+        blob = await renderPdfPage(blob, item.pageNumber || 1)
       }
       return (await uploadImage(new File([blob], 'migracion.png', { type: blob.type }), {
         reuseExisting: true,
@@ -214,7 +217,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     }
     if (data.type === 'study-board:import-files' && initialized && !busy) {
       busy = true
-      void import('./study-imports').then(async ({ importStudyFiles }) => {
+      void (async () => {
         const source = typeof data.diagramSource === 'string' && data.diagramSource.trim() && data.diagramSource.length <= 100000 ? data.diagramSource : undefined
         if (data.diagramSource !== undefined && (!source || data.files?.length !== 1)) throw new Error('El código del diagrama no es válido.')
         if (data.replaceDiagramId && !source) throw new Error('Falta el código del diagrama.')
@@ -231,7 +234,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
           } else insert(object)
         })
         if (data.requestId) send('import-result', { requestId: data.requestId, ok: true })
-      }).catch(error => send(data.requestId ? 'import-result' : 'error', { requestId: data.requestId, ok: false, error: String(error) })).finally(() => { busy = false; send('status', { status: '' }); checkpoint() })
+      })().catch(error => send(data.requestId ? 'import-result' : 'error', { requestId: data.requestId, ok: false, error: String(error) })).finally(() => { busy = false; send('status', { status: '' }); checkpoint() })
     }
   })
   doc.on('update', () => {

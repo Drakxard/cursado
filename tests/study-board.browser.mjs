@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { build } from 'esbuild'
 import { chromium, expect } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 
 // Uses the existing local Vite + Worker stack; no Next production build is needed.
 const origin = process.env.STUDY_TEST_ORIGIN || 'http://127.0.0.1:5173'
@@ -64,7 +66,14 @@ async function fixture(context) {
   await context.route('**/study-parent.js', route => route.fulfill({ contentType: 'text/javascript', body: bundle.outputFiles[0].text }))
   await context.route('**/pizarra/api/excel/import', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ sheets: [{ name: 'Hoja importada', cells: [[{ input: '=2+3' }]], truncated: false }] }) }))
   await context.route('**/study-board/index.html?**', async route => {
+    if (process.env.STUDY_TEST_BUILT === '1') {
+      await route.fulfill({ contentType: 'text/html', body: await readFile('public/study-board/index.html', 'utf8') }); return
+    }
     const response = await route.fetch({ url: origin + '/' }); await route.fulfill({ response })
+  })
+  if (process.env.STUDY_TEST_BUILT === '1') await context.route('**/study-board/assets/**', async route => {
+    const root = path.resolve('public/study-board/assets'), file = path.resolve(root, path.basename(new URL(route.request().url()).pathname))
+    await route.fulfill({ path: file })
   })
   await context.route('**/biblioteca/pizarra?**', route => {
     const url = new URL(route.request().url()), reader = url.searchParams.get('mode') === 'reader'
@@ -241,6 +250,11 @@ test('diagram chooser previews PlantUML, handles errors, cancels and imports int
   const context = await browser.newContext({ viewport: { width: 1366, height: 900 } }); await fixture(context)
   const page = await context.newPage()
   await page.goto(origin + '/study-fixture?board=first'); await loaded(page)
+  // Simulate an update removing the old lazy importer after the board has opened.
+  let lateImporterRequests = 0
+  await context.route(/\/(?:assets\/study-imports-[^/]+\.js|src\/study-imports\.ts)(?:\?.*)?$/, route => {
+    lateImporterRequests++; return route.abort('failed')
+  })
   await page.addStyleTag({ path: 'components/study-diagrams.css' })
   await page.getByRole('button', { name: 'Aceptar', exact: true }).click()
   const dock = engine(page).locator('komu-tool-dock')
@@ -333,6 +347,7 @@ test('diagram chooser previews PlantUML, handles errors, cancels and imports int
   assert.ok(mobileCode.y + mobileCode.height <= mobilePreview.y)
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'PlantUML', exact: true })).toHaveCount(0)
+  assert.equal(lateImporterRequests, 0, 'inserting and editing diagrams must not fetch a lazy importer')
 })
 
 test('PDF names open on one click and restore their destination after native text editing', { timeout: 60000 }, async t => {

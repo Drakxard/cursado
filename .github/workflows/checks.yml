@@ -286,9 +286,16 @@ jobs:
       - name: Compilar la pizarra de estudio integrada
         run: node scripts/build-study-board.mjs
         working-directory: .
+        env:
+          STUDY_BOARD_WORKER_HOST: 127.0.0.1:8787
       - run: pnpm exec playwright install --with-deps chromium
       - name: Camara, geometria y gestos
         run: pnpm exec playwright test e2e/camera-direct.spec.ts e2e/viewport.spec.ts --trace on
+      - name: Insertar y editar diagramas con la pizarra compilada tras una actualizacion
+        run: node scripts/test-study-board.mjs --test-name-pattern="diagram chooser"
+        working-directory: .
+        env:
+          STUDY_TEST_BUILT: '1'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -297,3 +304,4 @@ jobs:
           path: |
             pizarra-sync/test-results/
             pizarra-sync/playwright-report/
+            test-results/
