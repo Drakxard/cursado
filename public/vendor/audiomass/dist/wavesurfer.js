@@ -4680,7 +4680,10 @@ var WebAudio = function (_util$Observer) {
             this.unAll();
             this.resetPeakPyramid();
             this.buffer = null;
+            this.extraPeaks = null; this.extraDuration = 0;
+            this.splitPeaks = []; this.mergedPeaks = null;
             this.disconnectSource();
+            if (this.source) { try { this.source.stop(); } catch (_) {} this.source.buffer = null; this.source = null; }
             this.gainNode1.disconnect();
             this.gainNode2.disconnect();
             this.mergerNode.disconnect();

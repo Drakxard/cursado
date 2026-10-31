@@ -57,34 +57,27 @@
 				eng.wavesurfer.backend.buffer : null;
 		}
 
-		function trimForMemory () {
-			var len = undo_state_list.length;
-			if (len <= _min_keep) return ;
-
-			// An untyped (audio edit) push is about to replace the live
-			// editor buffer, so count the newest snapshot as pending
-			// retention. Typed pushes ('mult'/'mrk') leave the editor
-			// buffer live - it costs nothing wherever history shares it
-			// (including entries recycled through undo/redo). Live
-			// multitrack clip buffers cost nothing either way.
-			var seen = [];
-			var newest = undo_state_list[len - 1];
-			var live = liveEditorBuffer ();
-			var pending = newest && !newest.type && newest.data === live ?
-				live : null;
-			if (live && !pending) seen.push ( live );
-			seedLiveMultitrackBuffers ( seen, pending );
-
-			var total = 0;
-			for (var i = len - 1; i >= 0; --i) {
-				var add = stateBytes ( undo_state_list[i], seen );
-				if (add > 0 && total + add > _max_bytes && (len - 1 - i) >= _min_keep) {
-					undo_state_list.splice ( 0, i + 1 );
-					return ;
-				}
-				total += add;
-			}
-		}
+		function retainedBytes () {
+            var seen = [], newest = undo_state_list[undo_state_list.length - 1];
+            var live = liveEditorBuffer ();
+            var pending = newest && !newest.type && newest.data === live ? live : null;
+            if (live && !pending) seen.push(live);
+            seedLiveMultitrackBuffers(seen, pending);
+            return undo_state_list.concat(redo_state_list).reduce(function (sum, state) { return sum + stateBytes(state, seen); }, 0);
+        }
+        function trimForMemory () {
+            while (retainedBytes() > _max_bytes) {
+                if (undo_state_list.length > _min_keep) undo_state_list.shift();
+                else if (redo_state_list.length) redo_state_list.pop();
+                else break;
+            }
+        }
+        q.setMemoryBudget = function (bytes) {
+            if (!Number.isFinite(bytes) || bytes < 0) return;
+            _max_bytes = bytes; _min_keep = 0;
+            trimForMemory();
+        };
+        q.memoryUsage = function () { return {bytes: retainedBytes(), budget: _max_bytes, undo: undo_state_list.length, redo: redo_state_list.length}; };
 
 		function currentStateFor ( state ) {
 			var current = {
@@ -146,7 +139,8 @@
 				if (last_state._restore_failed) {
 					delete last_state._restore_failed;
 					undo_state_list.push ( last_state );
-					_fireEvent ( 'DidStateChange', undo_state_list, redo_state_list);
+	                trimForMemory();
+				_fireEvent ( 'DidStateChange', undo_state_list, redo_state_list);
 					return ( null );
 				}
 
@@ -159,6 +153,7 @@
 				updateStateData ( last_state, current );
 				redo_state_list.unshift (last_state);
 
+                trimForMemory();
 				_fireEvent ( 'DidStateChange', undo_state_list, redo_state_list);
 			}
 
@@ -177,7 +172,8 @@
 				if (last_state._restore_failed) {
 					delete last_state._restore_failed;
 					redo_state_list.unshift ( last_state );
-					_fireEvent ( 'DidStateChange', undo_state_list, redo_state_list);
+	                trimForMemory();
+				_fireEvent ( 'DidStateChange', undo_state_list, redo_state_list);
 					return ( null );
 				}
 
@@ -190,6 +186,7 @@
 				updateStateData ( last_state, current );
 				undo_state_list.push (last_state);
 
+                trimForMemory();
 				_fireEvent ( 'DidStateChange', undo_state_list, redo_state_list);
 			}
 

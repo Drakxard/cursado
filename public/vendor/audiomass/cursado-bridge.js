@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   var app = window.PKAudioEditor;
+  app.state.setMemoryBudget(32 * 1024 * 1024);
   var dirty = false, recording = false;
   function send(type, value) { if (type === 'error') { saveError(value.error); return; } parent.postMessage(Object.assign({ source: 'cursado-audiomass', type: type }, value), location.origin); }
   var saveModal = null, saveName = '', exporting = false;
@@ -116,6 +117,7 @@
   }
   window.addEventListener('message', function (event) {
     if (event.origin !== location.origin || event.source !== parent || event.data?.source !== 'cursado-host') return;
+    if (event.data.type === 'dispose') { window.CursadoDispose(); return; }
     if (event.data.type === 'record-toggle' && !document.querySelector('.pk_modal') && !app.ui.InteractionHandler.on) app.fireEvent('RequestActionRecordContinue');
     if (event.data.type === 'save-error') saveError(event.data.error);
   });
@@ -123,6 +125,22 @@
     if (event.key === 'Escape' && !document.querySelector('.pk_modal')) send('close');
   });
   window.addEventListener('beforeunload', function (event) { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', function () { layoutObserver.disconnect(); cancelAnimationFrame(resizeFrame); speech.dispose(); });
+  var disposed = false;
+  window.CursadoDispose = function () {
+    if (disposed) return;
+    disposed = true;
+    layoutObserver.disconnect(); cancelAnimationFrame(resizeFrame); speech.dispose();
+    app.rec.dispose();
+    app.state.clearAllState();
+    app.fireEvent('RequestActionFX_PREVIEW_STOP');
+    var wave = app.engine.wavesurfer;
+    // This iframe owns the audio context, so closing it also disconnects effect and mixer nodes.
+    var context = wave.backend.ac;
+    wave.params.closeAudioContext = true;
+    wave.destroy();
+    if (context && context.state !== 'closed') context.close().catch(function () {});
+    if (window.PKAudioList) delete window.PKAudioList[app.id];
+  };
+  window.addEventListener('pagehide', window.CursadoDispose);
   send('ready');
 })();

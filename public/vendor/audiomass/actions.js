@@ -252,7 +252,7 @@
 				if (_offset > 0)
 				{
 					uberChanData.set (
-						chan_data.slice ( 0, _offset )
+						chan_data.subarray ( 0, _offset )
 					);
 				}
 
@@ -266,7 +266,7 @@
 				if (_offset < (originalBuffer.length + new_len) )
 				{
 					uberChanData.set (
-						chan_data.slice( _offset + new_len ), _offset + new_len
+						chan_data.subarray( _offset + new_len ), _offset + new_len
 					);
 				}
 			}

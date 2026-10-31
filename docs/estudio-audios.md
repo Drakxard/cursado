@@ -25,6 +25,10 @@ La app no descarga modelos ni ejecuta tareas de transcripción posteriores. El n
 
 El texto corresponde a lo hablado durante la grabación. Importar un archivo no lo transcribe y recortar o reordenar el audio no ajusta el texto automáticamente.
 
+## Uso de memoria
+
+El historial de deshacer/rehacer comparte un presupuesto de 32 MiB para búferes retenidos, separado del audio que se está editando. Se retiran las copias antiguas que exceden ese presupuesto; una grabación larga puede tener menos pasos disponibles para deshacer. Al cerrar el editor se detienen el micrófono, los puertos del capturador y el dictado, se vacían los búferes y el historial y se cierra su AudioContext. Los reproductores guardados usan `preload="none"`; al ocultarse la lista se desmontan, se pausa su reproducción y se liberan sus URL y fuentes.
+
 ## Recursos y verificación
 
 AudioMass se conserva en `public/vendor/audiomass`, con licencia MIT, avisos de terceros y commit de origen en `CURSADO.txt`. La distribución completa ocupa aproximadamente 16,4 MB sin comprimir, incluidos los ejemplos; el iframe se monta solo al abrir el editor. El puente de dictado es JavaScript pequeño, sin dependencias ni modelos.

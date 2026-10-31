@@ -18,6 +18,7 @@
 		var channel_num_out = 1;
 
 		var is_active = false;
+        var disposed = false, draw_frame = 0;
 		var is_paused = false;
 		var is_starting = false;
 		var is_stopping = false;
@@ -123,7 +124,7 @@
 		}
 
 		this.startCapture = function ( opts ) {
-			if (is_active || is_starting || is_stopping) return false;
+			if (disposed || is_active || is_starting || is_stopping) return false;
 			opts = opts || {};
 			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !opts.ctx) {
 				reportError ( null, opts.onerror );
@@ -154,7 +155,11 @@
 				}
 				audio_stream = stream;
 				media_stream_source = audio_context.createMediaStreamSource ( stream );
-				return loadWorklet ().then ( startWorkletNode, startScriptNode );
+				return loadWorklet ().then (function () {
+                    if (id === capture_id && !disposed) startWorkletNode();
+                }, function () {
+                    if (id === capture_id && !disposed) startScriptNode();
+                });
 			}).then(function () {
 				if (id !== capture_id || !recorder_node) return ;
 				is_starting = false;
@@ -171,7 +176,7 @@
 			flushAgg ();
 
 			if (script_processor) script_processor.onaudioprocess = null;
-			if (recorder_node && recorder_node.port) recorder_node.port.onmessage = null;
+			if (recorder_node && recorder_node.port) { recorder_node.port.onmessage = null; recorder_node.port.close(); }
 			if (recorder_node) { try { recorder_node.disconnect (); } catch (e) {} }
 			if (monitor_node) { try { monitor_node.disconnect (); } catch (e2) {} }
 			if (media_stream_source) { try { media_stream_source.disconnect (); } catch (e3) {} }
@@ -187,6 +192,7 @@
 			recorder_node = null;
 			monitor_node = null;
 			capture_opts = null;
+            audio_context = null;
 			aggr = null;
 			aggr_i = 0;
 			is_stopping = false;
@@ -225,7 +231,7 @@
 		this.stopCapture = stopCapture;
 
 		function fetchBufferFunction ( float_array ) {
-			if (is_paused) return;
+			if (disposed || is_paused) return;
 			if (skip_samples > 0) {
 				skip_samples -= float_array.length;
 				return ;
@@ -240,8 +246,9 @@
 			temp_buffers[ ++temp_buffer_index ] = float_array;
 			draw_samples += float_array.length;
 
-			if (temp_buffer_index === 0 || draw_samples >= buffer_size * 4) {
-				requestAnimationFrame(function () {
+			if (!draw_frame && (temp_buffer_index === 0 || draw_samples >= buffer_size * 4)) {
+				draw_frame = requestAnimationFrame(function () {
+                    draw_frame = 0;
 					draw_samples = 0;
 					if (!is_active || !temp_buffers.length) return;
                     app.engine.wavesurfer.DrawTemp ( starting_offset, temp_buffers );
@@ -265,7 +272,7 @@
 		};
 
 		this.start = function ( _at_offset, _end_callback, _start_callback, _sample_rate ) {
-			if (is_active || is_starting) return (false);
+			if (disposed || is_active || is_starting || is_stopping) return (false);
 
 			is_paused = false;
 			starting_offset = _at_offset / 1;
@@ -330,9 +337,11 @@
 				}
 
 				downsampleAudioBuffer (buffers, source_sample_rate, sample_rate).then(function ( newBuffer ) {
+                    if (disposed) return;
 					_callback ();
 					_end_callback (offset, [newBuffer]);
 				}).catch(function () {
+                    if (disposed) return;
 					_callback ();
 					app.fireEvent ('ShowError', 'Could not resample recording');
 				});
@@ -357,7 +366,9 @@
 		this.stop = function ( cancel_recording ) {
 			if (!is_active && !is_starting) return ;
 
+            cancelAnimationFrame(draw_frame); draw_frame = 0;
 			stopCapture (function () {
+                if (disposed) return;
 				app.engine.wavesurfer.DrawTemp ( null );
 
 				if (temp_buffers.length > 0 && !cancel_recording)
@@ -378,6 +389,18 @@
 				end_record_func = start_record_func = null;
 			});
 		};
+        this.dispose = function () {
+            if (disposed) return;
+            disposed = true;
+            cancelAnimationFrame(draw_frame); draw_frame = 0;
+            ++capture_id; is_active = is_starting = is_paused = false;
+            capture_opts = null;
+            finishCapture();
+            temp_buffers = []; temp_buffer_index = -1;
+            end_record_func = start_record_func = null;
+            sample_rate = source_sample_rate = starting_offset = ending_offset = draw_samples = skip_samples = curr_offset = 0;
+        };
+
 	};
 
 	PKAE._deps.rec = PKREC;

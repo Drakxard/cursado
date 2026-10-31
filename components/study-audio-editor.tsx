@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState, useImperativeHandle, type Ref } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useImperativeHandle, type Ref } from 'react'
 import { saveStudyAudio } from '@/lib/subject-audio-storage'
 import type { StudyAudio } from '@/lib/subject-audio-model'
 
@@ -16,6 +16,12 @@ export function StudyAudioEditor({ subjectId, parentId, onClose, ref }: { subjec
     closeRef.current(); return true
   }
   useImperativeHandle(ref, () => ({ close }))
+  useLayoutEffect(() => {
+    const editorFrame = frame.current
+    return () => {
+      try { (editorFrame?.contentWindow as (Window & { CursadoDispose?: () => void }) | null)?.CursadoDispose?.() } catch { /* The frame may already be navigating away. */ }
+    }
+  }, [])
   useEffect(() => {
     const message = async (event: MessageEvent) => {
       if (event.origin !== location.origin || event.source !== frame.current?.contentWindow || event.data?.source !== 'cursado-audiomass') return

@@ -231,7 +231,7 @@ test('browser dictation restarts, pauses and preserves text without duplicated i
   await requestSave(page)
   await page.frameLocator('iframe[title="AudioMass"]').getByLabel('Nombre del audio').fill('Dictado')
   await page.frameLocator('iframe[title="AudioMass"]').getByRole('button',{name:'Confirmar audio',exact:true}).click()
-  await page.getByText('Transcripción guardada',{exact:true}).waitFor()
+  await page.getByText('Dictado',{exact:true}).waitFor()
   const w=await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))
   assert.equal(w.audios[0].transcript,'Una matriz. Tiene filas. Y columnas.')
 })
@@ -248,7 +248,7 @@ test('recognition errors preserve partial text and never block audio storage', a
   await requestSave(page)
   await page.frameLocator('iframe[title="AudioMass"]').getByLabel('Nombre del audio').fill('Con texto parcial')
   await page.frameLocator('iframe[title="AudioMass"]').getByRole('button',{name:'Confirmar audio',exact:true}).click()
-  await page.getByText('Transcripción parcial guardada',{exact:true}).waitFor()
+  await page.getByText('Con texto parcial',{exact:true}).waitFor()
   const w=await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))
   assert.equal(w.audios[0].transcript,'Texto previo.')
   assert.equal(w.audios[0].transcription,'partial')
@@ -266,7 +266,7 @@ test('unsupported browser saves audio without loading a model; old transcripts r
   await page.frameLocator('iframe[title="AudioMass"]').getByRole('button',{name:'Confirmar audio',exact:true}).click()
   await page.getByText('Dictado no disponible',{exact:true}).waitFor()
   await page.evaluate(()=>window.storage.updateAudioWorkspace('algebra',w=>{w.audios[0].transcript='Texto anterior';w.audios[0].transcription='completed'}))
-  await page.reload(); await page.getByText('Transcripción guardada',{exact:true}).waitFor()
+  await page.reload(); await page.getByText('Solo audio',{exact:true}).waitFor()
   assert.equal((await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))).audios[0].transcript,'Texto anterior')
   assert.equal(requests.some(url=>/huggingface|onnx|transcription\/worker|\.wasm/.test(url)),false)
 })
@@ -454,39 +454,41 @@ test('bottom plus creates an empty collection and keyboard plus records inside i
   assert.equal(nested.folders.find(folder=>folder.name==='Subtema').parentId,workspace.folders[0].id)
 })
 
-test('space starts recording, pauses, resumes and saves without capturing the pause', {timeout:30000}, async t => {
+test('space stops recording and appends the next take without losing the previous audio', {timeout:30000}, async t => {
   const page = await setup(t,{nativeMicrophone:true})
   await page.keyboard.press('+')
   const frame = page.frameLocator('iframe[title="AudioMass"]')
   await frame.locator('.pk_transport .icon-rec').waitFor()
-  await page.locator('iframe').focus()
-  await page.keyboard.press('Space')
+  await page.locator('iframe').focus(); await page.keyboard.press('Space')
   await frame.locator('.icon-rec.pk_act').waitFor()
   const editor = page.frames().find(frame=>frame.url().includes('/audiomass/'))
   await editor.waitForFunction(()=>window.PKAudioEditor.engine.wavesurfer.backend.extraPeaks?.length>=6)
-  await page.keyboard.down('Space')
-  await page.keyboard.down('Space')
-  await page.keyboard.up('Space')
-  assert.equal(await editor.evaluate(()=>window.PKAudioEditor.rec.isPaused()),true)
-  await editor.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
-  const count = await editor.evaluate(()=>window.PKAudioEditor.engine.wavesurfer.backend.extraPeaks.length)
-  await page.waitForTimeout(600)
-  assert.equal(await editor.evaluate(()=>window.PKAudioEditor.engine.wavesurfer.backend.extraPeaks.length),count)
+  await page.keyboard.down('Space'); await page.keyboard.down('Space'); await page.keyboard.up('Space')
+  await frame.locator('.icon-rec.pk_act').waitFor({state:'hidden'})
+  const first = await editor.evaluate(()=>{
+    const b = window.PKAudioEditor.engine.wavesurfer.backend.buffer
+    window.firstTake = b.getChannelData(0).slice()
+    return b.length
+  })
   await page.keyboard.press('Space')
-  assert.equal(await editor.evaluate(()=>window.PKAudioEditor.rec.isPaused()),false)
-  await editor.waitForFunction(count=>window.PKAudioEditor.engine.wavesurfer.backend.extraPeaks.length>count+5,count)
+  await frame.locator('.icon-rec.pk_act').waitFor()
+  await editor.waitForFunction(()=>window.PKAudioEditor.engine.wavesurfer.backend.extraPeaks?.length>=6)
   await page.keyboard.press('Space')
-  assert.equal(await editor.evaluate(()=>window.PKAudioEditor.rec.isPaused()),true)
-  assert.equal(await editor.evaluate(()=>window.PKAudioEditor.engine.wavesurfer.isPlaying()),false)
+  await frame.locator('.icon-rec.pk_act').waitFor({state:'hidden'})
+  assert.ok(await editor.evaluate(()=>{
+    const samples=window.PKAudioEditor.engine.wavesurfer.backend.buffer.getChannelData(0)
+    return samples.length>window.firstTake.length && window.firstTake.every((value,i)=>samples[i]===value)
+  }))
   await requestSave(page)
   await frame.getByLabel('Nombre del audio').fill('Mi voz')
   await frame.getByLabel('Nombre del audio').press('Space')
-  assert.equal(await editor.evaluate(()=>window.PKAudioEditor.rec.isPaused()),true)
+  assert.equal(await editor.evaluate(()=>window.PKAudioEditor.rec.isActive()),false)
   await frame.getByRole('button',{name:'Confirmar audio',exact:true}).click()
   await page.getByText('Mi voz',{exact:true}).waitFor()
   const saved = await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))
-  assert.ok(saved.audios[0].duration> .5)
+  assert.ok(saved.audios[0].duration>first/48000)
 })
+
 
 
 test('audio drag saves fixed order after reload without creating a collection', async t => {
@@ -501,26 +503,26 @@ test('audio drag saves fixed order after reload without creating a collection', 
 
 async function holdItem(page, locator, accept, expected) {
   const box = await locator.boundingBox()
-  const dialog = page.waitForEvent('dialog')
   await page.mouse.move(box.x+box.width/2,box.y+box.height/2)
   await page.mouse.down()
-  const confirmation = await dialog
-  assert.match(confirmation.message(), expected)
-  if (accept) await confirmation.accept(); else await confirmation.dismiss()
-  await page.mouse.up()
+  const modal = page.getByRole('alertdialog')
+  await modal.waitFor(); await page.mouse.up()
+  assert.match(await modal.innerText(), expected)
+  await modal.getByRole('button',{name:accept?'Eliminar':'Cancelar',exact:true}).click()
+  await modal.waitFor({state:'hidden'})
 }
 
 test('long press confirms audio or collection deletion, cancel keeps files and a failed write deletes nothing', async t => {
   const page = await setup(t); await seedAudios(page,3)
   const title = name=>page.getByText(name,{exact:true})
-  await holdItem(page,title('Audio 0'),false,/Eliminar el audio/)
+  await holdItem(page,title('Audio 0'),false,/Eliminar audio/)
   assert.equal((await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))).audios.length,3)
   await page.evaluate(()=>{window.failWorkspaceWrites=true})
-  await holdItem(page,title('Audio 0'),true,/Eliminar el audio/)
+  await holdItem(page,title('Audio 0'),true,/Eliminar audio/)
   await page.getByRole('alert').filter({hasText:'Disco lleno'}).waitFor()
   assert.ok(await page.evaluate(()=>window.workspaceFiles.has('subject-voice/audio/algebra/0.wav')))
   await page.evaluate(()=>{window.failWorkspaceWrites=false})
-  await holdItem(page,title('Audio 0'),true,/Eliminar el audio/)
+  await holdItem(page,title('Audio 0'),true,/Eliminar audio/)
   await title('Audio 0').waitFor({state:'hidden'})
   await page.waitForFunction(()=>!window.workspaceFiles.has('subject-voice/audio/algebra/0.wav'))
   await page.evaluate(()=>window.storage.updateAudioWorkspace('algebra',w=>{
@@ -529,14 +531,105 @@ test('long press confirms audio or collection deletion, cancel keeps files and a
   }))
   const folder = page.getByRole('button',{name:'Abrir conjunto Para borrar',exact:true})
   await folder.waitFor()
-  await holdItem(page,folder,false,/Eliminar el conjunto.*todo su contenido/)
+  await holdItem(page,folder,false,/Eliminar conjunto/)
   await folder.waitFor()
   assert.equal(await page.getByRole('button',{name:'Abrir conjunto Dentro',exact:true}).count(),0)
-  await holdItem(page,folder,true,/Eliminar el conjunto/)
+  await holdItem(page,folder,true,/Eliminar conjunto/)
   await folder.waitFor({state:'hidden'})
   await page.waitForFunction(()=>!window.workspaceFiles.has('subject-voice/audio/algebra/1.wav'))
   const saved = await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))
   assert.equal(saved.folders.length,0)
   assert.deepEqual(saved.audios.map(a=>a.id),['2'])
   assert.ok(await page.evaluate(()=>window.workspaceFiles.has('subject-voice/audio/algebra/2.wav')))
+})
+
+
+test('history stays within 32 MiB across repeated takes and undo/redo', async t => {
+  const page = await setup(t)
+  await page.keyboard.press('+'); await loadTone(page)
+  const editor = page.frames().find(frame=>frame.url().includes('/audiomass/'))
+  const usage = await editor.evaluate(()=>{
+    const app=window.PKAudioEditor, samples=2*1024*1024
+    const measurements=[]
+    for(let i=0;i<12;i++) {
+      const buffer=app.engine.wavesurfer.backend.ac.createBuffer(1,samples,48000)
+      buffer.getChannelData(0)[0]=i+.25
+      app.state.pushUndoState({desc:'Record Audio',data:buffer})
+      measurements.push(app.state.memoryUsage())
+    }
+    app.state.popUndoState(); measurements.push(app.state.memoryUsage())
+    app.state.shiftRedoState(); measurements.push(app.state.memoryUsage())
+    app.state.clearAllState(); measurements.push(app.state.memoryUsage())
+    return measurements
+  })
+  assert.ok(usage.every(state=>state.budget===32*1024*1024 && state.bytes<=state.budget),JSON.stringify(usage))
+  assert.ok(usage[11].undo>0 && usage[11].undo<12)
+  assert.equal(usage.at(-1).bytes,0)
+  console.log('Audio history retained bytes:',usage.map(state=>state.bytes))
+})
+
+test('repeated recording and editor unmount release contexts, microphones, buffers and playback sources', {timeout:60000}, async t => {
+  const page = await setup(t,{nativeMicrophone:true})
+  await page.evaluate(()=>{
+    window.disposalReports=[]; window.liveUrls=new Set()
+    addEventListener('message',event=>{if(event.data?.source==='audio-disposal-test') window.disposalReports.push(event.data.report)})
+    const create=URL.createObjectURL.bind(URL), revoke=URL.revokeObjectURL.bind(URL)
+    URL.createObjectURL=blob=>{const url=create(blob);window.liveUrls.add(url);return url}
+    URL.revokeObjectURL=url=>{window.liveUrls.delete(url);return revoke(url)}
+  })
+  await page.addInitScript(()=>{
+    window.testStreams=[]
+    const get=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+    navigator.mediaDevices.getUserMedia=async constraints=>{
+      const stream=await get(constraints);window.testStreams.push(stream);return stream
+    }
+  })
+  for(let cycle=0;cycle<4;cycle++) {
+    await page.keyboard.press('+')
+    const frame=page.frameLocator('iframe[title="AudioMass"]')
+    await frame.locator('.pk_transport .icon-rec').waitFor()
+    const editor=page.frames().find(frame=>frame.url().includes('/audiomass/'))
+    await editor.evaluate(()=>{
+      const dispose=window.CursadoDispose, app=window.PKAudioEditor, backend=app.engine.wavesurfer.backend, context=backend.ac
+      window.CursadoDispose=()=>{
+        dispose()
+        parent.postMessage({source:'audio-disposal-test',report:{context:context.state,active:app.rec.isActive(),
+          tracks:window.testStreams.flatMap(stream=>stream.getTracks().map(track=>track.readyState)),
+          buffer:backend.buffer,source:backend.source,preview:backend.extraPeaks,history:app.state.memoryUsage().bytes}},location.origin)
+      }
+    })
+    assert.equal(await page.locator('[data-subject-audios] audio').count(),0)
+    assert.equal(await page.evaluate(()=>window.liveUrls.size),0)
+    await page.locator('iframe').focus(); await page.keyboard.press('Space')
+    await frame.locator('.icon-rec.pk_act').waitFor()
+    await editor.waitForFunction(()=>window.PKAudioEditor.engine.wavesurfer.backend.extraPeaks?.length>=4)
+    if(cycle===0) for(let take=0;take<2;take++) {
+      await page.keyboard.press('Space')
+      await frame.locator('.icon-rec.pk_act').waitFor({state:'hidden'})
+      assert.ok(await editor.evaluate(()=>window.testStreams.every(stream=>stream.getTracks().every(track=>track.readyState==='ended'))))
+      await page.keyboard.press('Space')
+      await frame.locator('.icon-rec.pk_act').waitFor()
+      await editor.waitForFunction(()=>window.PKAudioEditor.engine.wavesurfer.backend.extraPeaks?.length>=4)
+    }
+    if(cycle===3) {
+      page.once('dialog',dialog=>dialog.accept())
+      await frame.getByRole('button',{name:'Cerrar editor de audio',exact:true}).click()
+    } else {
+      await page.keyboard.press('Space')
+      await frame.locator('.icon-rec.pk_act').waitFor({state:'hidden'})
+      await requestSave(page)
+      await frame.getByLabel('Nombre del audio').fill('Cycle '+cycle)
+      await frame.getByRole('button',{name:'Confirmar audio',exact:true}).click()
+      await page.getByText('Cycle '+cycle,{exact:true}).waitFor()
+    }
+    await page.waitForFunction(count=>window.disposalReports.length===count,cycle+1)
+    const report=await page.evaluate(()=>window.disposalReports.at(-1))
+    assert.equal(report.context,'closed',JSON.stringify(report))
+    assert.equal(report.active,false)
+    assert.ok(report.tracks.length>0 && report.tracks.every(state=>state==='ended'),JSON.stringify(report))
+    assert.equal(report.buffer,null); assert.equal(report.source,null); assert.equal(report.preview,null); assert.equal(report.history,0)
+    assert.equal(await page.locator('iframe').count(),0)
+    assert.ok(await page.locator('audio').evaluateAll(elements=>elements.every(el=>el.preload==='none')))
+  }
+  console.log('Disposed audio editor sessions:',await page.evaluate(()=>window.disposalReports))
 })

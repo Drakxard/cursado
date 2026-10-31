@@ -34,6 +34,7 @@ function AudioItem({ children, className, busy, onDelete, onDragStart, onDrop }:
 }
 
 function AudioCard({ audio, subjectId }: { audio: StudyAudio; subjectId: string }) {
+  const player = useRef<HTMLAudioElement>(null)
   const [url, setUrl] = useState(''), [error, setError] = useState('')
   useEffect(() => {
     let disposed = false, objectUrl = ''
@@ -42,10 +43,17 @@ function AudioCard({ audio, subjectId }: { audio: StudyAudio; subjectId: string 
     }).catch(error => { if (!disposed) setError(String(error.message)) })
     return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [subjectId, audio.id, audio.path])
+  useEffect(() => {
+    const element = player.current
+    return () => {
+      if (!element) return
+      element.pause(); element.removeAttribute('src'); element.load()
+    }
+  }, [url])
   const status = { pending: 'Sin transcripción en vivo', processing: 'Sin transcripción en vivo', completed: '', error: 'Sin transcripción en vivo', none: 'Sin transcripción en vivo', unavailable: 'Dictado no disponible', partial: '' }[audio.transcription]
   return <>
     <p className="mb-3 text-xl">{audio.name}</p>
-    {url && <audio controls preload="metadata" src={url} aria-label={audio.name} className="w-full" onError={() => setError('No se pudo reproducir el audio.')} />}
+    {url && <audio ref={player} controls preload="none" src={url} aria-label={audio.name} className="w-full" onError={() => setError('No se pudo reproducir el audio.')} />}
     {status && <p className="mt-3 text-sm text-neutral-600" role="status">{status}</p>}
     {audio.transcriptionError && <p className="text-xs text-neutral-600">{audio.transcriptionError}</p>}
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
@@ -146,7 +154,7 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
       </AlertDialog.Portal>
     </AlertDialog.Root>
     {editing && <AudioEditor ref={editor} subjectId={subjectId} parentId={editing.parentId} onClose={() => setEditing(null)} />}
-    {!editing && <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-28 pb-28 sm:px-8 sm:pt-32">
+    {!hidden && !editing && <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-28 pb-28 sm:px-8 sm:pt-32">
       <div className="mb-6 flex flex-wrap items-center gap-4">
         {parentId && <button className="rounded-lg border px-4 py-2" onClick={() => setParentId(folder?.parentId ?? null)} onDragOver={event => event.preventDefault()} onDrop={event => drop(event, folder?.parentId ?? null)}>← Nivel superior</button>}
         <h2 className="text-xl">{folder?.name ?? 'Audios'}</h2>
