@@ -15,7 +15,6 @@ const camera = (page: Page) => page.evaluate(() => {
 const frame = (page: Page) => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
 
 async function diagnostics(page: Page, info: TestInfo) {
-  await page.context().tracing.start({ screenshots: true, snapshots: true });
   await page.evaluate(() => {
     const samples: { input: number; frame: number; interval: number }[] = [];
     const presentations: { input: number; presented: number; latency: number }[] = [];
@@ -50,9 +49,7 @@ async function diagnostics(page: Page, info: TestInfo) {
   return async () => {
     const samples = await page.evaluate(() => (window as unknown as { cameraDiagnostics(): unknown }).cameraDiagnostics());
     await info.attach("camera-frames.json", { body: JSON.stringify(samples), contentType: "application/json" });
-    const path = info.outputPath("camera-trace.zip");
-    await page.context().tracing.stop({ path });
-    await info.attach("camera-trace", { path, contentType: "application/zip" });
+    // Playwright owns tracing (--trace on in CI), including manually created contexts.
   };
 }
 
