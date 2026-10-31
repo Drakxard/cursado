@@ -367,3 +367,34 @@ test('native microphone keeps a full-size editor responsive during sustained rec
   const audio = await page.evaluate(async () => (await window.storage.loadAudioWorkspace('algebra')).audios[0])
   assert.ok(audio.duration >= 7.5 && audio.duration < 15, JSON.stringify(audio))
 })
+
+
+test('dragged audio selection stays visible on the light waveform', async t => {
+  const page = await setup(t)
+  await page.keyboard.press('+'); await loadTone(page)
+  await page.locator('iframe').evaluate(el => { el.style.width = '1320px'; el.style.height = '700px' })
+  const editor = page.frames().find(frame=>frame.url().includes('/audiomass/'))
+  const box = await editor.evaluate(() => {
+    const rect = window.PKAudioEditor.engine.wavesurfer.drawer.wrapper.getBoundingClientRect()
+    return {x:rect.x,y:rect.y,width:rect.width,height:rect.height}
+  })
+  const iframe = await page.locator('iframe').boundingBox()
+  const y = iframe.y + box.y + box.height / 2
+  await page.mouse.move(iframe.x + box.x + box.width * .2, y)
+  await page.mouse.down()
+  await page.mouse.move(iframe.x + box.x + box.width * .6, y, {steps:12})
+  await page.mouse.up()
+  const region = page.frameLocator('iframe[title="AudioMass"]').locator('region.wavesurfer-region')
+  await region.waitFor()
+  const selection = await region.evaluate(el => {
+    const style = getComputedStyle(el), handle = getComputedStyle(el.querySelector('.wavesurfer-handle'))
+    const range = window.PKAudioEditor.engine.wavesurfer.regions.list[0]
+    return {blend:style.mixBlendMode,background:style.backgroundColor,shadow:style.boxShadow,
+      handle:handle.backgroundColor,start:range.start,end:range.end,width:el.getBoundingClientRect().width}
+  })
+  assert.equal(selection.blend,'normal')
+  assert.equal(selection.background,'rgba(37, 99, 235, 0.24)')
+  assert.match(selection.shadow,/29, 78, 216/)
+  assert.equal(selection.handle,'rgb(29, 78, 216)')
+  assert.ok(selection.start > 0 && selection.end > selection.start && selection.width > 50, JSON.stringify(selection))
+})

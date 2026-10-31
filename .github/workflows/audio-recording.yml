@@ -3,7 +3,7 @@ name: Audio recording regression
 on:
   push:
     branches:
-      - codex/fix-audio-recording-freeze
+      - main
   workflow_dispatch:
 
 permissions:

@@ -8,3 +8,15 @@
 .pk_transport .cursado-audio-close{font:22px system-ui,sans-serif;color:var(--fg-2)}
 .pk_modal_bottom .cursado-audio-save{height:34px;border:1px solid var(--bd);border-radius:5px;float:right;margin:0 8px}
 @media(max-width:600px){.pk_transport .cursado-audio-save span{display:none!important}.pk_transport .cursado-audio-save{padding:0 6px}}
+
+/* The upstream screen blend erases selections against the light waveform background. */
+.wavesurfer-region,.pk_mt_region{
+  mix-blend-mode:normal;
+  background:rgba(37,99,235,.24)!important;
+  box-shadow:inset 0 0 0 2px #1d4ed8;
+}
+.wavesurfer-region .wavesurfer-handle,.pk_mt_region .wavesurfer-handle{
+  background:#1d4ed8;
+  min-width:3px;
+}
+.pk_selection .pk_sellist{color:var(--fg-0)}
