@@ -282,6 +282,9 @@ jobs:
         run: npm ci
         working-directory: .
       - run: pnpm install --frozen-lockfile
+      - name: Instalar dependencias de la pizarra integrada anterior
+        run: npm ci
+        working-directory: pizarraproyecto-main
       - run: pnpm --filter @komuboard/client-web typecheck
       - name: Comprobar tipos del visor y la aplicacion
         run: npm run typecheck
