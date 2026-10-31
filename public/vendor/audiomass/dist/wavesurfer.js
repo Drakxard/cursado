@@ -3230,18 +3230,6 @@ var WaveSurfer = function (_util$Observer) {
             this.drawer.drawPeaks(peaks, width, 0, end, peaks.length, this.backend.shift);
 
 
-            if (this.backend.extraPeakStart >= 0)
-            {
-                // draw red 
-                var q = this;
-                requestAnimationFrame(function () {
-                    q.drawer.canvases[0].waveCtx.fillStyle = 'rgba(255,60,40,0.2)';
-                    q.drawer.canvases[0].waveCtx.fillRect (q.backend.extraPeakStart, 0, q.backend.extraPeakEnd-q.backend.extraPeakStart, q.drawer.canvases[0].wave.height);
-                });
-            }
-
-
-            // }
             this.fireEvent('redraw', peaks, width);
         }
 
