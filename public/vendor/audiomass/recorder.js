@@ -241,7 +241,9 @@
 			if (temp_buffer_index === 0 || draw_samples >= buffer_size * 4) {
 				requestAnimationFrame(function () {
 					draw_samples = 0;
-					app.engine.wavesurfer.DrawTemp ( starting_offset, temp_buffers );
+					if (!is_active || !temp_buffers.length) return;
+                    app.engine.wavesurfer.DrawTemp ( starting_offset, temp_buffers );
+                    app.fireEvent ('DidAudioProcess', [curr_offset / sample_rate, null, performance.now()]);
 				});
 			}
 		}

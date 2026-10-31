@@ -2736,6 +2736,11 @@ var WaveSurfer = function (_util$Observer) {
         value: function DrawTemp ( _offset, _arrays ) {
             this.backend.extraPeaks = _arrays;
             this.backend.extraOffset = _offset;
+            // Live samples may extend past the decoded buffer (one sample in an empty project).
+            // Scale the preview to seconds of captured audio, not that placeholder sample.
+            var samples = _arrays ? _arrays.reduce(function (sum, chunk) { return sum + chunk.length; }, 0) : 0;
+            this.backend.extraDuration = _arrays ? Math.max(5,
+                (_offset + samples) / this.backend.buffer.sampleRate) : 0;
 
             this.drawBuffer(1);
             var percent = this.backend.getPlayedPercents();
@@ -4403,7 +4408,7 @@ var WebAudio = function (_util$Observer) {
 
             // console.log( this.buffer.length, last );
 
-            var sampleSize = this.buffer.length / last;
+            var sampleSize = Math.max(this.buffer.length, this.extraDuration ? this.extraDuration * this.buffer.sampleRate : 0) / last;
             var sampleStep = ~~(sampleSize / 10) || 1;
 
             if (sampleStep > 32) sampleStep = 32; // todo
@@ -4592,7 +4597,7 @@ var WebAudio = function (_util$Observer) {
                     // var get length of peaks
                     var extra_len = this.extraPeaks.length;
                     var extra_arr_len = this.extraPeaks[0].length;
-                    var templength = extraoffset + ((extra_arr_len * extra_len) / sampleSize) >> 0;
+                    var templength = Math.min(length - 1, extraoffset + Math.ceil((this.extraPeaks.reduce(function (sum, chunk) { return sum + chunk.length; }, 0)) / sampleSize));
 
                     this.extraPeakStart = extraoffset;
                     this.extraPeakEnd = templength;
@@ -4605,7 +4610,7 @@ var WebAudio = function (_util$Observer) {
                         var i = void 0;
 
                         var k = 0;
-                        for (i = extraoffset; i <= templength; ++i)
+                        for (i = Math.max(0, extraoffset); i <= templength; ++i)
                         {
 
                             var start = k * sampleSize >> 0;
@@ -4868,7 +4873,7 @@ var WebAudio = function (_util$Observer) {
                 }
                 return 0;
             }
-            return this.buffer.duration;
+            return Math.max(this.buffer.duration, this.extraDuration || 0);
         }
 
         /**

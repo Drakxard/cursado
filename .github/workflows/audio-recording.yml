@@ -1,0 +1,28 @@
+name: Audio recording regression
+
+on:
+  push:
+    branches:
+      - codex/fix-audio-recording-freeze
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recording:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Audio storage and cooperation
+        run: node --test --experimental-strip-types tests/subject-audio.test.mts tests/subject-audio-cooperation.test.mts
+      - name: AudioMass recording, live rendering and native microphone
+        timeout-minutes: 3
+        run: node --test tests/subject-audio.browser.mjs

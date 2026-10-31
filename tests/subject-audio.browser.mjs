@@ -26,7 +26,7 @@ const bundle = build({
   } }],
 })
 
-async function setup(t) {
+async function setup(t, { nativeMicrophone = false } = {}) {
   const js = (await bundle).outputFiles[0].text
   const types = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.html': 'text/html', '.css': 'text/css', '.wasm': 'application/wasm' }
   const server = createServer(async (request, response) => {
@@ -37,13 +37,13 @@ async function setup(t) {
     catch { response.statusCode = 404; response.end() }
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const browser = await chromium.launch({ headless: true }); t.after(async () => { await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) })
-  const page = await browser.newPage({ viewport: { width: 1200, height: 850 } })
+  const browser = await chromium.launch({ headless: true, args: nativeMicrophone ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] : [] }); t.after(async () => { await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) })
+  const page = await browser.newPage({ viewport: { width: 1366, height: 850 }, permissions: nativeMicrophone ? ['microphone'] : [] })
   page.setDefaultTimeout(10000)
   page.on('pageerror', error => console.error('Browser error:', error.message))
   t.after(async () => { if (!t.passed && !page.isClosed()) console.error(await page.locator('body').innerText()) })
   await page.addInitScript(installAudioWorkspace)
-  await page.addInitScript(() => {
+  await page.addInitScript(({ nativeMicrophone }) => {
     window.recognitions = []
     window.SpeechRecognition = class {
       constructor() { window.recognitions.push(this) }
@@ -52,8 +52,8 @@ async function setup(t) {
       abort() { this.onend?.() }
     }
     window.micRequests = 0
-    navigator.mediaDevices.getUserMedia = async () => { window.micRequests++; throw Error('No microphone in test') }
-  })
+    if (!nativeMicrophone) navigator.mediaDevices.getUserMedia = async () => { window.micRequests++; throw Error('No microphone in test') }
+  }, { nativeMicrophone })
   await page.goto(`http://127.0.0.1:${server.address().port}`)
   await page.getByText('Pulsá + para grabar o importar un audio', { exact: true }).waitFor()
   return page
@@ -296,4 +296,74 @@ test('microphone failure allows retry and New Recording uses the timeline', asyn
   await frame.locator('.pk_transport .icon-rec').click()
   await frame.locator('.pk_transport .icon-rec.pk_act').waitFor({state:'hidden'})
   assert.ok(await editor.evaluate(() => window.PKAudioEditor.engine.wavesurfer.backend.buffer.duration) > .1)
+})
+
+
+test('live waveform uses the captured duration instead of the one-sample empty buffer', {timeout:30000}, async t => {
+  const page = await setup(t)
+  await page.keyboard.press('+'); await loadTone(page)
+  const editor = page.frames().find(frame=>frame.url().includes('/audiomass/'))
+  const result = await editor.evaluate(() => {
+    const wave = window.PKAudioEditor.engine.wavesurfer, backend = wave.backend
+    const context = backend.ac
+    wave.loadDecodedBuffer(context.createBuffer(1, 1, context.sampleRate))
+    const getPeaks = backend.getPeaks
+    // Abort before the old renderer can loop through hundreds of millions of offscreen pixels.
+    backend.getPeaks = function (...args) {
+      if (this.extraPeaks) {
+        const samples = this.extraPeaks.reduce((sum, chunk) => sum + chunk.length, 0)
+        if (this.getDuration() * this.buffer.sampleRate < this.extraOffset + samples)
+          throw Error('Live timeline is shorter than its captured samples; rendering would freeze')
+      }
+      return getPeaks.apply(this, args)
+    }
+    const samples = new Float32Array(context.sampleRate * 12)
+    for (let i=0;i<samples.length;i++) samples[i]=Math.sin(i * .1) * .2
+    const start = performance.now()
+    wave.DrawTemp(0, [samples])
+    const duration = wave.getDuration(), end = backend.extraPeakEnd, width = wave.drawer.getWidth()
+    const elapsed = performance.now() - start
+    wave.DrawTemp(null)
+    return {duration, end, width, elapsed, cleared: !backend.extraPeaks, restoredDuration: wave.getDuration()}
+  })
+  assert.ok(result.duration >= 12)
+  assert.ok(result.end <= result.width, JSON.stringify(result))
+  assert.ok(result.elapsed < 500, JSON.stringify(result))
+  assert.equal(result.cleared, true)
+  assert.ok(result.restoredDuration < .001)
+})
+
+
+test('native microphone keeps a full-size editor responsive during sustained recording', {timeout:45000}, async t => {
+  const page = await setup(t, { nativeMicrophone: true })
+  await page.keyboard.press('+')
+  const frame = page.frameLocator('iframe[title="AudioMass"]')
+  await frame.locator('.pk_transport .icon-rec').waitFor()
+  // The isolated React harness does not load Tailwind; match the deployed iframe dimensions.
+  await page.locator('iframe').evaluate(el => { el.style.width = '1320px'; el.style.height = '700px' })
+  const editor = page.frames().find(frame=>frame.url().includes('/audiomass/'))
+  await editor.evaluate(() => {
+    window.recordingTimes = []
+    window.PKAudioEditor.listenFor('DidAudioProcess', value => window.recordingTimes.push(value[0]))
+    window.heartbeat = 0
+    window.heartbeatTimer = setInterval(() => window.heartbeat++, 100)
+  })
+  await frame.locator('.pk_transport .icon-rec').click()
+  await frame.locator('.pk_transport .icon-rec.pk_act').waitFor()
+  await editor.waitForFunction(() => window.recordingTimes.at(-1) >= 8, null, {timeout:15000})
+  const live = await editor.evaluate(() => ({ticks: window.heartbeat, time: window.recordingTimes.at(-1),
+    end: window.PKAudioEditor.engine.wavesurfer.backend.extraPeakEnd,
+    width: window.PKAudioEditor.engine.wavesurfer.drawer.getWidth()}))
+  assert.ok(live.ticks >= 40, JSON.stringify(live))
+  assert.ok(live.end <= live.width, JSON.stringify(live))
+  const start = Date.now()
+  await frame.locator('.pk_transport .icon-rec').click()
+  await frame.locator('.pk_transport .icon-rec.pk_act').waitFor({state:'hidden'})
+  assert.ok(Date.now() - start < 3000, 'Stop must respond without freezing the page')
+  await requestSave(page)
+  await frame.getByLabel('Nombre del audio').fill('Grabacion sostenida')
+  await frame.getByRole('button', {name:'Confirmar audio',exact:true}).click()
+  await page.getByText('Grabacion sostenida',{exact:true}).waitFor()
+  const audio = await page.evaluate(async () => (await window.storage.loadAudioWorkspace('algebra')).audios[0])
+  assert.ok(audio.duration >= 7.5 && audio.duration < 15, JSON.stringify(audio))
 })
