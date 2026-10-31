@@ -6,8 +6,6 @@ const GRID = 24; // world units between the finest dots at 100% zoom
 const GRID_TARGET_PX = 24; // ideal on-screen dot spacing; the LOD steps keep the grid near this
 // Discrete zoom rungs (percent) the +/- buttons snap through.
 const ZOOM_STOPS = [1, 5, 10, 15, 20, 33, 50, 75, 100, 125, 150, 200, 250, 300, 350, 400, 450, 500];
-// One MediaQueryList, read per zoom-step (cheaper than constructing one each click).
-const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 /**
  * ViewportController — owns the board *camera*: the Konva stage's scale + position
@@ -26,9 +24,6 @@ export class ViewportController {
   // gradient-size/opacity writes and only nudges background-position.
   private gridFine = -1;
   private gridFade = -1;
-  // In-flight smooth zoom-step animation: rAF handle + destination scale.
-  private zoomAnim: number | null = null;
-  private zoomTarget: number | null = null;
   // Coalesces the downstream camera sync (chrome + text relayout + grid + Konva draw) to once per
   // animation frame. Wheel/pointer events fire far faster than frames (hundreds/s on a trackpad),
   // and the sync work is O(mounted objects) — running it per EVENT multiplied frame cost by the
@@ -71,7 +66,8 @@ export class ViewportController {
       this.interactiveSync = false;
       this.onTransform(interactive);
       this.syncGrid();
-      this.stage.batchDraw();
+      // Already inside the presentation frame: batchDraw would defer canvas pixels again.
+      this.stage.draw();
       this.notifyZoom();
     });
   }
@@ -109,53 +105,21 @@ export class ViewportController {
   zoomBy(factor: number): void {
     this.zoomAroundCenter(this.clamp(this.stage.scaleX() * factor), true);
   }
-  /** Snap zoom to the next discrete rung — dir > 0 = in, dir < 0 = out (ZOOM_STOPS),
-      tweened so it glides like a scroll-wheel landing exactly on the value. */
+  /** Snap directly to the next zoom rung, without an animation tail. */
   zoomStep(dir: number): void {
-    // Step from the pending animation target (if any) so rapid clicks chain rung-by-rung.
-    const pct = (this.zoomTarget ?? this.stage.scaleX()) * 100;
+    const pct = this.stage.scaleX() * 100;
     const max = ZOOM_STOPS[ZOOM_STOPS.length - 1] ?? 500;
     const min = ZOOM_STOPS[0] ?? 1;
     const next =
       dir > 0
         ? (ZOOM_STOPS.find((s) => s > pct + 0.5) ?? max)
         : ([...ZOOM_STOPS].reverse().find((s) => s < pct - 0.5) ?? min);
-    this.animateZoomToCenter(next / 100);
+    this.zoomAroundCenter(next / 100, true);
   }
 
-  /** Stop any in-flight zoom-step animation (other zoom gestures call this to take over). */
-  stopZoomAnim(): void {
-    if (this.zoomAnim !== null) cancelAnimationFrame(this.zoomAnim);
-    this.zoomAnim = null;
-    this.zoomTarget = null;
-  }
+  /** Kept for callers that cancel camera animations; direct zoom has none. */
+  stopZoomAnim(): void {}
 
-  /** Tween the zoom to `target` (scale) about the viewport centre — a wheel-like glide
-      that lands exactly on the value. Cancellable; instant under reduced-motion. */
-  private animateZoomToCenter(target: number): void {
-    this.stopZoomAnim();
-    const start = this.stage.scaleX();
-    if (REDUCED_MOTION.matches || Math.abs(target - start) < 1e-4) {
-      this.zoomAroundCenter(target, true);
-      return;
-    }
-    this.zoomTarget = target;
-    const t0 = performance.now();
-    const DUR = 180;
-    const ease = (t: number): number => 1 - Math.pow(1 - t, 3); // ease-out cubic
-    const tick = (now: number): void => {
-      const t = Math.min(1, (now - t0) / DUR);
-      // geometric (log-space) interpolation → perceptually even zoom
-      this.zoomAroundCenter(start * Math.pow(target / start, ease(t)), true);
-      if (t < 1) {
-        this.zoomAnim = requestAnimationFrame(tick);
-      } else {
-        this.zoomAnim = null;
-        this.zoomTarget = null;
-      }
-    };
-    this.zoomAnim = requestAnimationFrame(tick);
-  }
   resetZoom(): void {
     // Reset to the initial view: 100% zoom AND recenter the canvas (world origin at
     // the viewport center) — returns to exactly where the board opened.
@@ -325,7 +289,11 @@ export class ViewportController {
         x: (pointer.x - this.stage.x()) / oldScale,
         y: (pointer.y - this.stage.y()) / oldScale,
       };
-      const newScale = this.clamp(e.evt.deltaY > 0 ? oldScale / 1.08 : oldScale * 1.08);
+      // Normalize line/page wheels while preserving fractional trackpad/pinch input.
+      const unit = e.evt.deltaMode === 1 ? 16 : e.evt.deltaMode === 2 ? this.stage.height() : 1;
+      const delta = e.evt.deltaY * unit;
+      if (!Number.isFinite(delta) || delta === 0) return;
+      const newScale = this.clamp(oldScale * Math.exp(-Math.max(-100, Math.min(100, delta)) * .002));
       this.stage.scale({ x: newScale, y: newScale });
       this.stage.position({
         x: pointer.x - origin.x * newScale,

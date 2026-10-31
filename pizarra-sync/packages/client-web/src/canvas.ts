@@ -369,6 +369,7 @@ export class BoardCanvas {
   }
   /** Window listeners kept as fields so destroy() can detach them (else they leak / fire on a dead stage). */
   private readonly onWindowBlur = (): void => {
+    this.stopHandPan();
     this.opts.awareness.setLocalStateField("cursor", null);
   };
   private readonly onWindowPointerUp = (): void => {
@@ -400,6 +401,7 @@ export class BoardCanvas {
       container: opts.container as HTMLDivElement,
       width: opts.container.clientWidth,
       height: opts.container.clientHeight,
+      dragDistance: 0, // hand navigation starts with the first pixel, including its full delta
     });
     this.stage.add(this.overlay);
     this.stage.add(this.uiLayer);
@@ -418,11 +420,15 @@ export class BoardCanvas {
       opts.container,
       interactive => {
         this.scaleCursors();
-        this.syncCursorStage(); // keep the cursor stage locked to the camera
-        if (this.textLayer.syncTransform(interactive)) return;
+        this.syncCursorStage(false); // camera callback presents all layers in this frame
+        if (this.textLayer.syncTransform(interactive)) {
+          this.cursorLayer.draw();
+          return;
+        }
         this.renderSelectionBoxes();
         this.renderRemoteSelections(true); // zoom changes screen-space geometry → force rebuild
         this.updateConnectorChrome(); // keep the endpoint handles locked to the camera
+        this.cursorLayer.draw(); // present with DOM/grid, without another batchDraw frame
       },
       opts.viewKey,
     );
@@ -490,11 +496,6 @@ export class BoardCanvas {
     this.objects.observeDeep(() => this.onDocChanged());
 
     this.bindPointer();
-    // Hand-pan moves the viewport without a zoom transform, so re-cull + re-sync text on drag too
-    // (frame-coalesced — dragmove fires per pointer event, far faster than frames).
-    this.stage.on("dragmove", () => {
-      this.viewport.scheduleSync();
-    });
     this.bindSelection();
     this.bindTouch();
     this.bindDragCursor();
@@ -540,6 +541,7 @@ export class BoardCanvas {
       this.currentConnector = null;
       this.textLayer.setConnectorMode(false);
     }
+    if (tool !== "hand") this.stopHandPan();
     this.tool = tool;
     this.stage.draggable(tool === "hand");
     this.stage.container().style.cursor =
@@ -2866,6 +2868,20 @@ export class BoardCanvas {
     });
     this.stage.on("touchstart", (e) => {
       if (placing()) e.evt.preventDefault();
+      const touches = (e.evt as TouchEvent).touches;
+      if (touches.length < 2) return;
+      const a = touches[0], b = touches[1];
+      if (!a || !b) return;
+      e.evt.preventDefault();
+      this.cancelGestures();
+      // Clear even an armed hand drag so its next mouse/touch event cannot overwrite the pinch.
+      this.stage.stopDrag();
+      const rect = this.stage.container().getBoundingClientRect();
+      this.pinch = {
+        dist: Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY),
+        cx: (a.clientX + b.clientX) / 2 - rect.left,
+        cy: (a.clientY + b.clientY) / 2 - rect.top,
+      };
     });
     this.stage.on("touchmove", (e) => {
       const touches = (e.evt as TouchEvent).touches;
@@ -2881,7 +2897,7 @@ export class BoardCanvas {
       const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
       this.cancelGestures(); // a 2nd finger turns any draw/marquee/move into a pinch
       if (this.stage.isDragging()) this.stage.stopDrag();
-      if (!this.pinch) {
+      if (!this.pinch || this.pinch.dist === 0 || dist === 0) {
         this.pinch = { dist, cx: center.x, cy: center.y };
         return;
       }
@@ -2929,7 +2945,16 @@ export class BoardCanvas {
   }
 
   // ---- hand-pan cursor (wheel-zoom + grid tracking live in ViewportController) ----
+  private readonly stopHandPan = (): void => {
+    this.pinch = null;
+    // Also clear a drag armed by mousedown but cancelled before its first movement.
+    if (this.tool === "hand") this.stage.stopDrag();
+    if (this.tool === "hand") this.stage.container().style.cursor = "grab";
+  };
+
   private bindDragCursor(): void {
+    window.addEventListener("pointercancel", this.stopHandPan);
+    window.addEventListener("touchcancel", this.stopHandPan);
     // Grab → grabbing while the hand tool is actively dragging.
     this.stage.on("dragstart", () => {
       if (this.tool === "hand") this.stage.container().style.cursor = "grabbing";
@@ -3021,11 +3046,13 @@ export class BoardCanvas {
 
   /** Mirror the main camera transform + size onto the cursor stage so its world-space cursors line
    *  up exactly with the board, then redraw. (The cursor stage sits above the HTML text overlay.) */
-  private syncCursorStage(): void {
+  private syncCursorStage(scheduleDraw = true): void {
     this.cursorStage.scale({ x: this.stage.scaleX(), y: this.stage.scaleY() });
     this.cursorStage.position(this.stage.position());
-    this.cursorStage.size({ width: this.stage.width(), height: this.stage.height() });
-    this.cursorLayer.batchDraw();
+    if (this.cursorStage.width() !== this.stage.width() || this.cursorStage.height() !== this.stage.height()) {
+      this.cursorStage.size({ width: this.stage.width(), height: this.stage.height() });
+    }
+    if (scheduleDraw) this.cursorLayer.batchDraw();
   }
 
   /**
@@ -3077,6 +3104,8 @@ export class BoardCanvas {
     if (this.connGlideRaf) cancelAnimationFrame(this.connGlideRaf);
     this.connectorBar.destroy();
     this.opts.awareness.off("change", this.onAwarenessChange);
+    window.removeEventListener("pointercancel", this.stopHandPan);
+    window.removeEventListener("touchcancel", this.stopHandPan);
     window.removeEventListener("blur", this.onWindowBlur);
     window.removeEventListener("pointerup", this.onWindowPointerUp);
     this.resizeObserver?.disconnect();
