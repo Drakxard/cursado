@@ -46,7 +46,7 @@ test("image context menu downloads original bytes, including locked images, and 
     await expect(page.locator(".ctx-menu")).toBeVisible();
     await expect(page.locator('.ctx-item[data-act="downloadImage"]')).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await page.locator("#board").click({ button: "right", position: { x: 30, y: 40 } });
+    await page.locator("#board").click({ button: "right", position: { x: 150, y: 200 } });
     await expect(page.locator(".ctx-menu")).toBeVisible();
     await expect(page.locator('.ctx-item[data-act="downloadImage"]')).toHaveCount(0);
   } finally { await close(); }
