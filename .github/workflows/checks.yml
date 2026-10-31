@@ -291,6 +291,9 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - name: Camara, geometria y gestos
         run: pnpm exec playwright test e2e/camera-direct.spec.ts e2e/viewport.spec.ts --trace on
+      - name: Preparar Chromium de las pruebas de integracion
+        run: npx playwright install chromium
+        working-directory: .
       - name: Insertar y editar diagramas con la pizarra compilada tras una actualizacion
         run: node scripts/test-study-board.mjs --test-name-pattern="diagram chooser"
         working-directory: .
