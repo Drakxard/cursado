@@ -102,13 +102,35 @@ export function StudyImageViewer({ images, initialId, onClose }: { images: Study
         element: host.current, showNavigationControl: false, showNavigator: false,
         drawer: DeferredCanvasDrawer,
         immediateRender: true, maxImageCacheCount: 12, maxZoomPixelRatio: 4, blendTime: 0,
-        animationTime: 0.15, visibilityRatio: 0.8, constrainDuringPan: true,
+        animationTime: 0, minScrollDeltaTime: 0, visibilityRatio: 0.8, constrainDuringPan: true,
+        gestureSettingsMouse: { flickEnabled: false },
+        gestureSettingsTouch: { flickEnabled: false },
+        gestureSettingsPen: { flickEnabled: false },
+        gestureSettingsUnknown: { flickEnabled: false },
         tileSources: source,
       })
       instance.setKeyboardNavEnabled(false)
       instance.addHandler('animation-start', start)
-      instance.addHandler('canvas-scroll', start)
-      instance.addHandler('canvas-drag', start)
+      instance.addHandler('canvas-scroll', event => {
+        if (!instance?.world.getItemCount()) return
+        event.preventDefaultAction = true
+        const wheel = event.originalEvent as WheelEvent
+        const unit = wheel.deltaMode === 1 ? 16 : wheel.deltaMode === 2 ? host.current!.clientHeight : 1
+        const delta = wheel.deltaY * unit
+        if (!Number.isFinite(delta) || delta === 0) return
+        start()
+        instance.viewport.zoomBy(Math.exp(-Math.max(-100, Math.min(100, delta)) * .002), instance.viewport.pointFromPixel(event.position, true), true)
+        instance.viewport.applyConstraints(true)
+        positionPreview()
+      })
+      instance.addHandler('canvas-drag', event => {
+        if (!instance?.world.getItemCount()) return
+        event.preventDefaultAction = true
+        start()
+        instance.viewport.panBy(instance.viewport.deltaPointsFromPixels(event.delta.negate(), true), true)
+        instance.viewport.applyConstraints(true)
+        positionPreview()
+      })
       instance.addHandler('canvas-pinch', start)
       instance.addHandler('viewport-change', () => { if (moving) { positionPreview(); scheduleDetail() } })
       instance.addHandler('animation-finish', scheduleDetail)

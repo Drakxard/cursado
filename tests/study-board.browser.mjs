@@ -750,6 +750,22 @@ test('image reader opens on double click, loads one image at a time and returns 
   assert.ok(await page.evaluate(() => window.readerDetailDraws) > 0)
   await page.evaluate(() => { window.readerDetailDraws = 0 })
   await page.mouse.move(700, 500); await page.mouse.down()
+  const projection = () => reader.locator('[data-study-image-preview]').evaluate(canvas => {
+    const matrix = new DOMMatrix(canvas.style.transform)
+    return { x: matrix.m41, y: matrix.m42, scale: matrix.m11 }
+  })
+  // A single pixel must be presented in full, with no spring following behind the pointer.
+  const dragStart = await projection()
+  await page.mouse.move(701, 501)
+  const firstPixel = await projection()
+  assert.ok(Math.abs(firstPixel.x - dragStart.x - 1) < .05)
+  assert.ok(Math.abs(firstPixel.y - dragStart.y - 1) < .05)
+  await page.mouse.move(699, 499)
+  const reversed = await projection()
+  assert.ok(Math.abs(reversed.x - firstPixel.x + 2) < .05)
+  assert.ok(Math.abs(reversed.y - firstPixel.y + 2) < .05)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  assert.deepEqual(await projection(), reversed, 'the viewer must not continue interpolating between inputs')
   await page.mouse.move(900, 600, { steps: 10 })
   await expect(surface).toHaveAttribute('data-render-mode', 'preview')
   assert.equal(await page.evaluate(() => window.readerDetailDraws), 0)

@@ -283,6 +283,9 @@ jobs:
         working-directory: .
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @komuboard/client-web typecheck
+      - name: Comprobar tipos del visor y la aplicacion
+        run: npm run typecheck
+        working-directory: .
       - name: Compilar la pizarra de estudio integrada
         run: node scripts/build-study-board.mjs
         working-directory: .
@@ -295,7 +298,7 @@ jobs:
         run: npx playwright install chromium
         working-directory: .
       - name: Insertar y editar diagramas con la pizarra compilada tras una actualizacion
-        run: node scripts/test-study-board.mjs --test-name-pattern="diagram chooser"
+        run: node scripts/test-study-board.mjs --test-name-pattern="diagram chooser|image reader opens"
         working-directory: .
         env:
           STUDY_TEST_BUILT: '1'
