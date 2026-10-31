@@ -371,18 +371,23 @@ test('native microphone keeps a full-size editor responsive during sustained rec
 
 test('dragged audio selection stays visible on the light waveform', async t => {
   const page = await setup(t)
-  await page.keyboard.press('+'); await loadTone(page)
+  await page.keyboard.press('+')
+  await page.locator('iframe').waitFor()
   await page.locator('iframe').evaluate(el => { el.style.width = '1320px'; el.style.height = '700px' })
+  await loadTone(page)
   const editor = page.frames().find(frame=>frame.url().includes('/audiomass/'))
-  const box = await editor.evaluate(() => {
-    const rect = window.PKAudioEditor.engine.wavesurfer.drawer.wrapper.getBoundingClientRect()
-    return {x:rect.x,y:rect.y,width:rect.width,height:rect.height}
+  await editor.waitForFunction(() => {
+    const box = window.PKAudioEditor.engine.wavesurfer.drawer.wrapper.getBoundingClientRect()
+    return box.width > 1000 && box.height > 100 && box.bottom <= innerHeight
   })
-  const iframe = await page.locator('iframe').boundingBox()
-  const y = iframe.y + box.y + box.height / 2
-  await page.mouse.move(iframe.x + box.x + box.width * .2, y)
+  // Playwright returns top-level coordinates for elements inside an iframe.
+  const waveform = page.frameLocator('iframe[title="AudioMass"]').locator('wave').first()
+  await waveform.scrollIntoViewIfNeeded()
+  const box = await waveform.boundingBox()
+  const y = box.y + Math.min(100, box.height / 2)
+  await page.mouse.move(box.x + box.width * .2, y)
   await page.mouse.down()
-  await page.mouse.move(iframe.x + box.x + box.width * .6, y, {steps:12})
+  await page.mouse.move(box.x + box.width * .6, y, {steps:12})
   await page.mouse.up()
   const region = page.frameLocator('iframe[title="AudioMass"]').locator('region.wavesurfer-region')
   await region.waitFor()
