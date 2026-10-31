@@ -109,6 +109,8 @@ export interface TextLayerOptions {
   /** Fired each frame a shape's geometry changes visually (local drag/resize, peer glide) so the
    *  canvas can re-route connectors bound to it live (not just on the doc commit). */
   onShapesMoved?: () => void;
+  /** Refresh screen-sized canvas chrome after the composited camera settles. */
+  onCameraSettled?: () => void;
   /** Ungroup the current selection — fired by the group box's "Ungroup" chip. The canvas owns the
    *  ungroup (it spans both selection subsystems). */
   onUngroup?: () => void;
@@ -346,6 +348,7 @@ export class TextLayer {
    *  <svg> hides while the peer's glide draft (`remote:<id>`) shows, so there's no double-draw. */
   private remoteInkHidden = new Set<string>();
   private readonly onAwareness = (): void => {
+    if (this.remoteEdits.size) this.finishCameraMotion();
     this.renderRemoteEdits();
     this.renderRemoteSelDrag();
   };
@@ -485,6 +488,7 @@ export class TextLayer {
     this.root = document.createElement("div");
     this.root.className = "text-layer";
     opts.container.appendChild(this.root);
+    opts.container.addEventListener('pointerdown', this.finishCameraMotion, true);
     // Links are pointer-events:none (a click must reach the canvas to select/drag the box), so link
     // hover is detected by hit-testing pointer moves over the board rather than mouseover on the link.
     opts.container.addEventListener("pointermove", this.onHoverMove, true);
@@ -545,6 +549,7 @@ export class TextLayer {
 
   /** Reconcile display elements with the doc's text objects (z-ordered), then lay them out. */
   private render(): void {
+    this.finishCameraMotion();
     const order = orderArray(this.opts.doc).toArray();
     const cull = this.cullRect();
     const seen = new Set<string>();
@@ -587,6 +592,7 @@ export class TextLayer {
     if (this.edit) this.root.appendChild(this.edit.el); // keep the editor on top of the re-stacked boxes
     if (this.stickyGhost) this.root.appendChild(this.stickyGhost); // …and the placement ghost above all
     if (this.stampGhost) this.root.appendChild(this.stampGhost); // stamp preview stays above objects too
+    this.renderedCamera = { ...this.opts.camera() };
   }
 
   /** Create (if absent) + paint + lay out one object's element and (re)append it in z-order. Shared by
@@ -1572,8 +1578,69 @@ export class TextLayer {
     }
   }
 
-  /** Re-run layout for every box + the editor + peers' live edits after a camera change. */
-  syncTransform(): void {
+  private renderedCamera: Camera | null = null;
+  private cameraBase: Camera | null = null;
+  private previewCamera: Camera | null = null;
+  private cameraTimer: ReturnType<typeof setTimeout> | null = null;
+  private cameraArea = { width: 0, height: 0 };
+
+  /** A fresh edit/document update must use the current camera, never a stale preview. */
+  readonly finishCameraMotion = (): void => {
+    if (this.cameraBase) this.syncTransform();
+  };
+  private readonly settleCameraMotion = (): void => {
+    if (!this.cameraBase) return;
+    const current = this.opts.camera(), painted = this.previewCamera;
+    // Input can advance the camera before a busy browser delivers its next rAF.
+    // Do not mistake that pending frame for an idle gesture and relayout mid-zoom.
+    if (painted && (current.scale !== painted.scale || current.x !== painted.x || current.y !== painted.y)) {
+      this.cameraTimer = setTimeout(this.settleCameraMotion, 140);
+      return;
+    }
+    this.finishCameraMotion();
+  };
+
+  /** Gesture frames change one compositor transform, leaving text/SVG/image layout
+   *  cached. Rebase when the camera exhausts the culling margin, then restore crisp
+   *  screen-space layout once the gesture is quiet. */
+  syncTransform(interactive = false): boolean {
+    if (interactive && this.renderedCamera && !this.edit && !this.moveState && !this.resizing && !this.rotating &&
+      !this.groupResize && !this.groupRotate && !this.groupPreview && !this.stickyGhost && !this.stampGhost &&
+      !this.glideRaf && !this.remoteEdits.size && !this.remoteDrag.size && !this.remoteResize.size && !this.remoteRotate.size) {
+      const camera = this.opts.camera();
+      const base = this.cameraBase || this.renderedCamera;
+      const scale = camera.scale / base.scale;
+      const x = camera.x - base.x * scale, y = camera.y - base.y * scale;
+      const area = this.cameraArea;
+      if (this.cameraBase && (-x / scale < -area.width * .45 || -y / scale < -area.height * .45 ||
+        (area.width - x) / scale > area.width * 1.45 || (area.height - y) / scale > area.height * 1.45)) {
+        this.syncTransform(); // refresh newly visible objects before the cached margin runs out
+        return this.syncTransform(true);
+      }
+      if (!this.cameraBase) {
+        this.cameraBase = { ...base };
+        this.cameraArea = { width: this.opts.container.clientWidth, height: this.opts.container.clientHeight };
+        this.root.style.transformOrigin = '0 0';
+        this.root.style.willChange = 'transform';
+        this.root.style.overflow = 'visible'; // the board clips; cached off-screen objects may enter
+        this.root.dataset.cameraMotion = 'true';
+      }
+      this.root.style.transform = `matrix(${scale},0,0,${scale},${x},${y})`;
+      this.previewCamera = { ...camera };
+      if (this.cameraTimer !== null) clearTimeout(this.cameraTimer);
+      this.cameraTimer = setTimeout(this.settleCameraMotion, 140);
+      return true;
+    }
+    const wasMoving = this.cameraBase !== null;
+    this.cameraBase = null;
+    this.previewCamera = null;
+    if (this.cameraTimer !== null) clearTimeout(this.cameraTimer);
+    this.cameraTimer = null;
+    this.root.style.removeProperty('transform');
+    this.root.style.removeProperty('will-change');
+    this.root.style.removeProperty('transform-origin');
+    this.root.style.removeProperty('overflow');
+    delete this.root.dataset.cameraMotion;
     this.recull(); // the camera moved → mount what scrolled in, unmount what left, before repositioning
     // Camera-only relayout: recorded sizes are WORLD-space, which a camera change can't alter, so
     // skip layout()'s measurement — interleaved offset reads would force a reflow per element, and
@@ -1612,6 +1679,9 @@ export class TextLayer {
     }
     this.positionBar(); // follows the editor OR the selection-mode box as the camera moves
     this.updateResizeChrome();
+    this.renderedCamera = { ...this.opts.camera() };
+    if (wasMoving) this.opts.onCameraSettled?.();
+    return false;
   }
 
   // ---- hit-testing ----
@@ -1874,6 +1944,7 @@ export class TextLayer {
   }
 
   private beginEdit(id: string, selectAll = false, caretAt?: { x: number; y: number }): void {
+    this.finishCameraMotion();
     const m = this.objects.get(id);
     const obj = m ? readObject(m) : null;
     if (obj?.type !== "text" || obj.locked || (obj.study && obj.study.kind !== 'pdf')) return;
@@ -4233,6 +4304,7 @@ export class TextLayer {
     const dragChanged = !sameDragMap(drag, this.remoteDrag);
     const resizeChanged = !sameResizeMap(resize, this.remoteResize);
     const rotateChanged = !sameNumMap(rotate, this.remoteRotate);
+    if (selChanged || dragChanged || resizeChanged || rotateChanged) this.finishCameraMotion();
     // Boxes that gained or lost a remote rotation (computed from old+new before committing).
     const rotateAffected = rotateChanged
       ? new Set([...rotate.keys(), ...this.remoteRotate.keys()])
@@ -4481,6 +4553,7 @@ export class TextLayer {
       const te = st.textedit as TextEditState | undefined;
       if (!te || typeof te !== "object" || !Array.isArray(te.runs)) continue;
       if (typeof te.x !== "number" || typeof te.y !== "number") continue;
+      this.finishCameraMotion();
       any = true;
       active.add(cid);
       if (typeof te.id === "string") editingIds.add(te.id);
@@ -4620,6 +4693,9 @@ export class TextLayer {
   }
 
   destroy(): void {
+    if (this.cameraTimer !== null) clearTimeout(this.cameraTimer);
+    this.cameraTimer = null;
+    this.cameraBase = null;
     if (this.edit) this.commit();
     this.opts.awareness.off("change", this.onAwareness);
     this.objects.unobserveDeep(this.observer);
@@ -4634,6 +4710,7 @@ export class TextLayer {
     this.bar.destroy();
     this.removeLinkCard();
     this.opts.container.removeEventListener("pointermove", this.onHoverMove, true);
+    this.opts.container.removeEventListener('pointerdown', this.finishCameraMotion, true);
     document.removeEventListener("selectionchange", this.onSelChange);
     this.root.remove();
     this.els.clear();

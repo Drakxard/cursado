@@ -592,6 +592,88 @@ test('study URL reload restores the current nested board and closing clears its 
   assert.deepEqual(errors, [])
 })
 
+test('dense Study board composites zoom and pan frames, then restores crisp geometry and editing', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
+  await context.route('**/img/zoom-diagram.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="8192"><rect width="4096" height="8192" fill="white"/><path d="M0 0L4096 8192" stroke="black"/></svg>' }))
+  const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message))
+  await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openBoard)
+  await page.evaluate(() => window.openBoard('dense-zoom')); await loaded(page)
+  const frame = engine(page)
+  await frame.evaluate(() => {
+    const { doc, canvas } = window.__komuboard, objects = doc.getMap('objects')
+    doc.transact(() => {
+      const order = []
+      for (let index = 0; index < 240; index++) {
+        const id = 'dense-' + index, map = new objects.constructor()
+        objects.set(id, map)
+        const value = { id, type: 'text', authorId: 'test', x: 80 + index % 20 * 60, y: 130 + Math.floor(index / 20) * 48, width: 58, height: 30, fontSize: 12, fontFamily: 'system-ui', align: 'left', runs: [{ text: 'Elemento ' + index }] }
+        for (const [key, entry] of Object.entries(value)) map.set(key, entry)
+        order.push(id)
+      }
+      for (let index = 0; index < 4; index++) {
+        const id = 'zoom-image-' + index, map = new objects.constructor()
+        objects.set(id, map)
+        for (const [key, value] of Object.entries({ id, type: 'image', authorId: 'test', src: 'zoom-diagram.svg', x: 1800 + index * 250, y: 200, width: 200, height: 400 })) map.set(key, value)
+        order.push(id)
+      }
+      doc.getArray('order').push(order)
+    })
+    canvas.setTool('select'); canvas.restoreStudyView({ x: 0, y: 0, zoom: 1 })
+  })
+  const element = frame.locator('[data-id="dense-100"]'), layer = frame.locator('.text-layer')
+  await expect(element).toBeVisible()
+  const original = await element.getAttribute('style')
+  await frame.evaluate(() => {
+    window.childCameraWrites = 0
+    window.cameraObserver = new MutationObserver(records => { window.childCameraWrites += records.filter(record => record.target !== document.querySelector('.text-layer') && record.attributeName === 'style').length })
+    window.cameraObserver.observe(document.querySelector('.text-layer'), { subtree: true, attributes: true, attributeFilter: ['style'] })
+  })
+  const iframeBox = await page.locator('iframe').first().boundingBox()
+  await page.mouse.move(iframeBox.x + 700, iframeBox.y + 500)
+  const during = await frame.evaluate(async () => {
+    const target = document.querySelector('.konvajs-content canvas')
+    for (let step = 0; step < 5; step++) {
+      target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 700, clientY: 500, deltaY: -30 }))
+      await new Promise(resolve => requestAnimationFrame(resolve))
+    }
+    return { writes: window.childCameraWrites, style: document.querySelector('[data-id="dense-100"]').getAttribute('style'), transform: document.querySelector('.text-layer').style.transform, moving: document.querySelector('.text-layer').dataset.cameraMotion }
+  })
+  assert.equal(during.moving, 'true')
+  assert.equal(during.style, original)
+  assert.equal(during.writes, 0)
+  assert.notEqual(during.transform, '')
+  await expect(layer).not.toHaveAttribute('data-camera-motion', 'true')
+  const geometry = await frame.evaluate(() => {
+    const { canvas, doc } = window.__komuboard, view = canvas.captureStudyReviewView(), el = document.querySelector('[data-id="dense-100"]'), rect = el.getBoundingClientRect()
+    return { zoom: view.zoom, width: rect.width, styleWidth: parseFloat(el.style.width), sourceWidth: doc.getMap('objects').get('dense-100').get('width') }
+  })
+  assert.ok(Math.abs(geometry.width - geometry.sourceWidth * geometry.zoom) < 1)
+  assert.ok(Math.abs(geometry.styleWidth - geometry.sourceWidth * geometry.zoom) < .01)
+  // Large camera changes must mount newly visible images rather than leave holes.
+  await frame.evaluate(() => window.__komuboard.canvas.restoreStudyView({ x: 0, y: 0, zoom: .4 }))
+  await expect(frame.locator('.komu-image')).toHaveCount(4)
+  await frame.evaluate(() => { window.cameraObserver.disconnect(); window.__komuboard.canvas.setTool('hand') })
+  await page.mouse.move(iframeBox.x + 700, iframeBox.y + 700); await page.mouse.down()
+  await page.mouse.move(iframeBox.x + 800, iframeBox.y + 750, { steps: 5 })
+  await expect(layer).toHaveAttribute('data-camera-motion', 'true')
+  await page.mouse.up(); await expect(layer).not.toHaveAttribute('data-camera-motion', 'true')
+  // A new pointer action immediately flushes the preview before selection/hit testing.
+  await page.mouse.wheel(0, -30); await expect(layer).toHaveAttribute('data-camera-motion', 'true')
+  await frame.evaluate(() => window.__komuboard.canvas.setTool('select'))
+  await expect(layer).not.toHaveAttribute('data-camera-motion', 'true')
+  await page.mouse.wheel(0, -30); await expect(layer).toHaveAttribute('data-camera-motion', 'true')
+  const updated = await frame.evaluate(() => {
+    const { canvas, doc } = window.__komuboard
+    doc.getMap('objects').get('dense-100').set('x', 130)
+    const view = canvas.worldViewport(), zoom = canvas.captureStudyReviewView().zoom
+    return { left: parseFloat(document.querySelector('[data-id="dense-100"]').style.left), expected: (130 - view.x) * zoom }
+  })
+  await expect(layer).not.toHaveAttribute('data-camera-motion', 'true')
+  assert.ok(Math.abs(updated.left - updated.expected) < .01)
+  assert.deepEqual(errors, [])
+})
+
 test('image reader opens on double click, loads one image at a time and returns without editing the board', { timeout: 60000 }, async t => {
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)

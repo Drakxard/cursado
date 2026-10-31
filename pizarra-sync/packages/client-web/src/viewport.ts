@@ -36,6 +36,8 @@ export class ViewportController {
   // gesture math always reads fresh values); only the visual re-sync is deferred, and everything
   // it drives (Konva draw, CSS grid, DOM boxes) updates atomically in the same frame.
   private syncScheduled = false;
+  private syncFrame = 0;
+  private interactiveSync = false;
 
   // Debounced persistence of the camera (pan/zoom), keyed by storageKey, so a reload restores
   // exactly where the user was instead of resetting + auto-fitting.
@@ -45,25 +47,29 @@ export class ViewportController {
     private readonly stage: Konva.Stage,
     private readonly container: HTMLElement,
     /** Re-sync viewport-dependent chrome owned by BoardCanvas (cursors, transformer, outlines). */
-    private readonly onTransform: () => void,
+    private readonly onTransform: (interactive: boolean) => void,
     /** localStorage key to persist this board's camera across reloads; omitted = no persistence. */
     private readonly storageKey?: string,
   ) {
     this.bindWheel();
     this.stage.on("dragmove", () => {
-      this.scheduleSync(); // hand-pan: keep the grid + chrome + text under the camera (per frame)
+      this.scheduleSync(true); // hand-pan: composite the existing layer during the gesture
       this.scheduleSave();
     });
     this.syncGrid();
   }
 
   /** Run the full downstream camera sync at most once per animation frame (see syncScheduled). */
-  scheduleSync(): void {
+  scheduleSync(interactive = false): void {
+    this.interactiveSync ||= interactive;
     if (this.syncScheduled) return;
     this.syncScheduled = true;
-    requestAnimationFrame(() => {
+    this.syncFrame = requestAnimationFrame(() => {
+      this.syncFrame = 0;
       this.syncScheduled = false;
-      this.onTransform(); // BoardCanvas re-syncs cursors / transform box / selection outlines
+      const interactive = this.interactiveSync;
+      this.interactiveSync = false;
+      this.onTransform(interactive);
       this.syncGrid();
       this.stage.batchDraw();
       this.notifyZoom();
@@ -101,7 +107,7 @@ export class ViewportController {
   }
 
   zoomBy(factor: number): void {
-    this.zoomAroundCenter(this.clamp(this.stage.scaleX() * factor));
+    this.zoomAroundCenter(this.clamp(this.stage.scaleX() * factor), true);
   }
   /** Snap zoom to the next discrete rung — dir > 0 = in, dir < 0 = out (ZOOM_STOPS),
       tweened so it glides like a scroll-wheel landing exactly on the value. */
@@ -130,7 +136,7 @@ export class ViewportController {
     this.stopZoomAnim();
     const start = this.stage.scaleX();
     if (REDUCED_MOTION.matches || Math.abs(target - start) < 1e-4) {
-      this.zoomAroundCenter(target);
+      this.zoomAroundCenter(target, true);
       return;
     }
     this.zoomTarget = target;
@@ -140,7 +146,7 @@ export class ViewportController {
     const tick = (now: number): void => {
       const t = Math.min(1, (now - t0) / DUR);
       // geometric (log-space) interpolation → perceptually even zoom
-      this.zoomAroundCenter(start * Math.pow(target / start, ease(t)));
+      this.zoomAroundCenter(start * Math.pow(target / start, ease(t)), true);
       if (t < 1) {
         this.zoomAnim = requestAnimationFrame(tick);
       } else {
@@ -185,11 +191,11 @@ export class ViewportController {
   }
 
   /** Low-level: set the camera transform directly (used by pinch), then re-sync. */
-  applyTransform(scale: number, position: { x: number; y: number }): void {
+  applyTransform(scale: number, position: { x: number; y: number }, interactive = false): void {
     this.stopZoomAnim();
     this.stage.scale({ x: scale, y: scale });
     this.stage.position(position);
-    this.afterTransform();
+    this.afterTransform(interactive);
   }
 
   /** Resize the stage to the container (called from BoardCanvas's ResizeObserver). */
@@ -244,8 +250,8 @@ export class ViewportController {
     this.zoomListener?.(this.getZoomPercent());
   }
 
-  private afterTransform(): void {
-    this.scheduleSync();
+  private afterTransform(interactive = false): void {
+    this.scheduleSync(interactive);
     this.scheduleSave();
   }
 
@@ -298,14 +304,14 @@ export class ViewportController {
     }
   }
 
-  private zoomAroundCenter(newScale: number): void {
+  private zoomAroundCenter(newScale: number, interactive = false): void {
     const old = this.stage.scaleX();
     const cx = this.stage.width() / 2;
     const cy = this.stage.height() / 2;
     const origin = { x: (cx - this.stage.x()) / old, y: (cy - this.stage.y()) / old };
     this.stage.scale({ x: newScale, y: newScale });
     this.stage.position({ x: cx - origin.x * newScale, y: cy - origin.y * newScale });
-    this.afterTransform();
+    this.afterTransform(interactive);
   }
 
   private bindWheel(): void {
@@ -325,7 +331,18 @@ export class ViewportController {
         x: pointer.x - origin.x * newScale,
         y: pointer.y - origin.y * newScale,
       });
-      this.afterTransform();
+      this.afterTransform(true);
     });
+  }
+
+  destroy(): void {
+    this.stopZoomAnim();
+    cancelAnimationFrame(this.syncFrame);
+    if (this.saveTimer !== null) {
+      clearTimeout(this.saveTimer);
+      if (this.storageKey) {
+        try { localStorage.setItem(this.storageKey, JSON.stringify({ s: this.scale(), x: this.stage.x(), y: this.stage.y() })) } catch { /* Storage may be unavailable. */ }
+      }
+    }
   }
 }

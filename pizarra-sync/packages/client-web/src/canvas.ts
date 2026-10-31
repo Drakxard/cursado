@@ -416,12 +416,12 @@ export class BoardCanvas {
     this.viewport = new ViewportController(
       this.stage,
       opts.container,
-      () => {
+      interactive => {
         this.scaleCursors();
         this.syncCursorStage(); // keep the cursor stage locked to the camera
+        if (this.textLayer.syncTransform(interactive)) return;
         this.renderSelectionBoxes();
         this.renderRemoteSelections(true); // zoom changes screen-space geometry → force rebuild
-        this.textLayer.syncTransform(); // keep HTML text boxes (incl. connector <svg>) locked to the camera
         this.updateConnectorChrome(); // keep the endpoint handles locked to the camera
       },
       opts.viewKey,
@@ -432,6 +432,11 @@ export class BoardCanvas {
       doc: opts.doc,
       awareness: opts.awareness,
       camera: () => ({ scale: this.stage.scaleX(), x: this.stage.x(), y: this.stage.y() }),
+      onCameraSettled: () => {
+        this.renderSelectionBoxes();
+        this.renderRemoteSelections(true);
+        this.updateConnectorChrome();
+      },
       onSelectionChange: () => {
         // Re-evaluate the transform box vs the union group box for the new combined selection,
         // redraw the group box, fold the text selection into the count, and broadcast it so peers
@@ -509,6 +514,7 @@ export class BoardCanvas {
   }
 
   setTool(tool: ToolId): void {
+    this.textLayer.finishCameraMotion();
     if (this.tool === "select" && tool !== "select") {
       this.clearSelection();
       this.cancelMarquee();
@@ -2889,7 +2895,7 @@ export class BoardCanvas {
       this.viewport.applyTransform(newScale, {
         x: center.x - cx * newScale,
         y: center.y - cy * newScale,
-      });
+      }, true);
     });
     const end = (e: Konva.KonvaEventObject<TouchEvent>): void => {
       if (((e.evt as TouchEvent).touches?.length ?? 0) < 2) this.pinch = null;
@@ -3065,11 +3071,11 @@ export class BoardCanvas {
   }
 
   destroy(): void {
+    this.viewport.destroy();
     this.textLayer.destroy();
     cancelAnimationFrame(this.raf);
     if (this.connGlideRaf) cancelAnimationFrame(this.connGlideRaf);
     this.connectorBar.destroy();
-    this.viewport.stopZoomAnim(); // stop any in-flight zoom-step rAF before the stage is gone
     this.opts.awareness.off("change", this.onAwarenessChange);
     window.removeEventListener("blur", this.onWindowBlur);
     window.removeEventListener("pointerup", this.onWindowPointerUp);
