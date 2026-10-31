@@ -39,8 +39,8 @@ export function StudyAudioEditor({ subjectId, parentId, onClose, ref }: { subjec
     // Parent destination is captured when the editor opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectId, parentId])
-  return <div className="absolute inset-x-0 top-0 z-50 flex max-h-full flex-col border-b border-neutral-200 bg-white text-black" style={{ height: '50dvh', minHeight: 'min(320px, 100dvh)' }} role="region" aria-label="Editor AudioMass" onKeyDown={event => event.stopPropagation()}>
+  return <div className="absolute inset-x-0 top-0 z-50 flex max-h-full flex-col overflow-hidden border-b border-neutral-200 bg-white text-black" style={{ height: '50dvh', minHeight: 'min(320px, 100dvh)' }} role="region" aria-label="Editor AudioMass" onKeyDown={event => event.stopPropagation()}>
     {!ready && <p role="status" className="p-3">Abriendo AudioMass…</p>}
-    <iframe ref={frame} title="AudioMass" src="/vendor/audiomass/index.html?skipintro=1" allow="microphone" className="min-h-0 w-full flex-1 border-0" />
+    <iframe ref={frame} title="AudioMass" src="/vendor/audiomass/index.html?skipintro=1" allow="microphone" className="block min-h-0 w-full flex-1 border-0" />
   </div>
 }

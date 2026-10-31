@@ -190,8 +190,11 @@
 			if (hdr) used += hdr.offsetHeight;
 			if (tbc) used += tbc.offsetHeight;
 			if (ftr) used += ftr.offsetHeight;
+            // Account for all actual chrome, including wrapped controls and waveform borders.
+            var wave = root.querySelector ('.pk_av > wave');
+            if (wave && ftr) used = ftr.getBoundingClientRect ().bottom - wave.getBoundingClientRect ().height;
 			if (this.BarBtm && this.BarBtm.on) used += this.BarBtm.height;
-			return Math.max (112, h - used);
+			return Math.max (1, Math.floor (h - used));
 		};
 		if (app.isMobile && w.visualViewport) {
 			var resize_raf = 0;

@@ -51,6 +51,15 @@
     close.setAttribute('aria-label', 'Cerrar editor de audio'); close.title = 'Cerrar editor de audio'; close.onclick = function () { send('close'); };
     transport.appendChild(close);
   }
+  // Refit the waveform after toolbar wrapping, font loading or iframe resizing.
+  var resizeFrame = 0;
+  var layoutObserver = new ResizeObserver(function () {
+    if (resizeFrame) return;
+    resizeFrame = requestAnimationFrame(function () {
+      resizeFrame = 0; app.fireEvent('RequestResize');
+    });
+  });
+  [document.documentElement].concat(Array.from(document.querySelectorAll('.pk_hdr,.pk_tbc,.pk_ftr'))).forEach(function (element) { layoutObserver.observe(element); });
   var speechState = '';
   var speech = window.CursadoLiveSpeech(function (state) {
     speechState = state.transcriptionError || (state.listening ? 'Transcribiendo mientras grab\u00e1s\u2026' : '');
@@ -109,6 +118,6 @@
     if (event.key === 'Escape' && !document.querySelector('.pk_modal')) send('close');
   });
   window.addEventListener('beforeunload', function (event) { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', function () { speech.dispose(); });
+  window.addEventListener('pagehide', function () { layoutObserver.disconnect(); cancelAnimationFrame(resizeFrame); speech.dispose(); });
   send('ready');
 })();

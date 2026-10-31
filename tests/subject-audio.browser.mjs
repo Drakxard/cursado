@@ -403,3 +403,20 @@ test('dragged audio selection stays visible on the light waveform', async t => {
   assert.equal(selection.handle,'rgb(29, 78, 216)')
   assert.ok(selection.start > 0 && selection.end > selection.start && selection.width > 50, JSON.stringify(selection))
 })
+
+
+test('compact editor fits its viewport', async t => {
+  const page = await setup(t)
+  await page.keyboard.press('+'); await loadTone(page)
+  for (const [width,height] of [[1320,384],[1000,384],[390,422],[1320,320],[390,320],[740,300]]) {
+    await page.locator('iframe').evaluate((el,{width,height}) => {el.style.width=width+'px';el.style.height=height+'px'}, {width,height})
+    const editor = page.frames().find(frame=>frame.url().includes('/audiomass/'))
+    await editor.evaluate(() => new Promise(resolve => requestAnimationFrame(()=>requestAnimationFrame(resolve))))
+    await editor.waitForFunction(() => document.querySelector('.pk_ftr').getBoundingClientRect().bottom <= innerHeight + 1)
+    const layout = await editor.evaluate(() => ({width:innerWidth,height:innerHeight,
+      scrollW:document.documentElement.scrollWidth,scrollH:document.documentElement.scrollHeight,
+      footerBottom:document.querySelector('.pk_ftr').getBoundingClientRect().bottom}))
+    assert.ok(layout.scrollW <= width && layout.scrollH <= height && layout.footerBottom <= height + 1, JSON.stringify(layout))
+
+  }
+})
