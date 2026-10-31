@@ -757,7 +757,10 @@
 			if (app.ui.InteractionHandler.on) return ;
 			if (map[16] === 1 || accelHeld ( e )) return ;
 
-			app.fireEvent ('RequestTransportToggle', 'stop');
+			if (e && (e.repeat || e.isComposing || e.altKey || app.ui.KeyHandler.isEditTarget(e) || document.querySelector('.pk_modal'))) return;
+			e && e.preventDefault();
+			if (app.rec.isActive()) app.rec.togglePause();
+			else app.fireEvent ('RequestActionRecordStart');
 		}, [32]);
 		app.ui.KeyHandler.addCallback ('KeyShiftCopy' + app.id, function ( key, map, e ) {
 			if (app.ui.InteractionHandler.on || accelHeld ( e )) return ;

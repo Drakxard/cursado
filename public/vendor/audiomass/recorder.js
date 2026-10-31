@@ -18,6 +18,7 @@
 		var channel_num_out = 1;
 
 		var is_active = false;
+		var is_paused = false;
 		var is_starting = false;
 		var is_stopping = false;
 
@@ -224,6 +225,7 @@
 		this.stopCapture = stopCapture;
 
 		function fetchBufferFunction ( float_array ) {
+			if (is_paused) return;
 			if (skip_samples > 0) {
 				skip_samples -= float_array.length;
 				return ;
@@ -248,6 +250,12 @@
 			}
 		}
 
+		this.isPaused = function () { return is_paused; };
+		this.togglePause = function () {
+			if (!is_active) return;
+			is_paused = !is_paused;
+			app.fireEvent (is_paused ? 'DidActionRecordPause' : 'DidActionRecordResume');
+		};
 		this.isActive = function () {
 			return (is_active || is_starting);
 		};
@@ -259,6 +267,7 @@
 		this.start = function ( _at_offset, _end_callback, _start_callback, _sample_rate ) {
 			if (is_active || is_starting) return (false);
 
+			is_paused = false;
 			starting_offset = _at_offset / 1;
 			if (isNaN (starting_offset) || !starting_offset) starting_offset = 0;
 			curr_offset = starting_offset;
@@ -356,6 +365,7 @@
 				else
 					end_record_func && end_record_func ( null, null, function () {});
 
+				is_paused = false;
 				sample_rate = 0;
 				source_sample_rate = 0;
 				first_skip = 8;

@@ -190,11 +190,11 @@
 			if (hdr) used += hdr.offsetHeight;
 			if (tbc) used += tbc.offsetHeight;
 			if (ftr) used += ftr.offsetHeight;
-            // Account for all actual chrome, including wrapped controls and waveform borders.
-            var wave = root.querySelector ('.pk_av > wave');
-            if (wave && ftr) used = ftr.getBoundingClientRect ().bottom - wave.getBoundingClientRect ().height;
-			if (this.BarBtm && this.BarBtm.on) used += this.BarBtm.height;
-			return Math.max (1, Math.floor (h - used));
+			var av = root.querySelector ('.pk_av');
+			var top = av ? av.getBoundingClientRect ().top : used;
+			var footerHeight = ftr ? ftr.offsetHeight : 0;
+			var dockHeight = this.BarBtm && this.BarBtm.on ? this.BarBtm.height : 0;
+			return Math.max (1, Math.floor (Math.min(h - top - footerHeight - dockHeight, Math.max(112, h / 2 - top))));
 		};
 		if (app.isMobile && w.visualViewport) {
 			var resize_raf = 0;
@@ -2441,7 +2441,7 @@
 		// play button
 		var btn_stop = d.createElement ('button');
 		btn_stop.setAttribute ('tabIndex', -1);
-		btn_stop.innerHTML = '<span>Stop Playback (Space)</span>';
+		btn_stop.innerHTML = '<span>Stop Playback</span>';
 		btn_stop.className = 'pk_btn pk_stop icon-stop2';
 		btn_stop.onclick = function() {
 			UI.fireEvent('RequestStop');
@@ -2452,7 +2452,7 @@
 		var btn_play = d.createElement ('button');
 		btn_play.setAttribute ('tabIndex', -1);
 		btn_play.className = 'pk_btn pk_play icon-play3';
-		btn_play.innerHTML = '<span>Play (Space)</span>';
+		btn_play.innerHTML = '<span>Play</span>';
 		transport.appendChild ( btn_play );
 		btn_play.onclick = function() {
 			UI.fireEvent('RequestPlay');
@@ -2785,7 +2785,7 @@
 		var btn_rec = d.createElement ('button');
 		btn_rec.setAttribute('tabIndex', -1);
 		btn_rec.className = 'pk_btn icon-rec';
-		btn_rec.innerHTML = '<span>Record (R)</span>';
+		btn_rec.innerHTML = '<span>Record / Pause (Space)</span>';
 		btn_rec.onclick = function() {
 			if (this.getAttribute('disabled') === 'disabled') {
 				this.blur (); return ;

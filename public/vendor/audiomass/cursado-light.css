@@ -20,3 +20,8 @@
   min-width:3px;
 }
 .pk_selection .pk_sellist{color:var(--fg-0)}
+
+/* Keep navigation at the screen edge while the voice waveform stays compact. */
+.pk_ftr{position:fixed;bottom:0;left:0;right:0;box-sizing:border-box}
+
+.pk_transport .icon-rec.cursado-paused{background:var(--bg-3);box-shadow:none;color:var(--fg-1)}

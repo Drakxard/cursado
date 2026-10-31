@@ -71,6 +71,9 @@
   });
   app.listenFor('DidActionRecordStart', function () { recording = true; speech.start(false); });
   app.listenFor('DidActionRecordStop', function () { recording = false; speech.stop(); });
+  app.listenFor('DidActionRecordPause', function () { speech.stop(); document.querySelector('.icon-rec')?.classList.add('cursado-paused'); });
+  app.listenFor('DidActionRecordResume', function () { speech.start(false); document.querySelector('.icon-rec')?.classList.remove('cursado-paused'); });
+  app.listenFor('DidActionRecordStop', function () { document.querySelector('.icon-rec')?.classList.remove('cursado-paused'); });
   app.listenFor('CursadoRecordingStart', function (reset) { speech.start(reset); });
   app.listenFor('CursadoRecordingStop', function () { speech.stop(); });
   // Some effects do not emit a state event. Conservatively protect all edits.
@@ -96,6 +99,7 @@
     return new Blob([bytes], { type: 'audio/wav' });
   }
   function exportAudio() {
+      if (recording && app.rec.isPaused()) { app.fireEvent('RequestActionRecordStop', function () { exportAudio(); }); return; }
       if (recording) { send('error', { error: 'Detené la grabación antes de confirmar.' }); return; }
       app.fireEvent('RequestStop');
       async function done(buffer) {

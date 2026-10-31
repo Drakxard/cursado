@@ -250,10 +250,10 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
     setError("Usá + para grabar o importar audio en AudioMass.")
   }
 
-  function openAudioEditor() {
+  function createAudioFolder() {
     setQuery("")
     setLegacy(false)
-    audiosRef.current?.openEditor()
+    audiosRef.current?.createFolder()
   }
 
   async function runRegroup() {
@@ -376,7 +376,7 @@ export function SubjectVoiceImages({ subjectId, weekNumber = getCurrentWeekNumbe
         }} aria-label="Buscar imágenes y PDF" data-voice-search
           size={1} autoComplete="off" spellCheck={false} disabled={busy} className="col-start-1 row-start-1 w-full min-w-0 border-0 bg-transparent px-3 py-2 text-center text-2xl outline-none focus-visible:underline focus-visible:decoration-neutral-300 focus-visible:underline-offset-8" />
         </div>
-        <button type="button" onClick={openAudioEditor} disabled={busy} aria-label="Nuevo audio" title="Nuevo audio (+)"
+        <button type="button" onClick={createAudioFolder} disabled={busy} aria-label="Nuevo conjunto" title="Nuevo conjunto"
           className="pointer-events-auto absolute right-0 flex h-12 w-12 items-center justify-center rounded-full border-[3px] border-dotted border-[#f08c00] bg-white/95 text-3xl text-[#f08c00] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#f08c00] disabled:opacity-30">+</button>
       </div>}
     </>}
