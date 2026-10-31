@@ -41,11 +41,11 @@ function AudioCard({ audio, subjectId }: { audio: StudyAudio; subjectId: string 
     }).catch(error => { if (!disposed) setError(String(error.message)) })
     return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [subjectId, audio.id, audio.path])
-  const status = { pending: 'Sin transcripción en vivo', processing: 'Sin transcripción en vivo', completed: 'Transcripción guardada', error: 'Sin transcripción en vivo', none: 'Sin transcripción en vivo', unavailable: 'Dictado no disponible', partial: 'Transcripción parcial guardada' }[audio.transcription]
+  const status = { pending: 'Sin transcripción en vivo', processing: 'Sin transcripción en vivo', completed: '', error: 'Sin transcripción en vivo', none: 'Sin transcripción en vivo', unavailable: 'Dictado no disponible', partial: 'Transcripción parcial guardada' }[audio.transcription]
   return <>
     <p className="mb-3 text-xl">{audio.name}</p>
     {url && <audio controls preload="metadata" src={url} aria-label={audio.name} className="w-full" onError={() => setError('No se pudo reproducir el audio.')} />}
-    <p className="mt-3 text-sm text-neutral-600" role="status">{status}</p>
+    {status && <p className="mt-3 text-sm text-neutral-600" role="status">{status}</p>}
     {audio.transcriptionError && <p className="text-xs text-neutral-600">{audio.transcriptionError}</p>}
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
   </>
