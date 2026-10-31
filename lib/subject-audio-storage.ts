@@ -3,7 +3,7 @@ import { getReadyWorkspaceHandle, loadWorkspaceHandle, queryWorkspacePermission 
 import { readWorkspaceJson, writeWorkspaceJson } from './workspace-json'
 import { withWorkspaceFileLock } from './workspace-file-lock'
 import { writeVerified } from './subject-voice-images'
-import { audioManifestPath, audioPrefix, validateAudioWorkspace, type AudioWorkspace, type StudyAudio } from './subject-audio-model'
+import { audioManifestPath, audioPrefix, removeAudioItem, validateAudioWorkspace, type AudioWorkspace, type StudyAudio } from './subject-audio-model'
 
 async function root() {
   const handle = getReadyWorkspaceHandle() ?? await loadWorkspaceHandle()
@@ -45,4 +45,21 @@ export async function readStudyAudio(subjectId: string, id: string) {
   const parts = audio.path.split('/'); let directory = await root()
   for (const part of parts.slice(0, -1)) directory = await directory.getDirectoryHandle(part)
   return (await directory.getFileHandle(parts.at(-1)!)).getFile()
+}
+
+
+export async function deleteStudyAudioItem(subjectId: string, id: string) {
+  let removed: StudyAudio[] = []
+  // Commit the manifest before removing files: a failed write must keep every recording intact.
+  await updateAudioWorkspace(subjectId, workspace => { removed = removeAudioItem(workspace, id) })
+  const handle = await root()
+  for (const audio of removed) {
+    try {
+      const parts = audio.path.split('/'); let directory = handle
+      for (const part of parts.slice(0, -1)) directory = await directory.getDirectoryHandle(part)
+      await directory.removeEntry(parts.at(-1)!)
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw new Error('El elemento se quitó del listado, pero no se pudo borrar su archivo de audio.')
+    }
+  }
 }

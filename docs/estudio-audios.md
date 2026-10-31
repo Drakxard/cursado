@@ -2,11 +2,13 @@
 
 La lupa activa la entrada a las esferas de búsqueda. Dentro de una esfera, `+` abre AudioMass; el atajo se ignora en campos de texto. El editor conserva todas las herramientas y usa un tema claro. Al confirmar un nombre, guarda la mezcla completa como WAV PCM de 16 bits en la ubicación actual. Las cancelaciones con cambios piden confirmación.
 
-Arrastrar un audio sobre otro crea un conjunto después de pedir su nombre. Arrastrar audios o conjuntos sobre un conjunto existente los mueve allí. El botón «Nivel superior» también recibe elementos arrastrados. No se admiten ciclos. El material anterior sigue disponible mediante «Material guardado anteriormente»; se retiró la carga de nuevas imágenes y la búsqueda manual `tema/temas`.
+Arrastrar un audio sobre otro cambia su orden en la grilla: la mitad izquierda lo coloca antes y la derecha, después. El orden se guarda en el manifiesto y se conserva al recargar. Arrastrar audios o conjuntos sobre un conjunto existente los mueve allí. El botón «Nivel superior» también recibe elementos arrastrados. No se admiten ciclos. El material anterior sigue disponible mediante «Material guardado anteriormente»; se retiró la carga de nuevas imágenes y la búsqueda manual `tema/temas`.
 
 La grabación comienza directamente con el botón rojo de la barra de AudioMass (o R), incluso con el proyecto vacío. El mismo botón la detiene y deja la onda en la línea de tiempo para editarla. La opción New Recording usa ese mismo flujo: no abre el diálogo flotante de dispositivos. Si falla el permiso del micrófono, se puede reintentar sin cerrar el editor.
 
 El botón `+` inferior crea un conjunto vacío en la ubicación actual; las esferas muestran solo su nombre. Dentro del conjunto, la tecla `+` abre el grabador. Espacio inicia la captura y alterna pausa/reanudación sin añadir silencio; los campos de texto conservan la escritura normal. Guardar desde una pausa finaliza la captura y conserva sus fragmentos. La onda ocupa la mitad superior de la pantalla y la barra de navegación queda al pie.
+
+Mantener presionado un audio o conjunto durante 700 ms pide confirmación para eliminarlo. También se puede usar Suprimir con el elemento enfocado. Eliminar un conjunto incluye sus descendientes y grabaciones; cancelar conserva todo. Primero se guarda el manifiesto y luego se retiran los WAV correspondientes, de modo que un fallo de escritura del manifiesto no borre los archivos.
 
 ## Persistencia y cooperación
 

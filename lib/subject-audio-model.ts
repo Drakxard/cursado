@@ -44,3 +44,29 @@ export function groupAudioPair(w: AudioWorkspace, first: string, second: string,
   const folder = { id: crypto.randomUUID(), name: name.trim(), parentId: b.parentId }
   w.folders.push(folder); a.parentId = folder.id; b.parentId = folder.id
 }
+
+
+export function reorderAudio(w: AudioWorkspace, id: string, targetId: string, after = false) {
+  if (id === targetId) return
+  const source = w.audios.find(audio => audio.id === id), target = w.audios.find(audio => audio.id === targetId)
+  if (!source || !target) throw new Error('El audio ya no existe.')
+  assertAudioDestination(w, id, target.parentId)
+  w.audios = w.audios.filter(audio => audio.id !== id)
+  source.parentId = target.parentId
+  w.audios.splice(w.audios.findIndex(audio => audio.id === targetId) + (after ? 1 : 0), 0, source)
+}
+
+export function removeAudioItem(w: AudioWorkspace, id: string): StudyAudio[] {
+  if (![...w.folders, ...w.audios].some(item => item.id === id)) throw new Error('El elemento ya no existe.')
+  const removed = new Set([id])
+  let count = 0
+  while (count !== removed.size) {
+    count = removed.size
+    for (const folder of w.folders) if (folder.parentId && removed.has(folder.parentId)) removed.add(folder.id)
+  }
+  const audios = w.audios.filter(audio => removed.has(audio.id) || (audio.parentId !== null && removed.has(audio.parentId)))
+  const audioIds = new Set(audios.map(audio => audio.id))
+  w.audios = w.audios.filter(audio => !audioIds.has(audio.id))
+  w.folders = w.folders.filter(folder => !removed.has(folder.id))
+  return audios
+}

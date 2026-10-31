@@ -134,17 +134,19 @@ async function seedAudios(page, count = 4) {
     for(let i=0;i<count;i++) await window.storage.saveStudyAudio('algebra',String(i),`Audio ${i}`,null,new Blob([bytes],{type:'audio/wav'}),.1)
   }, count)
 }
-test('drag pairs, cancel grouping, nested folders, parent drop and saving inside a folder', async t => {
+test('empty collections receive audio and nested folders, parent drop and saving inside a folder', async t => {
   const page = await setup(t)
   await seedAudios(page)
   const card = name => page.locator('[data-subject-audios] [draggable="true"]').filter({ has: page.getByText(name, { exact: true }) })
-  await card('Audio 0').getByText('Audio 0',{exact:true}).dragTo(card('Audio 1').getByText('Audio 1',{exact:true}))
+  await page.getByRole('button', { name: 'Nuevo conjunto', exact: true }).click()
   await page.getByRole('button', { name: 'Cancelar', exact: true }).click()
   assert.equal((await page.evaluate(() => window.storage.loadAudioWorkspace('algebra'))).folders.length, 0)
-  await card('Audio 0').getByText('Audio 0',{exact:true}).dragTo(card('Audio 1').getByText('Audio 1',{exact:true}))
+  await page.getByRole('button', { name: 'Nuevo conjunto', exact: true }).click()
   await page.getByLabel('Nombre del conjunto').fill('Matrices')
   await page.getByRole('button', { name: 'Crear conjunto', exact: true }).click()
   const matrices = page.getByRole('button', { name: 'Abrir conjunto Matrices', exact: true })
+  await card('Audio 0').getByText('Audio 0',{exact:true}).dragTo(matrices)
+  await card('Audio 1').getByText('Audio 1',{exact:true}).dragTo(matrices)
   await card('Audio 2').getByText('Audio 2',{exact:true}).dragTo(matrices)
   await page.waitForFunction(async () => (await window.storage.loadAudioWorkspace('algebra')).audios.filter(a => a.parentId !== null).length === 3)
   await page.evaluate(() => window.storage.updateAudioWorkspace('algebra',w => { w.folders.push({id:'outer',name:'Álgebra completa',parentId:null}) }))
@@ -484,4 +486,57 @@ test('space starts recording, pauses, resumes and saves without capturing the pa
   await page.getByText('Mi voz',{exact:true}).waitFor()
   const saved = await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))
   assert.ok(saved.audios[0].duration> .5)
+})
+
+
+test('audio drag saves fixed order after reload without creating a collection', async t => {
+  const page = await setup(t); await seedAudios(page)
+  const card = name => page.locator('[data-subject-audios] [draggable="true"]').filter({has:page.getByText(name,{exact:true})})
+  await card('Audio 3').getByText('Audio 3',{exact:true}).dragTo(card('Audio 0'),{targetPosition:{x:5,y:5}})
+  await page.waitForFunction(async ()=>(await window.storage.loadAudioWorkspace('algebra')).audios[0].id==='3')
+  assert.equal((await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))).folders.length,0)
+  await page.reload(); await card('Audio 3').waitFor()
+  assert.deepEqual(await page.locator('[data-subject-audios] [draggable="true"] p.text-xl').allTextContents(),['Audio 3','Audio 0','Audio 1','Audio 2'])
+})
+
+async function holdItem(page, locator, accept, expected) {
+  const box = await locator.boundingBox()
+  const dialog = page.waitForEvent('dialog')
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2)
+  await page.mouse.down()
+  const confirmation = await dialog
+  assert.match(confirmation.message(), expected)
+  if (accept) await confirmation.accept(); else await confirmation.dismiss()
+  await page.mouse.up()
+}
+
+test('long press confirms audio or collection deletion, cancel keeps files and a failed write deletes nothing', async t => {
+  const page = await setup(t); await seedAudios(page,3)
+  const title = name=>page.getByText(name,{exact:true})
+  await holdItem(page,title('Audio 0'),false,/Eliminar el audio/)
+  assert.equal((await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))).audios.length,3)
+  await page.evaluate(()=>{window.failWorkspaceWrites=true})
+  await holdItem(page,title('Audio 0'),true,/Eliminar el audio/)
+  await page.getByRole('alert').filter({hasText:'Disco lleno'}).waitFor()
+  assert.ok(await page.evaluate(()=>window.workspaceFiles.has('subject-voice/audio/algebra/0.wav')))
+  await page.evaluate(()=>{window.failWorkspaceWrites=false})
+  await holdItem(page,title('Audio 0'),true,/Eliminar el audio/)
+  await title('Audio 0').waitFor({state:'hidden'})
+  await page.waitForFunction(()=>!window.workspaceFiles.has('subject-voice/audio/algebra/0.wav'))
+  await page.evaluate(()=>window.storage.updateAudioWorkspace('algebra',w=>{
+    w.folders.push({id:'outer',name:'Para borrar',parentId:null},{id:'inner',name:'Dentro',parentId:'outer'})
+    w.audios.find(a=>a.id==='1').parentId='inner'
+  }))
+  const folder = page.getByRole('button',{name:'Abrir conjunto Para borrar',exact:true})
+  await folder.waitFor()
+  await holdItem(page,folder,false,/Eliminar el conjunto.*todo su contenido/)
+  await folder.waitFor()
+  assert.equal(await page.getByRole('button',{name:'Abrir conjunto Dentro',exact:true}).count(),0)
+  await holdItem(page,folder,true,/Eliminar el conjunto/)
+  await folder.waitFor({state:'hidden'})
+  await page.waitForFunction(()=>!window.workspaceFiles.has('subject-voice/audio/algebra/1.wav'))
+  const saved = await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))
+  assert.equal(saved.folders.length,0)
+  assert.deepEqual(saved.audios.map(a=>a.id),['2'])
+  assert.ok(await page.evaluate(()=>window.workspaceFiles.has('subject-voice/audio/algebra/2.wav')))
 })

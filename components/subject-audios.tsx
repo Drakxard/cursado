@@ -1,14 +1,36 @@
 'use client'
-import { useEffect, useImperativeHandle, useRef, useState, type DragEvent, type Ref } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, type DragEvent, type Ref, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
 import { HandDrawnBubble } from './hand-drawn-bubble'
-import { loadAudioWorkspace, readStudyAudio, updateAudioWorkspace } from '@/lib/subject-audio-storage'
-import { groupAudioPair, moveAudioItem, type AudioWorkspace, type StudyAudio } from '@/lib/subject-audio-model'
+import { deleteStudyAudioItem, loadAudioWorkspace, readStudyAudio, updateAudioWorkspace } from '@/lib/subject-audio-storage'
+import { moveAudioItem, reorderAudio, type AudioWorkspace, type StudyAudio } from '@/lib/subject-audio-model'
 import { guardCooperationElement } from '@/lib/client/cooperation'
 import type { StudyAudioEditorHandle } from './study-audio-editor'
 const AudioEditor = dynamic(() => import('./study-audio-editor').then(module => module.StudyAudioEditor), { ssr: false })
 const dragType = 'application/x-cursado-audio'
 export type SubjectAudiosHandle = { openEditor: () => void; createFolder: () => void; escape: () => boolean }
+
+function AudioItem({ children, className, busy, onDelete, onDragStart, onDrop }: { children: ReactNode; className?: string; busy: boolean; onDelete: () => void; onDragStart: (event: DragEvent) => void; onDrop: (event: DragEvent) => void }) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const start = useRef({ x: 0, y: 0 }), held = useRef(false)
+  function cancel() { if (timer.current !== null) clearTimeout(timer.current); timer.current = null }
+  useEffect(() => cancel, [])
+  return <div className={className} draggable={!busy} tabIndex={0} style={{ userSelect: 'none' }}
+    onPointerDown={event => {
+      cancel(); held.current = false
+      if (busy || event.button !== 0 || (event.target instanceof Element && event.target.closest('audio,input,textarea,select'))) return
+      start.current = { x: event.clientX, y: event.clientY }
+      timer.current = setTimeout(() => { timer.current = null; held.current = true; onDelete() }, 700)
+    }}
+    onPointerMove={event => { if (Math.hypot(event.clientX - start.current.x, event.clientY - start.current.y) > 8) cancel() }}
+    onPointerUp={cancel} onPointerCancel={cancel} onPointerLeave={cancel} onContextMenu={event => event.preventDefault()}
+    onClickCapture={event => { if (held.current) { event.preventDefault(); event.stopPropagation(); held.current = false } }}
+    onKeyDown={event => { if (!busy && event.key === 'Delete' && !(event.target instanceof Element && event.target.closest('audio,input,textarea'))) { event.preventDefault(); onDelete() } }}
+    onDragStart={event => { cancel(); held.current = false; onDragStart(event) }} onDragEnd={cancel}
+    onDragOver={event => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move' }} onDrop={onDrop}>
+    {children}
+  </div>
+}
 
 function AudioCard({ audio, subjectId }: { audio: StudyAudio; subjectId: string }) {
   const [url, setUrl] = useState(''), [error, setError] = useState('')
@@ -33,7 +55,6 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
   const [parentId, setParentId] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ parentId: string | null } | null>(null)
   const [creatingFolder, setCreatingFolder] = useState(false)
-  const [pair, setPair] = useState<{ first: string; second: string } | null>(null)
   const [name, setName] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const editor = useRef<StudyAudioEditorHandle>(null)
   const revision = useRef(0)
@@ -51,17 +72,17 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
     return () => { alive = false; channel?.close(); window.removeEventListener('cursado-audios-changed', changed); window.removeEventListener('cursado-cooperation-applied', changed) }
   }, [subjectId])
   useEffect(() => { onEditorChange(Boolean(editing)); return () => onEditorChange(false) }, [editing, onEditorChange])
-  function openEditor() { if (!busy && !editing && !pair && !creatingFolder) { setEditing({ parentId }); setError('') } }
-  useImperativeHandle(ref, () => ({ openEditor, createFolder: () => { if (!busy && !editing && !pair) { setCreatingFolder(true); setName(''); setError('') } }, escape: () => {
+  function openEditor() { if (!busy && !editing && !creatingFolder) { setEditing({ parentId }); setError('') } }
+  useImperativeHandle(ref, () => ({ openEditor, createFolder: () => { if (!busy && !editing) { setCreatingFolder(true); setName(''); setError('') } }, escape: () => {
     if (editing) { editor.current?.close(); return true }
     if (busy) return true
-    if (pair || creatingFolder) { setPair(null); setCreatingFolder(false); return true }
+    if (creatingFolder) { setCreatingFolder(false); return true }
     if (parentId) { setParentId(workspace?.folders.find(item => item.id === parentId)?.parentId ?? null); return true }
     return false
   } }))
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (hidden || editing || pair || creatingFolder || busy || event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key !== '+') return
+      if (hidden || editing || creatingFolder || busy || event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key !== '+') return
       if (event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable]')) return
       event.preventDefault(); event.stopImmediatePropagation(); openEditor()
     }
@@ -71,9 +92,18 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
   async function mutate(action: (w: AudioWorkspace) => void) {
     if (busy) return
     setBusy(true); setError('')
-    try { await updateAudioWorkspace(subjectId, action); setPair(null); setCreatingFolder(false) }
+    try { await updateAudioWorkspace(subjectId, action); setCreatingFolder(false) }
     catch (error) { setError(error instanceof Error ? error.message : 'No se pudo mover el elemento.') }
     finally { setBusy(false) }
+  }
+  function requestDelete(id: string, name: string, folder: boolean) {
+    if (busy) return
+    const question = folder ? `¿Eliminar el conjunto “${name}” y todo su contenido?` : `¿Eliminar el audio “${name}”?`
+    if (!window.confirm(question)) return
+    void guardCooperationElement(subjectId, id, () => {
+      setBusy(true); setError('')
+      void deleteStudyAudioItem(subjectId, id).catch(failure => setError(failure instanceof Error ? failure.message : 'No se pudo eliminar.')).finally(() => setBusy(false))
+    })
   }
   function startDrag(event: DragEvent, id: string) { event.dataTransfer.setData(dragType, JSON.stringify({ subjectId, id })); event.dataTransfer.effectAllowed = 'move' }
   function drop(event: DragEvent, destination: string | null, targetAudio = false) {
@@ -84,7 +114,9 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
       if (source.subjectId !== subjectId || typeof source.id !== 'string' || source.id === destination) return
       if (targetAudio) {
         if (!workspace?.audios.some(audio => audio.id === source.id)) throw new Error('Arrastrá el conjunto sobre otro conjunto o al nivel superior.')
-        setPair({ first: source.id, second: destination! }); setName('')
+        const rect = event.currentTarget.getBoundingClientRect()
+        const after = event.clientX >= rect.left + rect.width / 2
+        void guardCooperationElement(subjectId, source.id, () => { void mutate(w => reorderAudio(w, source.id, destination!, after)) })
       } else void guardCooperationElement(subjectId, source.id, () => { void mutate(w => moveAudioItem(w, source.id, destination)) })
     } catch (error) { setError(error instanceof Error ? error.message : 'No se pudo mover.') }
   }
@@ -98,18 +130,18 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
         {parentId && <button className="rounded-lg border px-4 py-2" onClick={() => setParentId(folder?.parentId ?? null)} onDragOver={event => event.preventDefault()} onDrop={event => drop(event, folder?.parentId ?? null)}>← Nivel superior</button>}
         <h2 className="text-xl">{folder?.name ?? 'Audios'}</h2>
       </div>
-      {pair || creatingFolder ? <form className="mx-auto flex max-w-lg flex-col gap-4" onSubmit={event => { event.preventDefault(); void mutate(w => { if (pair) groupAudioPair(w, pair.first, pair.second, name); else w.folders.push({ id: crypto.randomUUID(), name: name.trim(), parentId }) }) }}>
+      {creatingFolder ? <form className="mx-auto flex max-w-lg flex-col gap-4" onSubmit={event => { event.preventDefault(); void mutate(w => { w.folders.push({ id: crypto.randomUUID(), name: name.trim(), parentId }) }) }}>
         <label className="flex flex-col gap-2">Nombre del conjunto<input autoFocus required disabled={busy} value={name} onChange={event => setName(event.target.value)} className="rounded border p-3" /></label>
-        <div className="flex gap-4"><button disabled={busy || !name.trim()} className="rounded border px-4 py-2">Crear conjunto</button><button type="button" disabled={busy} onClick={() => { setPair(null); setCreatingFolder(false) }}>Cancelar</button></div>
-      </form> : <div className="flex flex-wrap items-start justify-center gap-6" onDragOver={event => event.preventDefault()} onDrop={event => drop(event, parentId)}>
-        {workspace?.folders.filter(item => item.parentId === parentId).map(item => <div key={item.id} draggable={!busy} onDragStart={event => startDrag(event, item.id)} onDragOver={event => event.preventDefault()} onDrop={event => drop(event, item.id)}>
+        <div className="flex gap-4"><button disabled={busy || !name.trim()} className="rounded border px-4 py-2">Crear conjunto</button><button type="button" disabled={busy} onClick={() => { setCreatingFolder(false) }}>Cancelar</button></div>
+      </form> : <div className="grid items-start gap-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 20rem), 20rem))', gap: 24 }} onDragOver={event => event.preventDefault()} onDrop={event => drop(event, parentId)}>
+        {workspace?.folders.filter(item => item.parentId === parentId).map(item => <AudioItem key={item.id} busy={busy} onDelete={() => requestDelete(item.id, item.name, true)} onDragStart={event => startDrag(event, item.id)} onDrop={event => drop(event, item.id)}>
           <HandDrawnBubble seed={item.id} color="#a5d8ff" disabled={busy} style={{ width: 170, height: 170 }} onClick={() => { void guardCooperationElement(subjectId, item.id, () => setParentId(item.id)) }} aria-label={`Abrir conjunto ${item.name}`}>
             <span className="text-xl">{item.name}</span>
           </HandDrawnBubble>
-        </div>)}
-        {workspace?.audios.filter(item => item.parentId === parentId).map(audio => <div key={audio.id} className="w-80 max-w-full rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" draggable={!busy} onDragStart={event => startDrag(event, audio.id)} onDragOver={event => event.preventDefault()} onDrop={event => drop(event, audio.id, true)}>
+        </AudioItem>)}
+        {workspace?.audios.filter(item => item.parentId === parentId).map(audio => <AudioItem key={audio.id} busy={busy} onDelete={() => requestDelete(audio.id, audio.name, false)} className="w-80 max-w-full rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" onDragStart={event => startDrag(event, audio.id)} onDrop={event => drop(event, audio.id, true)}>
           <AudioCard audio={audio} subjectId={subjectId} />
-        </div>)}
+        </AudioItem>)}
         {workspace && !workspace.audios.some(item => item.parentId === parentId) && !workspace.folders.some(item => item.parentId === parentId) && <button onClick={openEditor} className="py-16 text-center text-xl">Pulsá + para grabar o importar un audio</button>}
         {!workspace && !error && <p role="status">Cargando audios…</p>}
       </div>}

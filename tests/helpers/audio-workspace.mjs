@@ -10,6 +10,12 @@ export function installAudioWorkspace() {
         if (!create && ![...window.workspaceFiles.keys()].some((key) => key.startsWith(path))) throw missing()
         return directory(path)
       },
+      removeEntry: async name => {
+        const path = prefix + name
+        if (!window.workspaceFiles.has(path)) throw missing()
+        window.workspaceFiles.delete(path)
+        sessionStorage.setItem("test-workspace", JSON.stringify(await Promise.all([...window.workspaceFiles].map(async ([key, blob]) => [key, Array.from(new Uint8Array(await blob.arrayBuffer()))]))))
+      },
       getFileHandle: async (name, { create = false } = {}) => {
         const path = prefix + name
         if (!create && !window.workspaceFiles.has(path)) throw missing()
