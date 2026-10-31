@@ -549,6 +549,74 @@ test('cooperative container opens the same live room across independent devices'
   await expect.poll(() => engine(b).evaluate(id => window.__komuboard.doc.getMap('objects').get(id)?.get('x'),objectId)).toBe(450)
 })
 
+test('image reader opens on double click, loads one image at a time and returns without editing the board', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
+  const requests = [], errors = []
+  await context.route('**/img/reader-*', route => {
+    if (route.request().frame().parentFrame() === null) {
+      const name = route.request().url().split('/').at(-1)
+      requests.push(name)
+      if (name === 'reader-third.svg') return route.fulfill({ status: 404, body: '' })
+    }
+    return route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2048"><rect width="4096" height="2048" fill="white"/><text x="500" y="500" font-size="100">Diagrama grande</text></svg>' })
+  })
+  const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message))
+  await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openBoard)
+  await page.evaluate(() => window.openBoard('image-reader')); await loaded(page)
+  for (const [index, src] of ['reader-first.svg', 'reader-second.svg', 'reader-third.svg'].entries()) {
+    await send(page, 'insert', { object: { type: 'image', src, x: 200 + index * 500, y: 300, width: 300, height: 150, rotation: 0, ...(index === 0 ? { plantumlSource: '@startuml\nA -> B\n@enduml' } : {}) } })
+  }
+  const frame = engine(page)
+  await expect(frame.locator('.komu-image')).toHaveCount(3)
+  await frame.evaluate(() => { window.__komuboard.canvas.setTool('select'); window.__komuboard.canvas.restoreStudyView({ x: 0, y: 0, zoom: 1 }) })
+  const before = await frame.evaluate(() => JSON.stringify([...window.__komuboard.doc.getMap('objects').values()].map(map => map.toJSON())))
+  const image = frame.locator('.komu-image').first(), box = await image.boundingBox()
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2)
+  const reader = page.getByRole('dialog', { name: 'Visor de imágenes de la pizarra', exact: true })
+  await expect(reader).toBeVisible()
+  assert.deepEqual(await reader.boundingBox(), { x: 0, y: 0, width: 1440, height: 1000 })
+  await expect(reader.getByText('Imagen 1 de 3', { exact: true })).toBeVisible()
+  await expect.poll(() => requests).toEqual(['reader-first.svg'])
+  await expect(reader.getByText('Cargando imagen…')).toHaveCount(0)
+  const painted = () => reader.locator('[data-study-image-viewer] canvas').evaluateAll(canvases => canvases.some(canvas => {
+    const context = canvas.getContext('2d')
+    if (!context || !canvas.width || !canvas.height) return false
+    const pixel = context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data
+    return pixel[0] > 240 && pixel[1] > 240 && pixel[2] > 240 && pixel[3] > 240
+  }))
+  await expect.poll(painted).toBe(true)
+  await expect(reader.getByRole('button')).toHaveCount(1)
+  await page.mouse.move(700, 500); await page.mouse.wheel(0, -300)
+  await page.keyboard.press('ArrowRight')
+  await expect(reader.getByText('Imagen 2 de 3', { exact: true })).toBeVisible()
+  await expect.poll(() => requests).toEqual(['reader-first.svg', 'reader-second.svg'])
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => requests).toEqual(['reader-first.svg', 'reader-second.svg', 'reader-third.svg'])
+  await expect(reader.getByRole('status')).toContainText('No se pudo cargar la imagen')
+  await page.keyboard.press('ArrowRight')
+  await expect(reader.getByText('Imagen 3 de 3', { exact: true })).toHaveCount(1)
+  await page.keyboard.press('ArrowLeft')
+  await expect(reader.getByText('Imagen 2 de 3', { exact: true })).toBeVisible()
+  await expect(reader.getByRole('status')).toHaveCount(0)
+  await page.keyboard.press('Tab')
+  assert.equal(await reader.evaluate(element => element.contains(document.activeElement)), true)
+  await page.keyboard.press('Escape'); await expect(reader).toHaveCount(0)
+  await expect.poll(() => frame.evaluate(() => document.hasFocus())).toBe(true)
+  assert.equal(await frame.evaluate(() => JSON.stringify([...window.__komuboard.doc.getMap('objects').values()].map(map => map.toJSON()))), before)
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2)
+  await expect(reader).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.deepEqual(await reader.boundingBox(), { x: 0, y: 0, width: 390, height: 844 })
+  await expect(reader.getByRole('status')).toHaveCount(0)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await expect.poll(painted).toBe(true)
+  await page.screenshot({ path: 'test-results/study-image-reader-mobile.png' })
+  await reader.getByRole('button', { name: 'Volver a la pizarra', exact: true }).click()
+  await expect(reader).toHaveCount(0)
+  assert.deepEqual(errors, [])
+})
+
 test('a mixed file batch imports later PDFs and releases the importer after reporting failures', { timeout: 60000 }, async t => {
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
   const context = await browser.newContext(); await fixture(context)

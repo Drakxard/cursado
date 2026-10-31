@@ -1,8 +1,8 @@
 import * as Y from 'yjs'
-import { addObject, objectsMap, type BoardObject, type TextRun } from '@komuboard/shared'
+import { addObject, objectsMap, orderArray, type BoardObject, type TextRun } from '@komuboard/shared'
 import type YProvider from 'y-partyserver/provider'
 import type { BoardCanvas } from './canvas'
-import { uploadImage, UploadError } from './uploads'
+import { uploadImage, UploadError, imageSrcUrl } from './uploads'
 import { convertStudyBoard, repairStudyReviewMarker, migrationErrorSummary, studyCard, STUDY_CONVERTER_VERSION, type StudyObject, type StudyAttachment, type MigrationReport } from '../../../../lib/study-board-migration'
 import { BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, BOARD_SHORTCUT_MIME, parseBoardShortcutDrag, parseBoardPdfDrag, parseBoardLinkDrag, parseImportantDrag } from '../../../../lib/board-library-contract'
 import './study.css'
@@ -42,6 +42,17 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   document.querySelector('komu-tool-dock [data-tool="image"]')?.remove()
   let initialized = false, busy = false, report: MigrationReport | undefined, checkpointTimer: ReturnType<typeof setTimeout> | undefined
   const send = (type: string, data: Record<string, unknown> = {}) => parent.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin)
+  document.getElementById('board')!.addEventListener('dblclick', event => {
+    if (event.button !== 0 || (event.target as Element).closest('button,input,textarea,[contenteditable]')) return
+    const id = canvas.studyHitAt(event.clientX, event.clientY)
+    if (!id || objectsMap(doc).get(id)?.get('type') !== 'image') return
+    event.preventDefault(); event.stopImmediatePropagation()
+    const images = [...new Set(orderArray(doc).toArray())].flatMap(imageId => {
+      const map = objectsMap(doc).get(imageId), src = map?.get('src')
+      return map?.get('type') === 'image' && typeof src === 'string' ? [{ id: imageId, url: imageSrcUrl(src) }] : []
+    })
+    send('read-image', { initialId: id, images })
+  }, true)
   const checkpoint = () => { send('checkpoint', { draft: encode(Y.encodeStateAsUpdate(doc)), report, imported: !!doc.getMap('study-migration').get('complete') }); checkpointTimer = undefined }
   const atCenter = () => { const view = canvas.worldViewport(); return { x: view.x + view.width / 2, y: view.y + view.height / 2 } }
   const insert = (object: StudyObject) => {

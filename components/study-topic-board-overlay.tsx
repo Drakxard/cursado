@@ -3,6 +3,7 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import { StudyBoardNavigationContext } from './study-board-navigation'
 import { StudyDiagramsDialog } from './study-diagrams-dialog'
+import { StudyImageViewer, type StudyImage } from './study-image-viewer'
 import { InlineTableEditor } from './study-inline-table-editor'
 import { boardPdfReference, parseBoardLinkDrag, type BoardPdfReference, type BoardLinkReference } from '@/lib/board-library-contract'
 import { openStudyBoard, saveStudyBoard, confirmStudyMigration } from '@/lib/study-board-workspace'
@@ -46,6 +47,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const [review, setReview] = useState<MigrationReport | null>(null), [attachment, setAttachment] = useState<{ id: string; study: StudyAttachment } | null>(null)
   const [closing, setClosing] = useState(false)
   const [diagrams, setDiagrams] = useState(false)
+  const [imageReader, setImageReader] = useState<{ images: StudyImage[]; initialId: string } | null>(null)
   const [diagramEdit, setDiagramEdit] = useState<{ id: string; source: string } | null>(null)
   const diagramImport = useRef<{ id: string; resolve: () => void; reject: (error: Error) => void } | null>(null)
   const [readerLoading, setReaderLoading] = useState(false)
@@ -117,6 +119,10 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       const data = event.data
       if (event.origin !== location.origin || data?.session !== session || data?.boardId !== boardId) return
       if (event.source === frame.current?.contentWindow) {
+        if (data.type === 'study-board:read-image' && typeof data.initialId === 'string' && Array.isArray(data.images)) {
+          const images = data.images.filter((image: any): image is StudyImage => typeof image?.id === 'string' && typeof image.url === 'string' && /^https?:\/\//.test(image.url))
+          if (images.some((image: StudyImage) => image.id === data.initialId)) setImageReader({ images, initialId: data.initialId })
+        }
         if (data.type === 'study-board:diagrams') { setDiagramEdit(null); setDiagrams(true) }
         if (data.type === 'study-board:edit-diagram' && typeof data.id === 'string' && typeof data.source === 'string' && data.source.length <= 100000) {
           setDiagramEdit({ id: data.id, source: data.source }); setDiagrams(true)
@@ -239,6 +245,8 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     } catch (reason) { setError(String(reason)) }
   }
   return <div role="dialog" aria-modal="true" aria-label={`Pizarra de ${name}`} className="fixed inset-0 z-[150] bg-white text-slate-900">
+    {imageReader && <StudyImageViewer {...imageReader} onClose={() => { setImageReader(null); requestAnimationFrame(focusBoard) }} />}
+    <div inert={!!imageReader} style={{ display: 'contents' }}>
     <div className="flex h-full">
       <div className="relative min-w-0" style={{ width: split ? '50%' : '100%', height: '100%' }}>
         {initial && <iframe ref={frame} title={`Pizarra de ${name}`} src={`/study-board/index.html?topicBoard=${encodeURIComponent(boardId)}&room=${encodeURIComponent(initial.record.roomId)}&session=${session}&studyTitle=${encodeURIComponent(name)}`} className="h-full w-full border-0" onLoad={initialize} />}
@@ -271,6 +279,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       <p className="whitespace-pre-wrap">{error || status}</p>
       {error && <div className="mt-2 flex gap-3">{!ready ? <><button onClick={() => { setError(''); setReview(null); setStatus('Reintentando la migración…'); initialize() }}>Reintentar migración</button><button onClick={() => void cancel()}>Volver a Estudio</button></> : <button onClick={() => setError('')}>Cerrar aviso</button>}</div>}
     </div>}
+    </div>
   </div>
 }
 
