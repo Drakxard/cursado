@@ -162,7 +162,7 @@ test('drag pairs, cancel grouping, nested folders, parent drop and saving inside
   const w = await page.evaluate(() => window.storage.loadAudioWorkspace('algebra'))
   assert.equal(w.audios.find(a=>a.name==='Dentro del conjunto').parentId,w.folders.find(f=>f.name==='Matrices').id)
 })
-test('new recording can be confirmed directly from the recording modal', async t => {
+test('empty project records from the transport without a recording modal', async t => {
   const page = await setup(t)
   await page.keyboard.press('+')
   const frame = page.frameLocator('iframe[title="AudioMass"]')
@@ -174,21 +174,25 @@ test('new recording can be confirmed directly from the recording modal', async t
       oscillator.connect(destination); oscillator.start(); await context.resume()
       return destination.stream
     }
-    window.PKAudioEditor.fireEvent('RequestActionNewRec')
   })
-  await frame.getByText('START RECORDING',{exact:true}).click()
-  await frame.getByText('FINISH RECORDING',{exact:true}).waitFor()
+  await frame.locator('.pk_transport .icon-rec').click()
+  await frame.locator('.pk_transport .icon-rec.pk_act').waitFor()
+  assert.equal(await frame.locator('.pk_rec').count(), 0)
+  assert.equal(await frame.locator('.pk_modal').count(), 0)
   await page.frames().find(frame=>frame.url().includes('/audiomass/')).evaluate(() => {
     const recognition = window.recognitions.at(-1)
     if (!recognition) throw Error('Live dictation did not start with recording')
     recognition.onresult({resultIndex:0,results:[{isFinal:false,0:{transcript:'Una matriz'}}]})
     recognition.finalOnStop = 'Una matriz tiene filas y columnas.'
   })
-  // Wait for actual microphone samples rather than a timer-based synthetic buffer.
-  await page.waitForFunction(() => {
-    const doc = document.querySelector('iframe').contentDocument
-    return parseFloat(doc.querySelector('.pk_rec .pk_row:nth-child(2) span')?.textContent || '0') > .5
+  // The real capture node must deliver samples to the editor timeline.
+  await page.frames().find(frame=>frame.url().includes('/audiomass/')).waitForFunction(() => {
+    const backend = window.PKAudioEditor.engine.wavesurfer.backend
+    return backend.extraPeaks?.reduce((sum, chunk) => sum + chunk.length, 0) > backend.ac.sampleRate / 2
   })
+  await frame.locator('.pk_transport .icon-rec').click()
+  await frame.locator('.pk_transport .icon-rec.pk_act').waitFor({state:'hidden'})
+  assert.equal(await frame.locator('.pk_rec').count(), 0)
   await requestSave(page)
   await page.frameLocator('iframe[title="AudioMass"]').getByLabel('Nombre del audio').fill('Grabación nueva')
   await page.frameLocator('iframe[title="AudioMass"]').getByRole('button',{name:'Confirmar audio',exact:true}).click()
@@ -263,4 +267,33 @@ test('unsupported browser saves audio without loading a model; old transcripts r
   await page.reload(); await page.getByText('Transcripción guardada',{exact:true}).waitFor()
   assert.equal((await page.evaluate(()=>window.storage.loadAudioWorkspace('algebra'))).audios[0].transcript,'Texto anterior')
   assert.equal(requests.some(url=>/huggingface|onnx|transcription\/worker|\.wasm/.test(url)),false)
+})
+
+
+test('microphone failure allows retry and New Recording uses the timeline', async t => {
+  const page = await setup(t)
+  await page.keyboard.press('+')
+  const frame = page.frameLocator('iframe[title="AudioMass"]')
+  await frame.locator('.pk_transport .icon-rec').click()
+  await frame.getByText('No microphone in test', {exact:true}).waitFor()
+  await frame.locator('.pk_modal_cancel').click()
+  assert.equal(await frame.locator('.pk_transport .icon-rec').isEnabled(), true)
+  const editor = page.frames().find(frame=>frame.url().includes('/audiomass/'))
+  await editor.evaluate(() => {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const context = new AudioContext(), source = context.createOscillator(), destination = context.createMediaStreamDestination()
+      source.connect(destination); source.start(); await context.resume()
+      return destination.stream
+    }
+    window.PKAudioEditor.fireEvent('RequestActionNewRec')
+  })
+  await frame.locator('.pk_transport .icon-rec.pk_act').waitFor()
+  assert.equal(await frame.locator('.pk_modal').count(), 0)
+  await editor.waitForFunction(() => {
+    const backend = window.PKAudioEditor.engine.wavesurfer.backend
+    return backend.extraPeaks?.reduce((sum, chunk) => sum + chunk.length, 0) > backend.ac.sampleRate / 2
+  })
+  await frame.locator('.pk_transport .icon-rec').click()
+  await frame.locator('.pk_transport .icon-rec.pk_act').waitFor({state:'hidden'})
+  assert.ok(await editor.evaluate(() => window.PKAudioEditor.engine.wavesurfer.backend.buffer.duration) > .1)
 })

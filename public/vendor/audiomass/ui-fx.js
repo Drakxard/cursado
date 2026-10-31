@@ -1232,7 +1232,7 @@
 		});
 
 		app.listenFor ('RequestActionNewRec', function () {
-			PKAudioEditor._deps.FxREC (app);
+			app.fireEvent ('RequestActionRecordToggle');
 		});
 
 		//app.listenFor ('RequestActionAUTO', function ( filter ) {

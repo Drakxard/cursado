@@ -4,6 +4,8 @@ La lupa activa la entrada a las esferas de búsqueda. Dentro de una esfera, `+` 
 
 Arrastrar un audio sobre otro crea un conjunto después de pedir su nombre. Arrastrar audios o conjuntos sobre un conjunto existente los mueve allí. El botón «Nivel superior» también recibe elementos arrastrados. No se admiten ciclos. El material anterior sigue disponible mediante «Material guardado anteriormente»; se retiró la carga de nuevas imágenes y la búsqueda manual `tema/temas`.
 
+La grabación comienza directamente con el botón rojo de la barra de AudioMass (o R), incluso con el proyecto vacío. El mismo botón la detiene y deja la onda en la línea de tiempo para editarla. La opción New Recording usa ese mismo flujo: no abre el diálogo flotante de dispositivos. Si falla el permiso del micrófono, se puede reintentar sin cerrar el editor.
+
 ## Persistencia y cooperación
 
 - `manifests/subject-voice/<materia>/audios.json`: versión 1, conjuntos con `parentId`, audios con identidad estable, ubicación, nombre, duración y transcripción.

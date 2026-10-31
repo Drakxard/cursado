@@ -2793,8 +2793,7 @@
 		};
 
 		UI.listenFor ('ErrorRec', function() {
-			btn_rec.style.opacity = 0.6;
-			btn_rec.setAttribute("disabled", "disabled");
+			btn_rec.classList.remove ('pk_act');
 		});
 
 		transport.appendChild ( btn_rec );

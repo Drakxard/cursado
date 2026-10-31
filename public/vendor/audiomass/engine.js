@@ -1373,14 +1373,11 @@
 			OneUp ('Paste to ' + dims[0].toFixed(2), 982);
 		});
 
-		var _sk = false;
+		var _sk = false, empty_recording = false;
+		app.listenFor ('DidLoadFile', function () {
+			if (wavesurfer.backend.buffer && wavesurfer.backend.buffer.length > 1) empty_recording = false;
+		});
 		app.listenFor ('RequestActionRecordToggle', function () {
-			if (!q.is_ready) {
-				// if not ready then bring up the new recording toggle!
-				app.fireEvent('RequestActionNewRec');
-
-				return ;
-			}
 
 			if (app.rec.isActive ()) {
 				app.fireEvent('RequestActionRecordStop');
@@ -1410,7 +1407,16 @@
 		});
 
 		app.listenFor ('RequestActionRecordStart', function () {
-			if (!q.is_ready) return ;
+			if (app.rec.isActive ()) return (false);
+			// The transport recorder also starts an empty project, directly on the timeline.
+			var new_recording = !q.is_ready || empty_recording;
+			if (new_recording) {
+				empty_recording = true;
+				var context = wavesurfer.backend.getAudioContext ();
+				wavesurfer.loadDecodedBuffer (context.createBuffer (1, 1, context.sampleRate));
+				q.is_ready = true;
+				app.fireEvent ('DidLoadFile');
+			}
 
 			app.fireEvent ('RequestPause');
 
@@ -1436,6 +1442,7 @@
 					return ;
 				}
 
+				empty_recording = false;
 				handleStateInline ( offset );
 				var dims = AudioUtils.ReplaceFloatArrays ( offset, buffers );
 
@@ -1458,7 +1465,9 @@
 			// --- ending offset is song full duration...
 			// if we have a selected area - mark that one as the end
 			var region = wavesurfer.regions.list[0];
-			if (region)
+			if (new_recording)
+				app.rec.setEndingOffset (Infinity);
+			else if (region)
 				app.rec.setEndingOffset ( region.end * wavesurfer.backend.buffer.sampleRate );
 			else
 				app.rec.setEndingOffset ( wavesurfer.getDuration () * wavesurfer.backend.buffer.sampleRate );

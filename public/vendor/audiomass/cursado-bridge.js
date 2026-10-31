@@ -51,15 +51,9 @@
     close.setAttribute('aria-label', 'Cerrar editor de audio'); close.title = 'Cerrar editor de audio'; close.onclick = function () { send('close'); };
     transport.appendChild(close);
   }
-  // A new recording has its own modal above the transport controls.
-  var modalObserver = new MutationObserver(function () {
-    var rec = document.querySelector('.pk_rec'), bottom = rec && rec.closest('.pk_modal').querySelector('.pk_modal_bottom');
-    if (bottom && !bottom.querySelector('.cursado-audio-save')) bottom.appendChild(saveButton());
-  });
-  modalObserver.observe(document.body, { childList: true, subtree: true });
   var speechState = '';
   var speech = window.CursadoLiveSpeech(function (state) {
-    speechState = state.transcriptionError || (state.listening ? 'Transcribiendo mientras grab?s?' : '');
+    speechState = state.transcriptionError || (state.listening ? 'Transcribiendo mientras grab\u00e1s\u2026' : '');
     if (saveModal) saveModal.el_body.querySelector('[role="status"]').textContent = speechState;
     send('transcript', state);
   });
@@ -76,7 +70,7 @@
     if (event.target.closest('.pk_rec .pk_tbsa')) { dirty = true; send('dirty'); }
   });
   function wav(buffer) {
-    if (!buffer || !buffer.length) throw new Error('Grabá o importá un audio antes de confirmar.');
+    if (!buffer || buffer.length <= 1) throw new Error('Grabá o importá un audio antes de confirmar.');
     var channels = buffer.numberOfChannels, count = buffer.length;
     var bytes = new ArrayBuffer(44 + count * channels * 2), view = new DataView(bytes);
     function str(offset, text) { for (var i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); }
@@ -93,25 +87,6 @@
     return new Blob([bytes], { type: 'audio/wav' });
   }
   function exportAudio() {
-      // The new-recording modal keeps its buffer separate until OPEN RECORDING.
-      // Confirming in Cursado finishes and opens it, avoiding an extra manual step.
-      var rec = document.querySelector('.pk_rec');
-      if (rec) {
-        var buttons = rec.querySelectorAll('.pk_tbsa');
-        var active = /FINISH RECORDING/.test(buttons[0].textContent);
-        if (active) buttons[0].click();
-        setTimeout(function () {
-          if (buttons[2].style.display === 'none') { send('error', { error: 'Grabá un audio antes de confirmar.' }); return; }
-          var timeout = setTimeout(function () {
-            app.stopListeningFor('DidLoadFile', loaded);
-            send('error', { error: 'No se pudo preparar la grabación. Reintentá.' });
-          }, 15000);
-          function loaded() { clearTimeout(timeout); app.stopListeningFor('DidLoadFile', loaded); setTimeout(exportAudio, 0); }
-          app.listenFor('DidLoadFile', loaded);
-          buttons[2].click();
-        }, active ? 320 : 0);
-        return;
-      }
       if (recording) { send('error', { error: 'Detené la grabación antes de confirmar.' }); return; }
       app.fireEvent('RequestStop');
       async function done(buffer) {
@@ -134,6 +109,6 @@
     if (event.key === 'Escape' && !document.querySelector('.pk_modal')) send('close');
   });
   window.addEventListener('beforeunload', function (event) { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', function () { modalObserver.disconnect(); speech.dispose(); });
+  window.addEventListener('pagehide', function () { speech.dispose(); });
   send('ready');
 })();
