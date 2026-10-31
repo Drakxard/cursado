@@ -10,6 +10,7 @@ export interface ContextMenuActions {
   copy(): void;
   paste(): void;
   duplicate(): void;
+  downloadImage(): void;
   remove(): void;
   bringToFront(): void;
   sendToBack(): void;
@@ -25,6 +26,7 @@ export interface SelectionMetaLite {
   count: number;
   locked: boolean;
   grouped: boolean;
+  imageSrc?: string;
 }
 
 export interface ContextMenu {
@@ -84,6 +86,7 @@ export function createContextMenu(actions: ContextMenuActions): ContextMenu {
                 disabled: !actions.canPaste(),
               },
               { label: "Duplicate", key: "common.duplicate", act: "duplicate" },
+              ...(meta.imageSrc ? [{ label: "Download image", key: "menu.downloadImage", act: "downloadImage" } satisfies Item] : []),
             ],
             [
               {

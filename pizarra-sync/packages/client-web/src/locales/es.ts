@@ -230,6 +230,8 @@ const dict: Record<string, string> = {
   // menus (context + app)
   "menu.cut": "Cortar",
   "menu.copy": "Copiar",
+  "menu.downloadImage": "Descargar imagen",
+  "toast.imageDownloadFailed": "No se pudo descargar la imagen. Intentá de nuevo.",
   "menu.paste": "Pegar",
   "menu.selectAll": "Seleccionar todo",
   "menu.zoomToFit": "Ajustar a la pantalla",

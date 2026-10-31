@@ -296,7 +296,7 @@ jobs:
           STUDY_BOARD_WORKER_HOST: 127.0.0.1:8787
       - run: pnpm exec playwright install --with-deps chromium
       - name: Camara, geometria y gestos
-        run: pnpm exec playwright test e2e/camera-direct.spec.ts e2e/viewport.spec.ts --trace on
+        run: pnpm exec playwright test e2e/camera-direct.spec.ts e2e/viewport.spec.ts e2e/image-download.spec.ts --trace on
       - name: Preparar Chromium de las pruebas de integracion
         run: npx playwright install chromium
         working-directory: .

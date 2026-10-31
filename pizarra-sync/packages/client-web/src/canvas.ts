@@ -2016,7 +2016,7 @@ export class BoardCanvas {
   /** Summary of the current selection for the mobile action bar: count, whether it's all-locked (lock
    *  toggle label), whether it forms one group (Group vs Ungroup), and whether it overlaps any other
    *  object (so Bring-to-front / Send-to-back are worth offering). */
-  selectionMeta(): { count: number; locked: boolean; grouped: boolean; overlapping: boolean } {
+  selectionMeta(): { count: number; locked: boolean; grouped: boolean; overlapping: boolean; imageSrc?: string } {
     const ids = this.selectionIds();
     const locked =
       ids.length > 0 && ids.every((id) => this.objects.get(id)?.get("locked") === true);
@@ -2024,7 +2024,9 @@ export class BoardCanvas {
     const gid = first ? this.objects.get(first)?.get("groupId") : undefined;
     const grouped =
       typeof gid === "string" && ids.every((id) => this.objects.get(id)?.get("groupId") === gid);
-    return { count: ids.length, locked, grouped, overlapping: this.selectionOverlapsOthers(ids) };
+    const image = ids.length === 1 && first ? this.objects.get(first) : undefined;
+    const imageSrc = image?.get("type") === "image" && typeof image.get("src") === "string" ? image.get("src") as string : undefined;
+    return { count: ids.length, locked, grouped, overlapping: this.selectionOverlapsOthers(ids), imageSrc };
   }
 
   /** Whether any selected object's world AABB intersects a *non-selected* object's — i.e. restacking

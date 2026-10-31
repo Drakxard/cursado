@@ -36,7 +36,7 @@ import type { ShapePickDetail } from "./shape-panel";
 import "./stamp-wheel";
 import "./emoji-picker";
 import { pushStampRecent } from "./stamp-wheel";
-import { uploadImage, UploadError } from "./uploads";
+import { uploadImage, UploadError, imageSrcUrl } from "./uploads";
 import type { PenChange } from "./draw-bar";
 import "./zoombar";
 import type { ZoomDetail } from "./zoombar";
@@ -306,6 +306,23 @@ const contextMenu = createContextMenu({
     canvas.deleteSelection();
   },
   copy: () => copyToClipboards(),
+  downloadImage: () => {
+    const src = canvas.selectionMeta().imageSrc;
+    if (!src) return;
+    void (async () => {
+      try {
+        const response = await fetch(imageSrcUrl(src));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        const extension = /\.(png|jpe?g|webp|gif|svg|avif)$/i.exec(src)?.[1]?.toLowerCase()
+          ?? ({ "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif", "image/svg+xml": "svg", "image/avif": "avif" } as Record<string, string>)[blob.type]
+          ?? "png";
+        downloadBlob(blob, `imagen.${extension}`);
+      } catch {
+        showToast(tr("toast.imageDownloadFailed"));
+      }
+    })();
+  },
   paste: () => void pasteFromClipboards(),
   duplicate: () => {
     canvas.copySelection();
