@@ -8,6 +8,7 @@ import { HoldActionButton } from "./hold-action-button"
 import { InlinePdfName } from "./inline-pdf-name"
 
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
+import { readStudyLocation, updateStudyLocation } from '@/lib/study-location'
 import { CooperationWeekSelector } from "@/components/cooperation-week-selector"
 import { CooperationPanel, CooperationSyncStatus, useCooperation } from '@/components/cooperation'
 import { reportCooperationError, removeLocalCooperationSubjects, undoCooperationSphere, COOPERATIVE_TAB_ID, cooperationGroupTab, refreshCooperation, finishCooperationSelection, shareCooperationSphere, canonicalCooperationSubject, canonicalCooperationElement, localCooperationBoardId, cooperationDeletionFor, cooperationPersonalFor, guardCooperationElement } from '@/lib/client/cooperation'
@@ -1291,6 +1292,8 @@ export function SubjectWheel({
   boardLibrary?: boolean
 }) {
   const router = useRouter()
+  const [initialStudyLocation] = useState(() => readStudyLocation(typeof window === 'undefined' ? '' : window.location.search))
+  const [hasRestoredStudyLocation, setHasRestoredStudyLocation] = useState(false)
   const [containerBoard, setContainerBoard] = useState<{ boardId: string; name: string; pdfReferences: BoardPdfReference[]; cooperationWeekNumber?: number; cooperationSubjectId?: string } | null>(null)
   const closeContainerBoard = useCallback(() => setContainerBoard(null), [])
   const localWorkspace = useLocalWorkspace()
@@ -5526,6 +5529,38 @@ export function SubjectWheel({
         }
       : null
   }, [initialSearchParams?.returnToken, resetSubjectUiState, router, visibleSubjects])
+
+  useEffect(() => {
+    if (boardLibrary || hasRestoredStudyLocation || !hasResolvedPersistentWorkspaceState || !localWorkspaceReady) return
+    // The existing viewer return token takes precedence over URL restoration.
+    if (!initialSearchParams?.returnToken) {
+      const requested = initialStudyLocation.subject
+      const subject = requested ? getSubjectById(requested.subjectId, [...builtInVisibleSubjects, ...Object.values(customSubjects)]) : null
+      const tab = workspaceTabList.find(tab => tab.id === initialStudyLocation.tab)
+      if (tab) setActiveWorkspaceTabId(tab.id)
+      if (subject && requested) {
+        resetSubjectUiState()
+        setCurrentSubject(subject)
+        setDialogDateKey(requested.date ?? getTodayDateString())
+        setPracticeSectionView(requested.section)
+        setExerciseWeeklyScopeEnabled(requested.weekly)
+        setIsDialogOpen(true)
+        if (initialStudyLocation.board) setContainerBoard({ ...initialStudyLocation.board, pdfReferences: [] })
+      }
+    }
+    setHasRestoredStudyLocation(true)
+  }, [boardLibrary, hasRestoredStudyLocation, hasResolvedPersistentWorkspaceState, localWorkspaceReady, initialSearchParams?.returnToken, initialStudyLocation, builtInVisibleSubjects, customSubjects, workspaceTabList])
+
+  useEffect(() => {
+    if (boardLibrary || !hasRestoredStudyLocation) return
+    updateStudyLocation({
+      pestana: activeWorkspaceTabId,
+      materia: isDialogOpen ? currentSubject?.id ?? null : null,
+      fecha: isDialogOpen ? subjectDialogDateKey : null,
+      seccion: isDialogOpen ? practiceSectionView : null,
+      alcance: isDialogOpen && exerciseWeeklyScopeEnabled ? 'semana' : null,
+    })
+  }, [boardLibrary, hasRestoredStudyLocation, activeWorkspaceTabId, isDialogOpen, currentSubject?.id, subjectDialogDateKey, practiceSectionView, exerciseWeeklyScopeEnabled])
 
   useEffect(() => {
     const pendingReturn = pendingViewerReturnContinueRef.current

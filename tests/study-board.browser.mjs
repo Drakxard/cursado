@@ -9,10 +9,14 @@ const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   import {createRoot} from 'react-dom/client';
   import {TopicBoardOverlay} from './components/topic-board-overlay';
   import {StudyBoardNavigationContext} from './components/study-board-navigation';
+  import {StudyImportantTasks} from './components/study-important-tasks';
+  import {NativeWorkspaceProvider} from './components/local-workspace-provider';
   import {cooperationState} from './lib/client/cooperation';
   const fs=await navigator.storage.getDirectory();
   const dir=await(await fs.getDirectoryHandle('progreso',{create:true})).getDirectoryHandle('pizarras',{create:true});
   const root=createRoot(document.getElementById('root'));
+  const persistentStudy=children=><NativeWorkspaceProvider rootHandle={fs}><StudyImportantTasks>{children}</StudyImportantTasks></NativeWorkspaceProvider>;
+  window.openPersistentBoard=()=>root.render(persistentStudy(<TopicBoardOverlay boardId="route-first" name="Pizarra inicial" rootHandle={fs} onClose={()=>root.render(persistentStudy(<button onClick={()=>window.openPersistentBoard()}>Abrir pizarra</button>))}/>));
   window.delegateBoard=()=>root.render(<StudyBoardNavigationContext.Provider value={reference=>{window.delegatedBoard=reference}}><TopicBoardOverlay boardId="target" name="Destino" rootHandle={fs} onClose={()=>{}} /></StudyBoardNavigationContext.Provider>);
   window.read=async path=>{let directory=fs;const parts=path.split('/');for(const part of parts.slice(0,-1))directory=await directory.getDirectoryHandle(part);return JSON.parse(await(await(await directory.getFileHandle(parts.at(-1))).getFile()).text())};
   window.openBoard=id=>root.render(<TopicBoardOverlay key={id} boardId={id} name={id} rootHandle={fs} pdfReferences={[{materialId:1,subjectId:'subject',fileName:'Uno.pdf',workspaceFileId:'workspace://teoria/uno.pdf'},{materialId:2,subjectId:'subject',fileName:'Dos.pdf',workspaceFileId:'workspace://teoria/dos.pdf'}]} onClose={()=>{window.boardClosed=true;root.render(<button onClick={()=>window.openBoard(id)}>Reabrir</button>)}}/>);
@@ -37,7 +41,8 @@ const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
     if(id==='upload-failure'){for(let i=0;i<3;i++){content.media.push({id:'image-'+i,kind:'image',assetId:'asset-'+i,x:90+i*120,y:210,width:100,height:100});assets['asset-'+i]='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='}}
     const writer=await(await dir.getFileHandle(id+'.json',{create:true})).createWritable();await writer.write(JSON.stringify({version:1,boardId:id,name:id,content,assets}));await writer.close();
   }
-  if(!new URLSearchParams(location.search).has('defer'))window.openBoard(new URLSearchParams(location.search).get('board')||'first');
+  if(new URLSearchParams(location.search).has('persist'))root.render(persistentStudy(<button onClick={()=>window.openPersistentBoard()}>Abrir pizarra</button>));
+  else if(!new URLSearchParams(location.search).has('defer'))window.openBoard(new URLSearchParams(location.search).get('board')||'first');
 `, loader: 'tsx' }, loader: { '.css': 'empty' }, jsx: 'automatic', bundle: true, format: 'esm', write: false })
 
 async function fixture(context) {
@@ -549,6 +554,34 @@ test('cooperative container opens the same live room across independent devices'
   await expect.poll(() => engine(b).evaluate(id => window.__komuboard.doc.getMap('objects').get(id)?.get('x'),objectId)).toBe(450)
 })
 
+test('study URL reload restores the current nested board and closing clears its location', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
+  await context.route('**/estudio?**', route => route.fulfill({ contentType: 'text/html', body: '<style>body{margin:0}.fixed{position:fixed}.absolute{position:absolute}.top-3{top:12px}.left-3{left:12px}.inset-0{inset:0}.h-full{height:100%}.w-full{width:100%}.flex{display:flex}iframe{border:0}</style><div id="root"></div><script type="module" src="/study-parent.js"></script>' }))
+  const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message))
+  await page.goto(origin + '/estudio?persist=1&untouched=yes#anchor')
+  await page.getByRole('button', { name: 'Abrir pizarra', exact: true }).click(); await loaded(page, 'route-first')
+  await expect.poll(() => new URL(page.url()).searchParams.get('pizarra')).toBe('route-first')
+  await send(page, 'insert', { object: { type: 'text', authorId: 'test', x: 100, y: 400, width: 320, height: 62, runs: [{ text: 'Destino' }], fontFamily: 'system-ui', fontSize: 18, align: 'left', study: { kind: 'board', reference: { boardId: 'local:important-route-second', name: 'Pizarra siguiente' } } } })
+  await engine(page).evaluate(() => { window.__komuboard.canvas.setTool('select'); window.__komuboard.canvas.restoreStudyView({ x: 0, y: 0, zoom: 1 }) })
+  const box = await engine(page).locator('[data-study=board]').boundingBox()
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2); await loaded(page, 'route-second')
+  await expect.poll(() => new URL(page.url()).searchParams.get('pizarra')).toBe('route-second')
+  await page.reload(); await loaded(page, 'route-second')
+  await expect(page.getByRole('dialog', { name: 'Pizarra de Pizarra siguiente', exact: true })).toHaveCount(1)
+  assert.equal(new URL(page.url()).searchParams.get('untouched'), 'yes'); assert.equal(new URL(page.url()).hash, '#anchor')
+  await page.getByRole('button', { name: 'Volver a Estudio', exact: true }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.has('pizarra')).toBe(false)
+  await page.reload(); await expect(page.getByRole('button', { name: 'Abrir pizarra', exact: true })).toBeVisible()
+  assert.equal(engine(page), undefined)
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => new URL(page.url()).searchParams.get('importantes')).toBe('1')
+  await expect(page.getByRole('heading', { name: 'Importantes', exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Importantes', exact: true })).toBeVisible()
+  assert.deepEqual(errors, [])
+})
+
 test('image reader opens on double click, loads one image at a time and returns without editing the board', { timeout: 60000 }, async t => {
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
@@ -559,7 +592,7 @@ test('image reader opens on double click, loads one image at a time and returns 
       requests.push(name)
       if (name === 'reader-third.svg') return route.fulfill({ status: 404, body: '' })
     }
-    return route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2048"><rect width="4096" height="2048" fill="white"/><text x="500" y="500" font-size="100">Diagrama grande</text></svg>' })
+    return route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="8192"><rect width="4096" height="8192" fill="white"/><text x="500" y="500" font-size="100">Diagrama grande</text></svg>' })
   })
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message))
   await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openBoard)
@@ -587,7 +620,37 @@ test('image reader opens on double click, loads one image at a time and returns 
   }))
   await expect.poll(painted).toBe(true)
   await expect(reader.getByRole('button')).toHaveCount(1)
+  assert.equal(await reader.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)')
+  const surface = reader.locator('[data-study-image-viewer]')
+  await expect(surface).toHaveAttribute('data-render-mode', 'detail')
+  const initialTransform = await reader.locator('[data-study-image-preview]').evaluate(canvas => canvas.style.transform)
+  await page.evaluate(() => {
+    window.readerDetailDraws = 0
+    const original = CanvasRenderingContext2D.prototype.drawImage
+    window.restoreReaderDraw = () => { CanvasRenderingContext2D.prototype.drawImage = original }
+    CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+      if (document.querySelector('[data-study-image-viewer]')?.contains(this.canvas)) window.readerDetailDraws++
+      return Reflect.apply(original, this, args)
+    }
+  })
   await page.mouse.move(700, 500); await page.mouse.wheel(0, -300)
+  await expect(surface).toHaveAttribute('data-render-mode', 'preview')
+  for (let step = 0; step < 6; step++) await page.mouse.wheel(0, -40)
+  assert.equal(await page.evaluate(() => window.readerDetailDraws), 0)
+  assert.notEqual(await reader.locator('[data-study-image-preview]').evaluate(canvas => canvas.style.transform), initialTransform)
+  assert.ok(await reader.locator('[data-study-image-preview]').evaluate(canvas => Math.max(canvas.width, canvas.height) <= 2048))
+  await expect(surface).toHaveAttribute('data-render-mode', 'detail')
+  assert.ok(await page.evaluate(() => window.readerDetailDraws) > 0)
+  await page.evaluate(() => { window.readerDetailDraws = 0 })
+  await page.mouse.move(700, 500); await page.mouse.down()
+  await page.mouse.move(900, 600, { steps: 10 })
+  await expect(surface).toHaveAttribute('data-render-mode', 'preview')
+  assert.equal(await page.evaluate(() => window.readerDetailDraws), 0)
+  await page.mouse.up()
+  await expect(surface).toHaveAttribute('data-render-mode', 'detail')
+  assert.ok(await page.evaluate(() => window.readerDetailDraws) > 0)
+  await page.evaluate(() => window.restoreReaderDraw())
+  assert.deepEqual(requests, ['reader-first.svg'])
   await page.keyboard.press('ArrowRight')
   await expect(reader.getByText('Imagen 2 de 3', { exact: true })).toBeVisible()
   await expect.poll(() => requests).toEqual(['reader-first.svg', 'reader-second.svg'])

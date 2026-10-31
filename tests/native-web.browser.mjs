@@ -3,7 +3,7 @@ import test from 'node:test'
 import path from 'node:path'
 import { readFile, mkdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { chromium } from '@playwright/test'
+import { chromium, expect } from '@playwright/test'
 
 function pdf() {
   const stream='BT /F1 18 Tf 30 100 Td (Cursado original offline) Tj ET'
@@ -66,6 +66,28 @@ async function setup(browser, {legacy = false, pdfShortcut = false} = {}) {
   })
   return {context,errors,requests,resources,inventory}
 }
+test('study URL restores the actual subject dialog, date and section after reload and clears a closed dialog', async t => {
+  const browser = await chromium.launch({ headless: true, ...(process.env.CI ? {} : { channel: 'chrome' }) }); t.after(() => browser.close())
+  const { context, errors } = await setup(browser), page = await context.newPage()
+  await page.goto('https://workspace.inscreen.local/estudio?materia=custom-calculo3&fecha=2026-10-12&seccion=theory&pestana=main&preservar=si#posicion')
+  await expect(page.getByRole('link', { name: 'Campus', exact: true })).toBeVisible({ timeout: 20000 })
+  await expect(page.getByRole('dialog')).toHaveCount(1)
+  assert.equal(new URL(page.url()).searchParams.get('seccion'), 'theory')
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => new URL(page.url()).searchParams.get('fecha')).toBe('2026-10-13')
+  await page.reload()
+  await expect(page.getByRole('link', { name: 'Campus', exact: true })).toBeVisible({ timeout: 20000 })
+  assert.equal(new URL(page.url()).searchParams.get('fecha'), '2026-10-13')
+  assert.equal(new URL(page.url()).searchParams.get('seccion'), 'theory')
+  assert.equal(new URL(page.url()).searchParams.get('preservar'), 'si')
+  assert.equal(new URL(page.url()).hash, '#posicion')
+  await page.getByRole('dialog').getByRole('button', { name: 'Cerrar modal', exact: true }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.has('materia')).toBe(false)
+  await page.reload(); await expect(page.getByRole('button', { name: /Cálculo 3/ }).first()).toBeVisible({ timeout: 20000 })
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  assert.deepEqual(errors, [])
+})
+
 test('original home, study, board and PDF work with a native read-only revision and no network',async()=>{
   const browser=await chromium.launch({headless:true,...(process.env.CI?{}:{channel:'chrome'})})
   try {
@@ -131,10 +153,10 @@ test('original home, study, board and PDF work with a native read-only revision 
     })
     assert.deepEqual(await page.evaluate(()=>window.nativeActions),[{pdf:hash('teoria/calculo3/material.pdf'),revision:'revision-native-browser'}])
     assert.equal(await page.locator('iframe[title="Material"]').count(),0)
-    await page.waitForURL('**/estudio')
+    await page.waitForURL(url => url.pathname === '/estudio')
     await page.evaluate(()=>{window.nativeActions=[];window.open('/native/pdf?workspaceFileId=workspace%3A%2F%2Fteoria%2Fcalculo3%2Fmaterial.pdf')})
     await page.waitForFunction(()=>window.nativeActions.some(action=>action.pdf))
-    await page.waitForURL('**/estudio')
+    await page.waitForURL(url => url.pathname === '/estudio')
     assert.equal(requests.some(url=>url.includes('/pdfjs/')),false)
     assert.equal(await page.getByText('Contenido aislado',{exact:true}).count(),0)
     await page.goto('https://workspace.inscreen.local/sintesis?subjectId=custom-calculo3&weekNumber=1')

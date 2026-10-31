@@ -3,12 +3,25 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { isNativeReadOnly } from "@/lib/native-workspace"
 import dynamic from "next/dynamic"
+import { useLocalWorkspace } from '@/components/local-workspace-provider'
+import { TopicBoardOverlay } from './topic-board-overlay'
+import { readStudyLocation, updateStudyLocation, type StudyBoardLocation } from '@/lib/study-location'
 const ImportantProgressView = dynamic(() => import("@/components/important-progress-view"), { ssr: false })
 import "./progress-original/theme.css"
 const editing = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=slider], [role=spinbutton]"))
 
 export function StudyImportantTasks({ children, boardLibrary = false }: { children: ReactNode; boardLibrary?: boolean }) {
+  const workspace = useLocalWorkspace()
+  const [restoredBoard, setRestoredBoard] = useState<StudyBoardLocation | null>(null)
   const [open, setOpen] = useState(false)
+  const [hasRestoredLocation, setHasRestoredLocation] = useState(false)
+  useEffect(() => {
+    if (boardLibrary) return
+    const location = readStudyLocation(window.location.search)
+    // Subject boards are restored by the subject dialog so its modal stays suspended.
+    setRestoredBoard(location.subject ? null : location.board); setOpen(location.important); setHasRestoredLocation(true)
+  }, [boardLibrary])
+  useEffect(() => { if (!boardLibrary && hasRestoredLocation) updateStudyLocation({ importantes: open ? '1' : null }) }, [open, boardLibrary, hasRestoredLocation])
   const [hasOpened, setHasOpened] = useState(false)
   // Retain drafts and pending save queues after the first visit.
   useEffect(() => { if (open) setHasOpened(true) }, [open])
@@ -62,6 +75,7 @@ export function StudyImportantTasks({ children, boardLibrary = false }: { childr
       }
     }}>
     {boardLibrary && !open && <button type="button" className="fixed bottom-4 left-4 z-40 rounded-xl border bg-background px-4 py-2 text-foreground shadow" onClick={() => setOpen(true)}>Importantes</button>}
+    {restoredBoard && workspace.isReady && workspace.permissionState === 'granted' && workspace.rootHandle && <TopicBoardOverlay {...restoredBoard} rootHandle={workspace.rootHandle} onClose={() => setRestoredBoard(null)} />}
     <div hidden={open} inert={open}>{children}</div>
     {(open || hasOpened) && <div hidden={!open} inert={!open} className="progress-original"><ImportantProgressView active={open} onBack={() => setOpen(false)} /></div>}
   </div>

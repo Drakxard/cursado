@@ -12,6 +12,7 @@ import { readImportantTasks, importantTaskProgress, importantCountdownStyle } fr
 import { publishStudyPdf } from '@/lib/study-board-pdf'
 import { cooperationStudyRoomId } from '@/lib/client/cooperation'
 import { startVisibleTask } from '@/lib/client/visible-task'
+import { writeStudyBoardLocation } from '@/lib/study-location'
 
 export type StudyTopicBoardProps = {
   boardId: string; name: string; rootHandle: FileSystemDirectoryHandle; onClose: () => void
@@ -29,12 +30,13 @@ export function StudyTopicBoardOverlay(props: StudyTopicBoardProps) {
     if (delegate) delegate({ boardId: `local:important-${props.boardId}`, name: props.name, topic: { pdfReferences: props.pdfReferences, cooperationSubjectId: props.cooperationSubjectId, cooperationWeekNumber: props.cooperationWeekNumber } })
   }, [delegate, props.boardId, props.name, props.pdfReferences, props.cooperationSubjectId, props.cooperationWeekNumber])
   const [stack, setStack] = useState<Destination[]>([{ boardId: props.boardId, name: props.name, pdfReferences: props.pdfReferences, cooperationSubjectId: props.cooperationSubjectId, cooperationWeekNumber: props.cooperationWeekNumber }])
-  if (delegate) return null
   const destination = stack[stack.length - 1]!
+  useEffect(() => { if (!delegate) writeStudyBoardLocation(destination) }, [delegate, destination])
+  if (delegate) return null
   // A new session owns all iframe messages and resources for one board.
   return <StudyBoardSession key={destination.boardId} {...props} {...destination} backLabel={stack.length > 1 ? 'Volver a la pizarra anterior' : props.backLabel}
-    onClose={() => stack.length > 1 ? setStack(current => current.slice(0, -1)) : props.onClose()}
-    onNavigate={value => setStack(current => [...current, value])} onCancel={props.onClose} />
+    onClose={() => { if (stack.length > 1) setStack(current => current.slice(0, -1)); else { writeStudyBoardLocation(null); props.onClose() } }}
+    onNavigate={value => setStack(current => [...current, value])} onCancel={() => { writeStudyBoardLocation(null); props.onClose() }} />
 }
 
 function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoomId, cooperationSubjectId, onClose, onNavigate, onCancel, backLabel = 'Volver a Estudio' }: StudyTopicBoardProps & { onNavigate: (value: Destination) => void; onCancel: () => void }) {
