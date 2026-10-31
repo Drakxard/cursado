@@ -3,12 +3,45 @@
   'use strict';
   var app = window.PKAudioEditor;
   var dirty = false, recording = false;
-  function send(type, value) { parent.postMessage(Object.assign({ source: 'cursado-audiomass', type: type }, value), location.origin); }
+  function send(type, value) { if (type === 'error') { saveError(value.error); return; } parent.postMessage(Object.assign({ source: 'cursado-audiomass', type: type }, value), location.origin); }
+  var saveModal = null, saveName = '', exporting = false;
+  function saveError(error) {
+    exporting = false;
+    if (saveModal) saveModal.el_body.querySelector('[role="alert"]').textContent = error;
+  }
+  function requestSave() {
+    if (saveModal) return;
+    saveModal = new PKSimpleModal({
+      title: 'Guardar audio',
+      body: '<form id="cursado-save-form"><label>Nombre del audio<input required aria-label="Nombre del audio"></label><p role="alert"></p><p role="status"></p><button type="submit" class="pk_modal_a_bottom pk_modal_a_accpt">Confirmar audio</button></form>',
+      ondestroy: function () { saveModal = null; },
+      setup: function (modal) {
+        modal.el.setAttribute('role', 'dialog'); modal.el.setAttribute('aria-label', 'Guardar audio');
+        var cancel = modal.el.querySelector('.pk_modal_cancel');
+        cancel.textContent = 'Cancelar'; cancel.setAttribute('role', 'button'); cancel.tabIndex = 0;
+        cancel.onclick = function () { if (!exporting) modal.Destroy(); };
+        var submit = modal.el_body.querySelector('button'); submit.setAttribute('form', 'cursado-save-form'); modal.el.querySelector('.pk_modal_bottom').appendChild(submit);
+        var input = modal.el_body.querySelector('input'); input.value = saveName;
+        input.oninput = function () { saveName = input.value; };
+        modal.el_body.querySelector('form').onsubmit = function (event) {
+          event.preventDefault(); if (exporting || !input.value.trim()) return;
+          saveName = input.value.trim(); exporting = true;
+          modal.el_body.querySelector('[role="alert"]').textContent = '';
+          exportAudio();
+        };
+        modal.el.addEventListener('keydown', function (event) {
+          event.stopPropagation();
+          if (event.key === 'Escape' && !exporting) modal.Destroy();
+        });
+      }
+    });
+    saveModal.Show(); saveModal.el_body.querySelector('[role="status"]').textContent = speechState; saveModal.el_body.querySelector('input').focus();
+  }
   function saveButton() {
     var button = document.createElement('button'); button.type = 'button'; button.className = 'pk_btn cursado-audio-save';
     button.setAttribute('aria-label', 'Guardar audio'); button.title = 'Guardar audio';
     button.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 3h12l4 4v14H3V3h2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg><span>Guardar</span>';
-    button.onclick = function () { send('save'); };
+    button.onclick = function () { requestSave(); };
     return button;
   }
   var transport = document.querySelector('.pk_transport');
@@ -24,7 +57,12 @@
     if (bottom && !bottom.querySelector('.cursado-audio-save')) bottom.appendChild(saveButton());
   });
   modalObserver.observe(document.body, { childList: true, subtree: true });
-  var speech = window.CursadoLiveSpeech(function (state) { send('transcript', state); });
+  var speechState = '';
+  var speech = window.CursadoLiveSpeech(function (state) {
+    speechState = state.transcriptionError || (state.listening ? 'Transcribiendo mientras grab?s?' : '');
+    if (saveModal) saveModal.el_body.querySelector('[role="status"]').textContent = speechState;
+    send('transcript', state);
+  });
   ['DidLoadFile', 'DidStateChange', 'DidUpdateMultitrack', 'DidActionRecordStart', 'DidActionRecordStop'].forEach(function (event) {
     app.listenFor(event, function () { dirty = true; send('dirty'); });
   });
@@ -79,7 +117,7 @@
       async function done(buffer) {
         try {
           var blob = wav(buffer), transcript = await speech.finish();
-          send('audio', Object.assign({ blob: blob, duration: buffer.duration }, transcript));
+          send('audio', Object.assign({ blob: blob, duration: buffer.duration, name: saveName }, transcript));
         }
         catch (error) { send('error', { error: error.message }); }
       }
@@ -90,7 +128,7 @@
   }
   window.addEventListener('message', function (event) {
     if (event.origin !== location.origin || event.source !== parent || event.data?.source !== 'cursado-host') return;
-    if (event.data.type === 'export') exportAudio();
+    if (event.data.type === 'save-error') saveError(event.data.error);
   });
   window.addEventListener('keydown', function (event) {
     if (event.key === 'Escape' && !document.querySelector('.pk_modal')) send('close');

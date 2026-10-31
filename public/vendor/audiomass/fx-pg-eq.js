@@ -2909,14 +2909,14 @@
 
 						enumerate ();
 					}).catch(function(error) {
-						alert("no microphone permissions found!");
+						is_ready = true; btn_start.classList.remove ('pk_inact'); app.fireEvent ('ShowError', 'No se pudo acceder al micr?fono. Revis? el permiso del navegador y volv? a intentar.');
 					});
 
 					var enumerate = function () {
 						if (navigator.mediaDevices.enumerateDevices) {
 							navigator.mediaDevices.enumerateDevices().then((devices) => {
 							  devices = devices.filter((d) => d.kind === 'audioinput');
-							  has_devices = true;
+							  has_devices = devices.length > 0;
 
 							  var len = devices.length;
 							  for (var i = 0; i < len; ++i) {
@@ -3011,6 +3011,7 @@
 						btn_add.style.display = 'none';
 
 						audio_context = new (window.AudioContext || window.webkitAudioContext)();
+						audio_context.resume ();
 						sample_rate = audio_context.sampleRate;
 
 						var audio_val = true;
@@ -3040,7 +3041,7 @@
 			            	draw_volume ();
 
 						}).catch(function(error) {
-
+							app.fireEvent ('ShowError', 'No se pudo iniciar la grabaci?n: ' + error.message);
 						});
 
 					};
