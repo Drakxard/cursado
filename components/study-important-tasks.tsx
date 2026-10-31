@@ -5,7 +5,8 @@ import { isNativeReadOnly } from "@/lib/native-workspace"
 import dynamic from "next/dynamic"
 import { useLocalWorkspace } from '@/components/local-workspace-provider'
 import { TopicBoardOverlay } from './topic-board-overlay'
-import { readStudyLocation, updateStudyLocation, type StudyBoardLocation } from '@/lib/study-location'
+import { resolveStudyLocation, updateStudyLocation, flushStudyRoutes, type StudyBoardLocation } from '@/lib/study-location'
+import { registerHomeSave } from '@/lib/client/home-navigation'
 const ImportantProgressView = dynamic(() => import("@/components/important-progress-view"), { ssr: false })
 import "./progress-original/theme.css"
 const editing = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=slider], [role=spinbutton]"))
@@ -15,12 +16,25 @@ export function StudyImportantTasks({ children, boardLibrary = false }: { childr
   const [restoredBoard, setRestoredBoard] = useState<StudyBoardLocation | null>(null)
   const [open, setOpen] = useState(false)
   const [hasRestoredLocation, setHasRestoredLocation] = useState(false)
+  const [routeError, setRouteError] = useState('')
+  useEffect(() => boardLibrary ? undefined : registerHomeSave(flushStudyRoutes), [boardLibrary])
+  useEffect(() => {
+    if (boardLibrary || isNativeReadOnly() || !navigator.serviceWorker) return
+    // Upgrade installed standalone workers before a named Study URL is reloaded.
+    void navigator.serviceWorker.getRegistration('/pizarra/').then(registration => registration?.update()).catch(() => {})
+  }, [boardLibrary])
   useEffect(() => {
     if (boardLibrary) return
-    const location = readStudyLocation(window.location.search)
-    // Subject boards are restored by the subject dialog so its modal stays suspended.
-    setRestoredBoard(location.subject ? null : location.board); setOpen(location.important); setHasRestoredLocation(true)
-  }, [boardLibrary])
+    if (!workspace.isReady || !workspace.rootHandle) return
+    let active = true
+    void resolveStudyLocation(workspace.rootHandle, { readOnly: isNativeReadOnly() }).then(location => {
+      if (!active) return
+      setRouteError('')
+      // Subject boards are restored by the subject dialog so its modal stays suspended.
+      setRestoredBoard(location.subject ? null : location.board); setOpen(location.important); setHasRestoredLocation(true)
+    }).catch(error => { if (active) setRouteError(String(error)) })
+    return () => { active = false }
+  }, [boardLibrary, workspace.isReady, workspace.rootHandle])
   useEffect(() => { if (!boardLibrary && hasRestoredLocation) updateStudyLocation({ importantes: open ? '1' : null }) }, [open, boardLibrary, hasRestoredLocation])
   const [hasOpened, setHasOpened] = useState(false)
   // Retain drafts and pending save queues after the first visit.
@@ -53,6 +67,8 @@ export function StudyImportantTasks({ children, boardLibrary = false }: { childr
     window.addEventListener("keydown", onKey, true)
     return () => { window.removeEventListener("keydown", onKey, true) }
   }, [open])
+  if (routeError) return <div role="alert" className="p-6"><p>{routeError}</p><a href="/estudio">Volver a Estudio</a></div>
+  if (!boardLibrary && !hasRestoredLocation) return <p role="status" className="p-6">Abriendo Estudio…</p>
   return <div
     data-native-study-tabs={isNativeReadOnly() ? (tabsOpen ? "open" : "closed") : undefined}
     onClick={event => { if (event.target instanceof Element && event.target.closest('[data-study-workspace-tabs] button')) setTabsOpen(false) }}

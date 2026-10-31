@@ -59,7 +59,7 @@ async function setup(browser, {legacy = false, pdfShortcut = false} = {}) {
     const url=new URL(route.request().url()); requests.push(url.href)
     if(url.origin!=='https://workspace.inscreen.local'){await route.abort();return}
     if(url.pathname.startsWith('/files/')) {const bytes=resources.get(url.pathname.split('/').at(-1));const file=files.find(f=>f.id===url.pathname.split('/').at(-1));await route.fulfill({status:bytes?200:503,contentType:file?.mime||'text/plain',body:bytes||'Archivo pendiente de descarga'});return}
-    const pathname=['/','/estudio','/sintesis','/practice/viewer','/native/pdf'].includes(url.pathname)?'/index.html':url.pathname
+    const pathname=['/','/estudio','/imp','/sintesis','/practice/viewer','/native/pdf'].includes(url.pathname)||/^\/materia\/[^/]+$/.test(url.pathname)||/^\/pizarra\/[^/]+\/[^/]+\/[^/]+$/.test(url.pathname)?'/index.html':url.pathname
     const local=path.resolve(directory,'.'+pathname)
     if(!local.startsWith(directory+path.sep)){await route.abort();return}
     try {const body=await readFile(local);const ext=path.extname(local);await route.fulfill({body,contentType:({'.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.html':'text/html','.svg':'image/svg+xml','.woff2':'font/woff2','.wasm':'application/wasm','.json':'application/json','.png':'image/png'})[ext]||'application/octet-stream'})}catch{await route.fulfill({status:404,body:'No encontrado'})}
@@ -72,17 +72,23 @@ test('study URL restores the actual subject dialog, date and section after reloa
   await page.goto('https://workspace.inscreen.local/estudio?materia=custom-calculo3&fecha=2026-10-12&seccion=theory&pestana=main&preservar=si#posicion')
   await expect(page.getByRole('link', { name: 'Campus', exact: true })).toBeVisible({ timeout: 20000 })
   await expect(page.getByRole('dialog')).toHaveCount(1)
-  assert.equal(new URL(page.url()).searchParams.get('seccion'), 'theory')
+  assert.equal(new URL(page.url()).pathname, '/materia/calculo-3')
+  assert.equal(new URL(page.url()).searchParams.has('materia'), false)
   await page.keyboard.press('ArrowRight')
-  await expect.poll(() => new URL(page.url()).searchParams.get('fecha')).toBe('2026-10-13')
+  await expect.poll(() => page.evaluate(() => new URLSearchParams(history.state.studyRoute.query).get('fecha'))).toBe('2026-10-13')
   await page.reload()
   await expect(page.getByRole('link', { name: 'Campus', exact: true })).toBeVisible({ timeout: 20000 })
-  assert.equal(new URL(page.url()).searchParams.get('fecha'), '2026-10-13')
-  assert.equal(new URL(page.url()).searchParams.get('seccion'), 'theory')
+  assert.equal(await page.evaluate(() => new URLSearchParams(history.state.studyRoute.query).get('fecha')), '2026-10-13')
+  assert.equal(await page.evaluate(() => new URLSearchParams(history.state.studyRoute.query).get('seccion')), 'theory')
   assert.equal(new URL(page.url()).searchParams.get('preservar'), 'si')
   assert.equal(new URL(page.url()).hash, '#posicion')
+  const direct = await context.newPage()
+  await direct.goto('https://workspace.inscreen.local/materia/calculo-3')
+  await expect(direct.getByRole('link', { name: 'Campus', exact: true })).toBeVisible({ timeout: 20000 })
+  assert.equal(new URL(direct.url()).pathname, '/materia/calculo-3')
+  await direct.close()
   await page.getByRole('dialog').getByRole('button', { name: 'Cerrar modal', exact: true }).click()
-  await expect.poll(() => new URL(page.url()).searchParams.has('materia')).toBe(false)
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/estudio')
   await page.reload(); await expect(page.getByRole('button', { name: /Cálculo 3/ }).first()).toBeVisible({ timeout: 20000 })
   await expect(page.getByRole('dialog')).toHaveCount(0)
   assert.deepEqual(errors, [])

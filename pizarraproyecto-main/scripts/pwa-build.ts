@@ -42,6 +42,8 @@ self.addEventListener('fetch',event=>{
   const request=event.request,url=new URL(request.url);
   if(request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/pizarra/api/')||url.pathname.startsWith('/pizarra/recognize/'))return;
   if(!url.pathname.startsWith('/pizarra/'))return;
+  // Study's named board routes belong to Next, not the standalone app shell.
+  if(request.mode==='navigate'&&url.pathname.split('/').filter(Boolean).length===4)return;
   if(request.mode==='navigate'){
     if(url.pathname==='/pizarra/plantuml.html'){
       event.respondWith(caches.open(CACHE).then(async cache=>(await cache.match(url.pathname))||fetch(request)));

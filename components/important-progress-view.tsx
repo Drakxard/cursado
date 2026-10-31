@@ -7,6 +7,8 @@ import { Button } from "@/components/progress-original/button"
 import { Input } from "@/components/progress-original/input"
 import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X, Plus } from "lucide-react"
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
+import { setStudyBoardRouteHint } from '@/lib/study-location'
+import { getWeekNumberForDate } from '@/lib/subject-utils'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 
 function HoldableTaskRow({ children, label, onHold }: { children: ReactNode; label: string; onHold: () => void }) {
@@ -951,7 +953,12 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
                   {(task.topics || []).map((topic, index) => (
                     <TopicChip key={task.topicBoardIds?.[index] ?? index} topic={topic} boardId={task.topicBoardIds?.[index]} onRemove={() => setDeleteTarget({ kind: "topic", taskId: task.id, boardId: task.topicBoardIds?.[index] ?? "", label: topic })} onOpen={() => {
                       const boardId = task.topicBoardIds?.[index]
-                      if (boardId) setSelectedTopicBoard({ boardId, name: `${task.text} · ${topic}` })
+                      if (boardId) {
+                        const due = normalizeDate(new Date())
+                        due.setDate(due.getDate() + (task.days ?? task.denominator - task.numerator))
+                        setStudyBoardRouteHint(boardId, { subject: task.text, week: String(getWeekNumberForDate(due)), name: topic })
+                        setSelectedTopicBoard({ boardId, name: `${task.text} · ${topic}` })
+                      }
                     }} />
                   ))}
                   </div>

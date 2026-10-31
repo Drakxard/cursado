@@ -16,7 +16,8 @@ const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   const dir=await(await fs.getDirectoryHandle('progreso',{create:true})).getDirectoryHandle('pizarras',{create:true});
   const root=createRoot(document.getElementById('root'));
   const persistentStudy=children=><NativeWorkspaceProvider rootHandle={fs}><StudyImportantTasks>{children}</StudyImportantTasks></NativeWorkspaceProvider>;
-  window.openPersistentBoard=()=>root.render(persistentStudy(<TopicBoardOverlay boardId="route-first" name="Pizarra inicial" rootHandle={fs} onClose={()=>root.render(persistentStudy(<button onClick={()=>window.openPersistentBoard()}>Abrir pizarra</button>))}/>));
+  window.openNamedBoard=(id,week)=>root.render(persistentStudy(<TopicBoardOverlay key={id} boardId={id} name="Base de Datos · temas" cooperationWeekNumber={week} rootHandle={fs} onClose={()=>root.render(persistentStudy(<button onClick={()=>window.openPersistentBoard()}>Abrir pizarra</button>))}/>));
+  window.openPersistentBoard=()=>window.openNamedBoard('route-first',4);
   window.delegateBoard=()=>root.render(<StudyBoardNavigationContext.Provider value={reference=>{window.delegatedBoard=reference}}><TopicBoardOverlay boardId="target" name="Destino" rootHandle={fs} onClose={()=>{}} /></StudyBoardNavigationContext.Provider>);
   window.read=async path=>{let directory=fs;const parts=path.split('/');for(const part of parts.slice(0,-1))directory=await directory.getDirectoryHandle(part);return JSON.parse(await(await(await directory.getFileHandle(parts.at(-1))).getFile()).text())};
   window.openBoard=id=>root.render(<TopicBoardOverlay key={id} boardId={id} name={id} rootHandle={fs} pdfReferences={[{materialId:1,subjectId:'subject',fileName:'Uno.pdf',workspaceFileId:'workspace://teoria/uno.pdf'},{materialId:2,subjectId:'subject',fileName:'Dos.pdf',workspaceFileId:'workspace://teoria/dos.pdf'}]} onClose={()=>{window.boardClosed=true;root.render(<button onClick={()=>window.openBoard(id)}>Reabrir</button>)}}/>);
@@ -557,25 +558,34 @@ test('cooperative container opens the same live room across independent devices'
 test('study URL reload restores the current nested board and closing clears its location', { timeout: 60000 }, async t => {
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
-  await context.route('**/estudio?**', route => route.fulfill({ contentType: 'text/html', body: '<style>body{margin:0}.fixed{position:fixed}.absolute{position:absolute}.top-3{top:12px}.left-3{left:12px}.inset-0{inset:0}.h-full{height:100%}.w-full{width:100%}.flex{display:flex}iframe{border:0}</style><div id="root"></div><script type="module" src="/study-parent.js"></script>' }))
+  await context.route(/\/(?:estudio|imp|pizarra\/[^/]+\/[^/]+\/[^/?]+)(?:\?|$)/, route => route.fulfill({ contentType: 'text/html', body: '<style>body{margin:0}.fixed{position:fixed}.absolute{position:absolute}.top-3{top:12px}.left-3{left:12px}.inset-0{inset:0}.h-full{height:100%}.w-full{width:100%}.flex{display:flex}iframe{border:0}</style><div id="root"></div><script type="module" src="/study-parent.js"></script>' }))
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message))
   await page.goto(origin + '/estudio?persist=1&untouched=yes#anchor')
   await page.getByRole('button', { name: 'Abrir pizarra', exact: true }).click(); await loaded(page, 'route-first')
-  await expect.poll(() => new URL(page.url()).searchParams.get('pizarra')).toBe('route-first')
-  await send(page, 'insert', { object: { type: 'text', authorId: 'test', x: 100, y: 400, width: 320, height: 62, runs: [{ text: 'Destino' }], fontFamily: 'system-ui', fontSize: 18, align: 'left', study: { kind: 'board', reference: { boardId: 'local:important-route-second', name: 'Pizarra siguiente' } } } })
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/pizarra/base-de-datos/4/temas')
+  assert.equal(new URL(page.url()).searchParams.has('pizarra'), false)
+  await send(page, 'insert', { object: { type: 'text', authorId: 'test', x: 100, y: 400, width: 320, height: 62, runs: [{ text: 'Destino' }], fontFamily: 'system-ui', fontSize: 18, align: 'left', study: { kind: 'board', reference: { boardId: 'local:important-route-second', name: 'Base de Datos · temas', topic: { cooperationWeekNumber: 5 } } } } })
   await engine(page).evaluate(() => { window.__komuboard.canvas.setTool('select'); window.__komuboard.canvas.restoreStudyView({ x: 0, y: 0, zoom: 1 }) })
   const box = await engine(page).locator('[data-study=board]').boundingBox()
   await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2); await loaded(page, 'route-second')
-  await expect.poll(() => new URL(page.url()).searchParams.get('pizarra')).toBe('route-second')
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/pizarra/base-de-datos/5/temas')
+  await expect.poll(async () => page.evaluate(async () => { try { return (await window.read('progreso/rutas-estudio.json')).routes['/pizarra/base-de-datos/5/temas']?.key } catch { return null } })).toBe('board:route-second')
+  await page.evaluate(() => { sessionStorage.clear(); history.replaceState(null, '') })
   await page.reload(); await loaded(page, 'route-second')
-  await expect(page.getByRole('dialog', { name: 'Pizarra de Pizarra siguiente', exact: true })).toHaveCount(1)
+  await expect(page.getByRole('dialog', { name: 'Pizarra de Base de Datos · temas', exact: true })).toHaveCount(1)
+  const direct = await context.newPage(); await direct.goto(page.url()); await loaded(direct, 'route-second'); await direct.close()
   assert.equal(new URL(page.url()).searchParams.get('untouched'), 'yes'); assert.equal(new URL(page.url()).hash, '#anchor')
   await page.getByRole('button', { name: 'Volver a Estudio', exact: true }).click()
-  await expect.poll(() => new URL(page.url()).searchParams.has('pizarra')).toBe(false)
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/estudio')
+  await page.evaluate(() => window.openNamedBoard('route-third', 5)); await loaded(page, 'route-third')
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/pizarra/base-de-datos/5/temas-2')
+  await page.reload(); await loaded(page, 'route-third')
+  await page.getByRole('button', { name: 'Volver a Estudio', exact: true }).click()
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/estudio')
   await page.reload(); await expect(page.getByRole('button', { name: 'Abrir pizarra', exact: true })).toBeVisible()
   assert.equal(engine(page), undefined)
   await page.keyboard.press('ArrowRight')
-  await expect.poll(() => new URL(page.url()).searchParams.get('importantes')).toBe('1')
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/imp')
   await expect(page.getByRole('heading', { name: 'Importantes', exact: true })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Importantes', exact: true })).toBeVisible()

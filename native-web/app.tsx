@@ -9,6 +9,7 @@ import { nativeSnapshot, nativeWorkspaceRoot } from '@/lib/native-workspace'
 import { setReadyWorkspaceHandle } from '@/lib/local-workspace-client'
 import { SUBJECT_IDS } from '@/lib/subjects'
 import { usePathname, useSearchParams, navigate } from './navigation'
+import { isStudyPath } from '@/lib/study-location'
 import { SynthesisClient } from '@/app/sintesis/synthesis-client'
 import { parseSynthesisContext } from '@/lib/synthesis-context'
 import { NativePdfLauncher, PracticeViewerClient } from '@/app/practice/viewer/practice-viewer-client'
@@ -38,7 +39,7 @@ function NativeHome() {
 function Routes() {
   const path = usePathname(), params = useSearchParams()
   const session = { email: 'native-reader@app.local', isAdmin: false, allowedSubjectIds: SUBJECT_IDS, expiresAtMs: Number.MAX_SAFE_INTEGER }
-  if (path === '/estudio') return <StudyImportantTasks><SubjectWheel authSession={session} initialSearchParams={Object.fromEntries(params)} /></StudyImportantTasks>
+  if (isStudyPath(path)) return <StudyImportantTasks><SubjectWheel authSession={session} initialSearchParams={Object.fromEntries(params)} /></StudyImportantTasks>
   if (path === '/sintesis') return <SynthesisClient key={`${params.get('subjectId')}:${params.get('weekNumber')}`} context={parseSynthesisContext(params.get('subjectId'), params.get('weekNumber'))} legacyReturnToken={params.get('returnToken') || ''} />
   if (path === '/practice/viewer') return <PracticeViewerClient materialId={Number(params.get('materialId'))} returnToken={params.get('returnToken') || undefined} />
   if (path === '/native/pdf') return <NativePdfLauncher workspaceFileId={params.get('workspaceFileId') || ''} />
