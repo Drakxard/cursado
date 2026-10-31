@@ -278,6 +278,9 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: pizarra-sync/pnpm-lock.yaml
+      - name: Instalar dependencias de la aplicacion integrada
+        run: npm ci
+        working-directory: .
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @komuboard/client-web typecheck
       - name: Compilar la pizarra de estudio integrada

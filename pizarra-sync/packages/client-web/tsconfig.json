@@ -4,6 +4,7 @@
     "types": ["vite/client"],
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx"
   },
   "include": ["src"]
