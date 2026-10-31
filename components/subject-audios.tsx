@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useImperativeHandle, useRef, useState, type DragEvent, type Ref, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
+import * as AlertDialog from '@radix-ui/react-alert-dialog'
 import { HandDrawnBubble } from './hand-drawn-bubble'
 import { deleteStudyAudioItem, loadAudioWorkspace, readStudyAudio, updateAudioWorkspace } from '@/lib/subject-audio-storage'
 import { moveAudioItem, reorderAudio, type AudioWorkspace, type StudyAudio } from '@/lib/subject-audio-model'
@@ -55,6 +56,7 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
   const [parentId, setParentId] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ parentId: string | null } | null>(null)
   const [creatingFolder, setCreatingFolder] = useState(false)
+  const [deleting, setDeleting] = useState<{ id: string; name: string; folder: boolean } | null>(null)
   const [name, setName] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const editor = useRef<StudyAudioEditorHandle>(null)
   const revision = useRef(0)
@@ -72,17 +74,18 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
     return () => { alive = false; channel?.close(); window.removeEventListener('cursado-audios-changed', changed); window.removeEventListener('cursado-cooperation-applied', changed) }
   }, [subjectId])
   useEffect(() => { onEditorChange(Boolean(editing)); return () => onEditorChange(false) }, [editing, onEditorChange])
-  function openEditor() { if (!busy && !editing && !creatingFolder) { setEditing({ parentId }); setError('') } }
-  useImperativeHandle(ref, () => ({ openEditor, createFolder: () => { if (!busy && !editing) { setCreatingFolder(true); setName(''); setError('') } }, escape: () => {
+  function openEditor() { if (!busy && !editing && !creatingFolder && !deleting) { setEditing({ parentId }); setError('') } }
+  useImperativeHandle(ref, () => ({ openEditor, createFolder: () => { if (!busy && !editing && !deleting) { setCreatingFolder(true); setName(''); setError('') } }, escape: () => {
     if (editing) { editor.current?.close(); return true }
     if (busy) return true
+    if (deleting) { setDeleting(null); return true }
     if (creatingFolder) { setCreatingFolder(false); return true }
     if (parentId) { setParentId(workspace?.folders.find(item => item.id === parentId)?.parentId ?? null); return true }
     return false
   } }))
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (hidden || editing || creatingFolder || busy || event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key !== '+') return
+      if (hidden || editing || creatingFolder || deleting || busy || event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key !== '+') return
       if (event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable]')) return
       event.preventDefault(); event.stopImmediatePropagation(); openEditor()
     }
@@ -98,8 +101,11 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
   }
   function requestDelete(id: string, name: string, folder: boolean) {
     if (busy) return
-    const question = folder ? `¿Eliminar el conjunto “${name}” y todo su contenido?` : `¿Eliminar el audio “${name}”?`
-    if (!window.confirm(question)) return
+    setDeleting({ id, name, folder })
+  }
+  function confirmDelete() {
+    if (busy || !deleting) return
+    const { id } = deleting
     void guardCooperationElement(subjectId, id, () => {
       setBusy(true); setError('')
       void deleteStudyAudioItem(subjectId, id).catch(failure => setError(failure instanceof Error ? failure.message : 'No se pudo eliminar.')).finally(() => setBusy(false))
@@ -124,6 +130,21 @@ export function SubjectAudios({ subjectId, hidden, onEditorChange, ref }: { subj
   return <div className={hidden && !editing ? 'hidden' : 'flex min-h-0 flex-1 flex-col'} data-subject-audios
     onDragOver={event => { if (event.dataTransfer.types.includes(dragType)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move' } }}
     onDrop={event => { if (event.dataTransfer.types.includes(dragType)) drop(event, parentId) }}>
+    <AlertDialog.Root open={Boolean(deleting)} onOpenChange={open => { if (!open) setDeleting(null) }}>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="fixed inset-0 z-[60] bg-black/10" />
+        <AlertDialog.Content className="fixed top-1/2 left-1/2 z-[61] w-[calc(100%-2rem)] max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-xl border border-neutral-200 bg-white p-4 text-black shadow-lg" onKeyDown={event => event.stopPropagation()}>
+          <AlertDialog.Title className="text-base font-normal">{deleting?.folder ? '¿Eliminar conjunto?' : '¿Eliminar audio?'}</AlertDialog.Title>
+          <AlertDialog.Description className="mt-2 break-words text-sm text-neutral-600">
+            {deleting?.name}{deleting?.folder && '. Se eliminará también su contenido.'}
+          </AlertDialog.Description>
+          <div className="mt-4 flex justify-end gap-2">
+            <AlertDialog.Cancel className="rounded-lg px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-100">Cancelar</AlertDialog.Cancel>
+            <AlertDialog.Action onClick={confirmDelete} className="rounded-lg bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700">Eliminar</AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
     {editing && <AudioEditor ref={editor} subjectId={subjectId} parentId={editing.parentId} onClose={() => setEditing(null)} />}
     {!editing && <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-28 pb-28 sm:px-8 sm:pt-32">
       <div className="mb-6 flex flex-wrap items-center gap-4">
