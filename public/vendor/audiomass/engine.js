@@ -759,8 +759,7 @@
 
 			if (e && (e.repeat || e.isComposing || e.altKey || app.ui.KeyHandler.isEditTarget(e) || document.querySelector('.pk_modal'))) return;
 			e && e.preventDefault();
-			if (app.rec.isActive()) app.rec.togglePause();
-			else app.fireEvent ('RequestActionRecordStart');
+			app.fireEvent ('RequestActionRecordContinue');
 		}, [32]);
 		app.ui.KeyHandler.addCallback ('KeyShiftCopy' + app.id, function ( key, map, e ) {
 			if (app.ui.InteractionHandler.on || accelHeld ( e )) return ;
@@ -1409,7 +1408,16 @@
 			app.rec.stop ();
 		});
 
-		app.listenFor ('RequestActionRecordStart', function () {
+        var continue_record_stopping = false;
+        app.listenFor ('RequestActionRecordContinue', function () {
+            if (continue_record_stopping) return;
+            if (app.rec.isActive ()) {
+                continue_record_stopping = true;
+                app.fireEvent ('RequestActionRecordStop', function () { continue_record_stopping = false; });
+            } else app.fireEvent ('RequestActionRecordStart', true);
+        });
+
+		app.listenFor ('RequestActionRecordStart', function (append) {
 			if (app.rec.isActive ()) return (false);
 			// The transport recorder also starts an empty project, directly on the timeline.
 			var new_recording = !q.is_ready || empty_recording;
@@ -1425,7 +1433,8 @@
 
 			if (app.rec.isActive ()) return (false);
 
-			var pos = wavesurfer.getCurrentTime () * wavesurfer.backend.buffer.sampleRate;
+			var pos = append ? (new_recording ? 0 : wavesurfer.backend.buffer.length) : wavesurfer.getCurrentTime () * wavesurfer.backend.buffer.sampleRate;
+            if (append) wavesurfer.regions.clear();
 			app.rec.start ( pos, function ( offset, buffers ) {
 
 				// app.fireEvent ('RequestPause');
@@ -1468,7 +1477,7 @@
 			// --- ending offset is song full duration...
 			// if we have a selected area - mark that one as the end
 			var region = wavesurfer.regions.list[0];
-			if (new_recording)
+			if (new_recording || append)
 				app.rec.setEndingOffset (Infinity);
 			else if (region)
 				app.rec.setEndingOffset ( region.end * wavesurfer.backend.buffer.sampleRate );

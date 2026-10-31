@@ -33,9 +33,16 @@ export function StudyAudioEditor({ subjectId, parentId, onClose, ref }: { subjec
         } catch (failure) { saving.current = false; frame.current?.contentWindow?.postMessage({ source: 'cursado-host', type: 'save-error', error: failure instanceof Error ? failure.message : 'No se pudo guardar.' }, location.origin) }
       }
     }
+    const recordKey = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || event.repeat || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || saving.current) return
+      if (event.target instanceof Element && event.target.closest('input,textarea,select,button,[contenteditable]')) return
+      event.preventDefault(); event.stopImmediatePropagation()
+      frame.current?.contentWindow?.postMessage({ source: 'cursado-host', type: 'record-toggle' }, location.origin)
+    }
+    window.addEventListener('keydown', recordKey, true)
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.current) { event.preventDefault(); event.returnValue = '' } }
     window.addEventListener('message', message); window.addEventListener('beforeunload', beforeUnload)
-    return () => { window.removeEventListener('message', message); window.removeEventListener('beforeunload', beforeUnload) }
+    return () => { window.removeEventListener('keydown', recordKey, true); window.removeEventListener('message', message); window.removeEventListener('beforeunload', beforeUnload) }
     // Parent destination is captured when the editor opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjectId, parentId])

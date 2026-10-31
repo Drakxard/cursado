@@ -116,6 +116,7 @@
   }
   window.addEventListener('message', function (event) {
     if (event.origin !== location.origin || event.source !== parent || event.data?.source !== 'cursado-host') return;
+    if (event.data.type === 'record-toggle' && !document.querySelector('.pk_modal') && !app.ui.InteractionHandler.on) app.fireEvent('RequestActionRecordContinue');
     if (event.data.type === 'save-error') saveError(event.data.error);
   });
   window.addEventListener('keydown', function (event) {
