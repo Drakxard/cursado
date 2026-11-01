@@ -10,7 +10,7 @@ function PlantUmlSketch() {
   return <svg viewBox="0 0 340 130" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="2"><path d="M90 64h35l25-37h45M125 64l25 35h45M265 99h18l16 16" /><ellipse cx="52" cy="64" rx="42" ry="15" /><ellipse cx="234" cy="27" rx="45" ry="15" /><ellipse cx="234" cy="99" rx="45" ry="15" /><ellipse cx="311" cy="115" rx="22" ry="10" /></g></svg>
 }
 
-export function StudyDiagramsDialog({ onClose, onInsert, initialSource, editing = false }: { onClose: () => void; onInsert: (file: File, source: string) => Promise<void>; initialSource?: string; editing?: boolean }) {
+export function StudyDiagramsDialog({ onClose, onInsert, initialSource, editing = false }: { onClose: () => void; onInsert: (file: File, source: string, rootFile?: File) => Promise<void>; initialSource?: string; editing?: boolean }) {
   const [view, setView] = useState<'choose' | 'plantuml'>(initialSource !== undefined ? 'plantuml' : 'choose')
   const [source, setSource] = useState(initialSource || ''), [error, setError] = useState(''), [loading, setLoading] = useState(false), [inserting, setInserting] = useState(false)
   const [maximized, setMaximized] = useState(false)
@@ -69,7 +69,13 @@ export function StudyDiagramsDialog({ onClose, onInsert, initialSource, editing 
   async function insert() {
     if (!preview || preview.source !== source || loading || inserting) return
     setInserting(true); setError('')
-    try { await onInsert(new File([preview.blob], 'diagrama-plantuml.png', { type: 'image/png' }), source); onClose() }
+    try {
+      const rootBlob = /@startmindmap\b/i.test(source.replace(/[\u200B-\u200D\u2060\uFEFF]/g, ''))
+        ? await renderStudyMindmap(source, new AbortController().signal, undefined, true) : undefined
+      await onInsert(new File([preview.blob], 'diagrama-plantuml.png', { type: 'image/png' }), source,
+        rootBlob ? new File([rootBlob], 'raiz-plantuml.png', { type: 'image/png' }) : undefined)
+      onClose()
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setInserting(false) }
   }
   return <div className={`study-diagrams-backdrop${maximized ? ' study-diagrams-maximized' : ''}`} style={{ position: 'absolute', inset: 0, zIndex: 60 }}>

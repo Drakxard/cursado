@@ -204,6 +204,7 @@ export const DEFAULT_STAMP_SIZE = 48;
 export interface ImageObject {
   /** Source retained for editable PlantUML diagrams. */
   plantumlSource?: string;
+  plantumlFullSrc?: string;
   id: string;
   type: "image";
   /** Group membership — see {@link StrokeObject.groupId}. */
@@ -766,6 +767,7 @@ export function addImage(doc: Y.Doc, img: ImageObject): void {
     m.set("height", img.height);
     m.set("src", img.src);
     if (typeof img.plantumlSource === 'string' && img.plantumlSource.length <= 100000) m.set('plantumlSource', img.plantumlSource);
+    if (typeof img.plantumlFullSrc === "string") m.set("plantumlFullSrc", img.plantumlFullSrc);
     if (img.rotation != null) m.set("rotation", img.rotation);
     m.set("authorId", img.authorId);
     objectsMap(doc).set(img.id, m);

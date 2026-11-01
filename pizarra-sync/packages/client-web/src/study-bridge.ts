@@ -51,7 +51,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (!id || objectsMap(doc).get(id)?.get('type') !== 'image') return
     event.preventDefault(); event.stopImmediatePropagation()
     const images = [...new Set(orderArray(doc).toArray())].flatMap(imageId => {
-      const map = objectsMap(doc).get(imageId), src = map?.get('src')
+      const map = objectsMap(doc).get(imageId), src = map?.get('plantumlFullSrc') || map?.get('src')
       return map?.get('type') === 'image' && typeof src === 'string' ? [{ id: imageId, url: imageSrcUrl(src) }] : []
     })
     send('read-image', { initialId: id, images })
@@ -221,8 +221,10 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
         const source = typeof data.diagramSource === 'string' && data.diagramSource.trim() && data.diagramSource.length <= 100000 ? data.diagramSource : undefined
         if (data.diagramSource !== undefined && (!source || data.files?.length !== 1)) throw new Error('El código del diagrama no es válido.')
         if (data.replaceDiagramId && !source) throw new Error('Falta el código del diagrama.')
+        const fullSrc = source && data.diagramFullFile instanceof File
+          ? (await uploadImage(data.diagramFullFile, { reuseExisting: true, preserveResolution: true })).key : undefined
         for await (const object of importStudyFiles(data.files, atCenter(), status => send('status', { status }), { preserveImageResolution: data.preserveImageResolution === true })) doc.transact(() => {
-          if (source && object.type === 'image') object.plantumlSource = source
+          if (source && object.type === 'image') { object.plantumlSource = source; if (fullSrc) object.plantumlFullSrc = fullSrc }
           if (data.replaceDiagramId) {
             const current = objectsMap(doc).get(data.replaceDiagramId)
             if (!current || current.get('type') !== 'image' || typeof current.get('plantumlSource') !== 'string') throw new Error('El diagrama ya no está en la pizarra.')
@@ -230,7 +232,10 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
             const width = Number(current.get('width'))
             current.set('src', object.src)
             current.set('plantumlSource', source)
-            current.set('height', width * object.height / object.width)
+            if (fullSrc) current.set('plantumlFullSrc', fullSrc)
+            else current.delete('plantumlFullSrc')
+            if (fullSrc) current.set('width', object.width)
+            current.set('height', fullSrc ? object.height : width * object.height / object.width)
           } else insert(object)
         })
         if (data.requestId) send('import-result', { requestId: data.requestId, ok: true })

@@ -70,10 +70,10 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   }
   const initialize = () => { const value = live.current.initial; if (value) send('init', { ...value.record, name, snapshot: value.snapshot, pdfReferences, shared:!!sharedRoomId }) }
   const focusBoard = () => frame.current?.focus()
-  const insertDiagram = (file: File, source: string) => new Promise<void>((resolve, reject) => {
+  const insertDiagram = (file: File, source: string, rootFile?: File) => new Promise<void>((resolve, reject) => {
     const id = crypto.randomUUID()
     diagramImport.current = { id, resolve, reject }
-    send('import-files', { files: [file], requestId: id, preserveImageResolution: true, diagramSource: source, replaceDiagramId: diagramEdit?.id })
+    send('import-files', { files: [rootFile || file], diagramFullFile: rootFile ? file : undefined, requestId: id, preserveImageResolution: true, diagramSource: source, replaceDiagramId: diagramEdit?.id })
   })
   const closeReader = () => {
     setReaderLoading(false); send('open-finished')

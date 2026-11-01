@@ -1,5 +1,5 @@
 /** Render mindmaps locally with the board's PlantUML + KaTeX renderer. */
-export function renderStudyMindmap(source: string, signal: AbortSignal, onProgress?: (percent: number, stage: string) => void): Promise<Blob> {
+export function renderStudyMindmap(source: string, signal: AbortSignal, onProgress?: (percent: number, stage: string) => void, rootOnly = false): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const frame = document.createElement('iframe')
     onProgress?.(5, 'Abriendo el renderizador…')
@@ -25,7 +25,7 @@ export function renderStudyMindmap(source: string, signal: AbortSignal, onProgre
       if (event.data?.type === 'plantuml:ready') {
         clearTimeout(timer)
         timer = setTimeout(() => { cleanup(); reject(new Error('PlantUML tardó demasiado en generar el mapa. Intentá dividirlo en partes.')) }, 90_000)
-        frame.contentWindow?.postMessage({ type: 'plantuml:render', source }, location.origin)
+        frame.contentWindow?.postMessage({ type: 'plantuml:render', source, rootOnly }, location.origin)
       }
       if (event.data?.type === 'plantuml:result') {
         cleanup()

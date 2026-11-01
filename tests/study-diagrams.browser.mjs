@@ -10,7 +10,7 @@ test('study dialog renders local mindmaps with separate KaTeX rows and inserts t
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
     import {createRoot} from 'react-dom/client';
     import {StudyDiagramsDialog} from './components/study-diagrams-dialog';
-    createRoot(document.getElementById('root')).render(<StudyDiagramsDialog onClose={()=>window.closedDialog=true} onInsert={async(file,source)=>{window.inserted={source,type:file.type,size:file.size,bytes:Array.from(new Uint8Array(await file.arrayBuffer()))}}}/>);
+    createRoot(document.getElementById('root')).render(<StudyDiagramsDialog onClose={()=>window.closedDialog=true} onInsert={async(file,source,rootFile)=>{window.inserted={source,type:file.type,size:file.size,bytes:Array.from(new Uint8Array(await file.arrayBuffer())),rootBytes:rootFile?Array.from(new Uint8Array(await rootFile.arrayBuffer())):null}}}/>);
   `, loader: 'tsx' }, bundle: true, format: 'esm', write: false, jsx: 'automatic', loader: { '.css': 'empty' } })
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' })
   t.after(() => browser.close())
@@ -116,7 +116,16 @@ test('study dialog renders local mindmaps with separate KaTeX rows and inserts t
   await page.getByRole('button', { name: 'Restaurar vista previa', exact: true }).click()
   const bytes = await preview.evaluate(async image => Array.from(new Uint8Array(await (await fetch(image.src)).arrayBuffer())))
   await insert.click()
+  await page.waitForFunction(() => !!window.inserted)
   assert.deepEqual(await page.evaluate(() => window.inserted.bytes), bytes)
+  const sizes = await page.evaluate(async () => {
+    const size = async bytes => {
+      const bitmap = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }))
+      const dimensions = { width: bitmap.width, height: bitmap.height }; bitmap.close(); return dimensions
+    }
+    return { full: await size(window.inserted.bytes), root: await size(window.inserted.rootBytes) }
+  })
+  assert.ok(sizes.root.width * sizes.root.height < sizes.full.width * sizes.full.height, 'board root is smaller than the full viewer image')
   assert.equal(await page.evaluate(() => window.inserted.source), source)
   assert.equal(await page.evaluate(() => window.closedDialog), true)
   assert.equal(apiCalls, 0)
