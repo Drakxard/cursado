@@ -151,8 +151,17 @@ try {
 }
 const store = createAppStore(room);
 
-const ydoc = new Y.Doc();
-const provider = new YProvider(host, room, ydoc, { party: PARTY, protocol: serverUrl.startsWith("https:") ? "wss" : "ws" });
+let ydoc = new Y.Doc();
+let provider = new YProvider(host, room, ydoc, { party: PARTY, protocol: serverUrl.startsWith("https:") ? "wss" : "ws" });
+const pageSubscriptions: ((next: YProvider) => void)[] = [];
+const onProvider = (event: string, listener: (...args: any[]) => void) => {
+  provider.on(event, listener);
+  pageSubscriptions.push(next => next.on(event, listener));
+};
+const onPresence = (event: string, listener: (...args: any[]) => void) => {
+  provider.awareness.on(event, listener);
+  pageSubscriptions.push(next => next.awareness.on(event, listener));
+};
 // Stable per-browser identity: multiple tabs read as the same person; open a
 // private/incognito window (separate storage) to appear as a new user.
 const identity = loadBoardIdentity();
@@ -208,7 +217,7 @@ if(room.startsWith('study-')) for(const element of app.querySelectorAll('komu-to
 // --------------------------------------------------------------------------
 const boardEl = document.getElementById("board");
 if (!boardEl) throw new Error("#board missing");
-const canvas = new BoardCanvas({
+const createPageCanvas = (): BoardCanvas => new BoardCanvas({
   container: boardEl,
   doc: ydoc,
   awareness: provider.awareness,
@@ -229,6 +238,7 @@ const canvas = new BoardCanvas({
     wheel?.render();
   },
 });
+let canvas = createPageCanvas();
 if (window.__komuboard) window.__komuboard.canvas = canvas; // e2e hook: introspect remote presence
 // Middle-button drag moves only the local camera; it never changes the selected tool.
 let middlePan: { id: number; x: number; y: number; cursor: string } | null = null;
@@ -284,7 +294,7 @@ for (const event of ["mousedown", "auxclick"] as const) {
 }
 // Accessibility: mirror the board into a screen-reader-navigable list, announce presence, and let a
 // mirror item's focus/activation select that object so the keyboard shortcuts can act on it (§5.1).
-createBoardA11y({
+let boardA11y = createBoardA11y({
   doc: ydoc,
   awareness: provider.awareness,
   board: boardEl,
@@ -482,10 +492,11 @@ function updateSelectionBar(): void {
     canReorder: meta?.overlapping ?? false,
   });
 }
-canvas.setSelectionListener((count) => {
+const onPageSelection = (count: number) => {
   lastSelCount = count;
   updateSelectionBar();
-});
+};
+canvas.setSelectionListener(onPageSelection);
 // Each of these tools owns a mobile mini-sheet (draw bar / sticky palette / shape menu).
 const sheetForTool = (tool: ToolId): Element | null =>
   tool === "pen"
@@ -1139,7 +1150,7 @@ window.addEventListener("keyup", (e) => {
 const topbar = document.querySelector("komu-topbar");
 const drawer = document.querySelector("komu-drawer");
 installNightReadability();
-const roomMetadata = ydoc.getMap<string>("metadata");
+let roomMetadata = ydoc.getMap<string>("metadata");
 let migratingTitle = "";
 let renamingRoom = false;
 async function renameRoom(title: string): Promise<void> {
@@ -1428,7 +1439,7 @@ const refusedDialog = createRefusedDialog({
     window.location.href = u.toString(); // a fresh, empty room
   },
 });
-provider.on("connection-close", (event: { code?: number }) => {
+onProvider("connection-close", (event: { code?: number }) => {
   if (event?.code !== CLOSE_ROOM_FULL && event?.code !== CLOSE_RATE_LIMIT) return;
   connectionRefused = true;
   provider.disconnect(); // halt the auto-reconnect loop (shouldConnect = false)
@@ -1447,7 +1458,7 @@ const joinToasts = createJoinToasts();
 const knownPeerIds = new Set<string>();
 let joinReady = false;
 let joinSettleStarted = false;
-provider.on("sync", () => {
+onProvider("sync", () => {
   if (joinSettleStarted) return;
   joinSettleStarted = true;
   window.setTimeout(() => {
@@ -1501,7 +1512,7 @@ function renderPresenceRow(): void {
   presenceRowEl.people = list; // the <komu-avatar-presence-row> element renders + animates
   detectJoins(list); // membership changed → check for newcomers to toast
 }
-provider.awareness.on("change", renderPresenceRow);
+onPresence("change", renderPresenceRow);
 renderPresenceRow();
 // ---- "Your profile" dialog (name + colour + avatar photo) — UI lives in ./ui/profile ----
 const profile = createProfileDialog({
@@ -1566,7 +1577,7 @@ window.addEventListener("pagehide", () => provider.awareness.setLocalState(null)
 const zoombar = document.querySelector("komu-zoombar");
 const zoomPill = document.getElementById("zoom-pill");
 let zoomPillTimer = 0;
-canvas.setZoomListener((pct) => {
+const onPageZoom = (pct: number) => {
   if (zoombar) zoombar.percent = pct;
   // Transient zoom readout — the main indicator on mobile, where the zoombar is hidden.
   if (zoomPill) {
@@ -1575,7 +1586,8 @@ canvas.setZoomListener((pct) => {
     clearTimeout(zoomPillTimer);
     zoomPillTimer = window.setTimeout(() => zoomPill.classList.remove("show"), 900);
   }
-});
+};
+canvas.setZoomListener(onPageZoom);
 zoombar?.addEventListener("zoom", (e) => {
   const d = (e as CustomEvent<ZoomDetail>).detail;
   if (d.action === "in") canvas.zoomStep(1);
@@ -1601,8 +1613,8 @@ function updateConn(): void {
   lastConnStatus = status;
   store.getState().setStatus(status);
 }
-provider.on("status", updateConn);
-provider.on("sync", updateConn);
+onProvider("status", updateConn);
+onProvider("sync", updateConn);
 
 // Land a link/QR joiner on the board's content: zoom-to-fit once, on the first sync, when the board
 // already has content and they haven't started interacting. Only on the *initial* sync — never on
@@ -1618,9 +1630,9 @@ let userMovedViewport = false;
 const markViewportMoved = (): void => {
   userMovedViewport = true;
 };
-boardEl.addEventListener("pointerdown", markViewportMoved, { capture: true, once: true });
-boardEl.addEventListener("wheel", markViewportMoved, { capture: true, once: true, passive: true });
-provider.on("sync", () => {
+boardEl.addEventListener("pointerdown", markViewportMoved, { capture: true });
+boardEl.addEventListener("wheel", markViewportMoved, { capture: true, passive: true });
+onProvider("sync", () => {
   if (!autoFitEnabled || didInitialFit || userMovedViewport) return;
   if (ydoc.getMap("objects").size === 0) return; // empty board → nothing to frame
   didInitialFit = true;
@@ -1630,7 +1642,7 @@ provider.on("sync", () => {
 });
 
 let lastConnCount = -1;
-provider.awareness.on("change", () => {
+onPresence("change", () => {
   // Connection state doesn't change at cursor frequency; only react when the peer count
   // actually changes (status/sync are covered by the provider events + the 1 s poll below).
   const n = provider.awareness.getStates().size;
@@ -1647,4 +1659,62 @@ updateConn();
 // the persistent chrome (tool dock, topbar, zoombar, settings) now that every component is built.
 applyTranslations();
 
-installStudyBridge(ydoc, provider, canvas);
+let disposeStudyBridge = installStudyBridge(ydoc, provider, canvas);
+let changingStudyPage = false;
+window.addEventListener('message', event => {
+  const data = event.data;
+  if (!initialUrl.searchParams.get('topicBoard') || !initialUrl.searchParams.get('session') || event.origin !== location.origin || event.source !== parent || data?.type !== 'study-board:switch-page' || data.session !== initialUrl.searchParams.get('session')) return;
+  if (changingStudyPage || !/^[a-zA-Z0-9-]{1,100}$/.test(data.boardId) || !/^study-[a-f0-9-]{36}$/.test(data.roomId)) return;
+  changingStudyPage = true;
+  boardEl.inert = true;
+  try {
+    const preferences = canvas.studyToolPreferences();
+    endMiddlePan();
+    contextMenu.close();
+    // Flush and release the old page before allocating any new content.
+    canvas.finishStudyEdits();
+    disposeStudyBridge?.();
+    boardA11y.destroy();
+    canvas.destroy();
+    provider.awareness.setLocalState(null);
+    provider.destroy();
+    ydoc.destroy();
+    room = data.roomId;
+    initialUrl.searchParams.set('topicBoard', data.boardId);
+    initialUrl.searchParams.set('room', room);
+    initialUrl.searchParams.set('studyTitle', String(data.name || 'Page'));
+    history.replaceState(null, '', initialUrl);
+    ydoc = new Y.Doc();
+    provider = new YProvider(host, room, ydoc, { party: PARTY, protocol: serverUrl.startsWith('https:') ? 'wss' : 'ws' });
+    store.setState({ room });
+    roomMetadata = ydoc.getMap<string>('metadata');
+    roomMetadata.observe(paintRoomName);
+    roomMetadata.observe(openSharedStudy);
+    usersMap(ydoc).observe(renderPresenceRow);
+    knownPeerIds.clear(); joinReady = false; joinSettleStarted = false;
+    lastPresenceKey = ''; lastConnCount = -1; lastConnStatus = ''; connectionRefused = false;
+    didInitialFit = false; userMovedViewport = false;
+    canvas = createPageCanvas();
+    canvas.setColor(preferences.color); canvas.setWidth(preferences.width); canvas.setStyle(preferences.style);
+    canvas.setStickyColor(preferences.sticky);
+    canvas.setShape(preferences.shape, preferences.custom || undefined);
+    if (preferences.connector) canvas.setConnector(preferences.connector);
+    if (preferences.stamp) canvas.setStamp(preferences.stamp);
+    canvas.setTool(currentTool);
+    canvas.setSelectionListener(onPageSelection); canvas.setZoomListener(onPageZoom);
+    lastSelCount = 0; updateSelectionBar();
+    didInitialFit = canvas.restoreSavedView();
+    boardA11y = createBoardA11y({ doc: ydoc, awareness: provider.awareness, board: boardEl, selectObject: id => canvas.selectById(id) });
+    provider.awareness.setLocalStateField('id', identity.id);
+    publishProfile();
+    for (const subscribe of pageSubscriptions) subscribe(provider);
+    window.__komuboard = { doc: ydoc, provider, awareness: provider.awareness, canvas };
+    paintRoomName(); renderPresenceRow(); updateConn();
+    disposeStudyBridge = installStudyBridge(ydoc, provider, canvas);
+  } catch (error) {
+    boardEl.inert = false;
+    parent.postMessage({ type: 'study-board:error', session: data.session, boardId: data.boardId, error: String(error) }, location.origin);
+  } finally {
+    changingStudyPage = false;
+  }
+});

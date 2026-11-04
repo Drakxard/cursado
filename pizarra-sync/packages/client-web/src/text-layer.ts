@@ -4706,6 +4706,13 @@ export class TextLayer {
   }
 
   destroy(): void {
+    window.removeEventListener("pointermove", this.onGroupResizeMove);
+    window.removeEventListener("pointerup", this.onGroupResizeUp);
+    window.removeEventListener("pointermove", this.onGroupRotateMove);
+    window.removeEventListener("pointerup", this.onGroupRotateUp);
+    window.removeEventListener("pointermove", this.onRotateMove);
+    window.removeEventListener("pointerup", this.onRotateUp);
+    if (this.editTimer !== null) clearTimeout(this.editTimer);
     if (this.cameraTimer !== null) clearTimeout(this.cameraTimer);
     this.cameraTimer = null;
     this.cameraBase = null;

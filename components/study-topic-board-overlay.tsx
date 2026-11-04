@@ -34,16 +34,25 @@ export function StudyTopicBoardOverlay(props: StudyTopicBoardProps) {
   const [stack, setStack] = useState<Destination[]>([{ boardId: props.boardId, name: props.name, pdfReferences: props.pdfReferences, cooperationSubjectId: props.cooperationSubjectId, cooperationWeekNumber: props.cooperationWeekNumber }])
   const destination = useMemo(() => ({ ...stack[stack.length - 1]!, ...page }), [stack, page])
   useEffect(() => { if (!delegate) writeStudyBoardLocation(destination) }, [delegate, destination])
+  useEffect(() => {
+    if (delegate) return
+    const overflow = document.body.style.overflow
+    const focus = document.activeElement as HTMLElement | null
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = overflow; focus?.focus({ preventScroll: true }) }
+  }, [delegate])
   if (delegate) return null
-  // A new session owns all iframe messages and resources for one board.
-  return <StudyBoardSession key={destination.boardId} {...props} {...destination} backLabel={stack.length > 1 ? 'Volver a la pizarra anterior' : props.backLabel}
-    onClose={() => { if (stack.length > 1) setStack(current => current.slice(0, -1)); else { writeStudyBoardLocation(null); props.onClose() } }}
+  // The iframe shell stays mounted while its active document changes.
+  return <StudyBoardSession key={stack[stack.length - 1]!.boardId} {...props} {...destination} backLabel={stack.length > 1 ? 'Volver a la pizarra anterior' : props.backLabel}
+    onClose={() => { if (stack.length > 1) { setPage(null); setStack(current => current.slice(0, -1)) } else { writeStudyBoardLocation(null); props.onClose() } }}
     sharedRoomId={page && page.boardId !== props.boardId ? undefined : props.sharedRoomId} cooperationSubjectId={page && page.boardId !== props.boardId ? undefined : destination.cooperationSubjectId} pagesRootId={stack[stack.length - 1]!.boardId} onPage={setPage} onNavigate={value => { setPage(null); setStack(current => [...current, value]) }} onCancel={() => { writeStudyBoardLocation(null); props.onClose() }} />
 }
 
 function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoomId, cooperationSubjectId, onClose, onNavigate, onCancel, backLabel = 'Volver a Estudio', pagesRootId, onPage }: StudyTopicBoardProps & { onNavigate: (value: Destination) => void; onCancel: () => void; pagesRootId: string; onPage: (page: { boardId: string; name: string }) => void }) {
   const [session] = useState(() => crypto.randomUUID())
   const frame = useRef<HTMLIFrameElement>(null), library = useRef<HTMLIFrameElement>(null), readerFrame = useRef<HTMLIFrameElement>(null)
+  const [frameSrc, setFrameSrc] = useState<string | null>(null)
+  const frameBoardId = useRef<string | null>(null)
   const [initial, setInitial] = useState<Awaited<ReturnType<typeof openStudyBoard>> | null>(null)
   const [ready, setReady] = useState(false), [error, setError] = useState(''), [status, setStatus] = useState('')
   const [menu, setMenu] = useState(false), [split, setSplit] = useState(false), [urlInput, setUrlInput] = useState(false), [url, setUrl] = useState('')
@@ -107,19 +116,25 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   useEffect(() => {
     let active = true
     mounted.current = true
+    setReady(false); setClosing(false); setError(''); setInitial(null)
+    setPins([]); setReader(null); setReaderVisible(false); setReview(null); setAttachment(null); setMenu(false)
+    setImageReader(null); setDiagramEdit(null); setDiagrams(false); setReaderLoading(false); loadedReader.current = null
+    live.current.initial = null
+    localPdfs.current.clear(); publishing.current.clear()
     void cooperationStudyRoomId(cooperationSubjectId, boardId).then(roomId => openStudyBoard(rootHandle, boardId, sharedRoomId, roomId)).then(value => { if (active) {
       for(const key of value.record.localPdfReferences || []) localPdfs.current.add(key)
       for(const raw of [...(pdfReferences || []),...(value.snapshot?.content.shapes || []).filter((shape:any)=>shape.visualType === 'pdf-shortcut').map((shape:any)=>shape.pdfReference)]) {
         const reference = boardPdfReference(raw); if(reference) localPdfs.current.add(localPdfKey(reference))
       }
       live.current.initial = value; setInitial(value)
+      if (frameBoardId.current && frameBoardId.current !== boardId) send('switch-page', { roomId: value.record.roomId, name })
+      if (!frameBoardId.current) setFrameSrc(`/study-board/index.html?topicBoard=${encodeURIComponent(boardId)}&room=${encodeURIComponent(value.record.roomId)}&session=${session}&studyTitle=${encodeURIComponent(name)}`)
+      frameBoardId.current = boardId
     } }).catch(reason => { if (active) setError(String(reason)) })
     return () => { active = false; mounted.current = false; diagramImport.current?.reject(new Error('Se cerró la pizarra.')); diagramImport.current = null }
   }, [rootHandle, boardId, sharedRoomId, cooperationSubjectId])
   useEffect(() => { if (initial) initialize() }, [initial])
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow, previousFocus = document.activeElement as HTMLElement | null
-    document.body.style.overflow = 'hidden'
     const receive = (event: MessageEvent) => {
       const data = event.data
       if (event.origin !== location.origin || data?.session !== session || data?.boardId !== boardId) return
@@ -163,7 +178,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
           focusBoard(); void refreshTasks()
         }
         if (data.type === 'study-board:checkpoint' && typeof data.draft === 'string') void save(() => saveStudyBoard(rootHandle, boardId, { draft: data.draft, report: data.report, imported: !!data.imported })).catch(() => {})
-        if (data.type === 'study-board:closed') void saveQueue.current.then(() => { if (saveError.current) { setClosing(false); return }; const action = pendingClose.current; pendingClose.current = null; action?.() })
+        if (data.type === 'study-board:closed') void saveQueue.current.then(() => { if (saveError.current) { setClosing(false); return }; const action = pendingClose.current; pendingClose.current = null; setClosing(false); action?.() })
         if (data.type === 'study-board:error') { setError(data.error || 'No se pudo abrir la pizarra.'); setClosing(false) }
         if (data.type === 'study-board:migration-errors') { setReview(null); setError(migrationErrorSummary(data.report.errors || [])); setStatus('') }
         if (data.type === 'study-board:status') setStatus(data.status || '')
@@ -216,7 +231,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     const refresh = () => void refreshTasks()
     window.addEventListener('message', receive); window.addEventListener('keydown', key); window.addEventListener('focus', refresh); window.addEventListener('cursado-workspace-saved', refresh)
     return () => {
-      stopRefresh(); document.body.style.overflow = previousOverflow; previousFocus?.focus({ preventScroll: true })
+      stopRefresh()
       window.removeEventListener('message', receive); window.removeEventListener('keydown', key); window.removeEventListener('focus', refresh); window.removeEventListener('cursado-workspace-saved', refresh)
     }
   }, [session, boardId, rootHandle])
@@ -255,7 +270,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     <div inert={!!imageReader} style={{ display: 'contents' }}>
     <div className="flex h-full">
       <div className="relative min-w-0" style={{ width: split ? '50%' : '100%', height: '100%' }}>
-        {initial && <iframe ref={frame} title={`Pizarra de ${name}`} src={`/study-board/index.html?topicBoard=${encodeURIComponent(boardId)}&room=${encodeURIComponent(initial.record.roomId)}&session=${session}&studyTitle=${encodeURIComponent(name)}`} className="h-full w-full border-0" onLoad={initialize} />}
+        {frameSrc && <iframe inert={!ready} ref={frame} title={`Pizarra de ${name}`} src={frameSrc} className="h-full w-full border-0" onLoad={initialize} />}
         {!ready && !error && !status && <p role="status" className="absolute bottom-4 left-4 rounded bg-white p-3">Abriendo pizarra…</p>}
       </div>
       {split && <aside className="relative h-full w-1/2 border-l bg-background text-foreground">

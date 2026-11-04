@@ -18,6 +18,13 @@ function encode(bytes: Uint8Array) {
 function decode(value: string) { return Uint8Array.from(atob(value), char => char.charCodeAt(0)) }
 
 export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: BoardCanvas) {
+  const lifetime = new AbortController()
+  const options = (value?: boolean | AddEventListenerOptions): AddEventListenerOptions => ({ ...(typeof value === 'boolean' ? { capture: value } : value), signal: lifetime.signal })
+  const onWindow = ((type: string, listener: EventListenerOrEventListenerObject, value?: boolean | AddEventListenerOptions) => window.addEventListener(type, listener, options(value))) as Window['addEventListener']
+  const onDocument = ((type: string, listener: EventListenerOrEventListenerObject, value?: boolean | AddEventListenerOptions) => document.addEventListener(type, listener, options(value))) as Document['addEventListener']
+  const onBoard = ((type: string, listener: EventListenerOrEventListenerObject, value?: boolean | AddEventListenerOptions) => document.getElementById('board')!.addEventListener(type, listener, options(value))) as HTMLElement['addEventListener']
+  const cleanups: (() => void)[] = [() => lifetime.abort()]
+  const dispose = () => { for (const cleanup of cleanups) cleanup() }
   const params = new URLSearchParams(location.search), session = params.get('session'), boardId = params.get('topicBoard')
   const observer = new MutationObserver(records => {
     // text-layer moves nodes to maintain z-order; only unmount truly removed players.
@@ -27,7 +34,11 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     }
   })
   observer.observe(document.getElementById('board')!, { childList: true, subtree: true })
-  document.addEventListener('study-video', ((event: CustomEvent) => {
+  cleanups.push(() => {
+    observer.disconnect()
+    document.querySelectorAll<HTMLElement>('[data-study="youtube"]').forEach(disposeStudy)
+  })
+  onDocument('study-video', ((event: CustomEvent) => {
     const data = event.detail, map = objectsMap(doc).get(data.id), study = map?.get('study') as any
     if (study?.kind !== 'youtube') return
     if (data.action) {
@@ -36,17 +47,20 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     } else map!.set('study', { ...study, start: data.start, end: data.end })
   }) as EventListener)
   if (!session || !boardId || window.parent === window) {
-    document.addEventListener('click', event => {
+    onDocument('click', event => {
       if ((event.target as Element)?.closest('[data-study-action]')) alert('Abrí esta pizarra desde Estudio para acceder a sus materiales y tareas locales.')
     })
-    return
+    return dispose
   }
   document.body.classList.add('study-embedded')
   document.querySelector('komu-tool-dock [data-tool="image"]')?.remove()
   let initialized = false, busy = false, report: MigrationReport | undefined, checkpointTimer: ReturnType<typeof setTimeout> | undefined
-  const send = (type: string, data: Record<string, unknown> = {}) => parent.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin)
+  cleanups.push(() => { if (checkpointTimer) clearTimeout(checkpointTimer) })
+  const send = (type: string, data: Record<string, unknown> = {}) => { if (lifetime.signal.aborted) return; parent.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin) }
   const notifyTheme = () => send('theme', { theme: document.documentElement.dataset.theme || 'light' })
-  new MutationObserver(notifyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  const themeObserver = new MutationObserver(notifyTheme)
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  cleanups.push(() => themeObserver.disconnect())
   const readImage = (id: string) => {
     const images = [...new Set(orderArray(doc).toArray())].flatMap(imageId => {
       const map = objectsMap(doc).get(imageId), src = map?.get('plantumlFullSrc') || map?.get('src')
@@ -54,7 +68,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     })
     send('read-image', { initialId: id, images })
   }
-  document.getElementById('board')!.addEventListener('dblclick', event => {
+  onBoard('dblclick', event => {
     if (event.button !== 0 || (event.target as Element).closest('button,input,textarea,[contenteditable]')) return
     const id = canvas.studyHitAt(event.clientX, event.clientY)
     if (!id || objectsMap(doc).get(id)?.get('type') !== 'image') return
@@ -176,11 +190,12 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
           }
         }
       }, 'study-migration')
+      document.getElementById('board')!.inert = false
       initialized = true; send('ready', { report, converterVersion: STUDY_CONVERTER_VERSION }); checkpoint(); emitPins()
     } catch (error) { send('error', { error: String(error) }) }
     finally { busy = false; send('status', { status: '' }) }
   }
-  window.addEventListener('message', event => {
+  onWindow('message', event => {
     if (event.origin !== location.origin || event.source !== parent || event.data?.session !== session || event.data?.boardId !== boardId) return
     const data = event.data
     if (data.type === 'study-board:night-images' && ['auto', 'original', 'invert'].includes(data.mode)) { document.documentElement.dataset.nightImages = data.mode; localStorage.setItem('study-night-images', data.mode) }
@@ -196,7 +211,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     }
     if (data.type === 'study-board:close') {
       if (busy) { send('error', { error: 'Esperá a que termine la importación antes de salir.' }); return }
-      checkpoint(); send('closed')
+      canvas.finishStudyEdits(); checkpoint(); send('closed')
     }
     if (data.type === 'study-board:pin') {
       const map = objectsMap(doc).get(data.id), study = map?.get('study') as any
@@ -250,13 +265,15 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
       })().catch(error => send(data.requestId ? 'import-result' : 'error', { requestId: data.requestId, ok: false, error: String(error) })).finally(() => { busy = false; send('status', { status: '' }); checkpoint() })
     }
   })
-  doc.on('update', () => {
-    if (!initialized) return
+  const onUpdate = () => {
+    if (!initialized || lifetime.signal.aborted) return
     if (checkpointTimer) clearTimeout(checkpointTimer)
     checkpointTimer = setTimeout(checkpoint, 500)
     emitPins(); send('changed')
-  })
-  document.addEventListener('click', event => {
+  }
+  doc.on('update', onUpdate)
+  cleanups.push(() => doc.off('update', onUpdate))
+  onDocument('click', event => {
     const button = (event.target as Element).closest<HTMLElement>('[data-study-action]')
     const element = button?.closest<HTMLElement>('[data-id]')
     if (!element) return
@@ -275,7 +292,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (study?.kind !== 'pdf') return
     card(id)?.classList.add('study-opening'); send('open', { id, study })
   }
-  document.addEventListener('study-open-pdf', ((event: CustomEvent) => openPdf(event.detail.id)) as EventListener)
+  onDocument('study-open-pdf', ((event: CustomEvent) => openPdf(event.detail.id)) as EventListener)
   type CardPress = { id: string; pointer: number; x: number; y: number; held: boolean; textLink: boolean; diagram: boolean; timer?: ReturnType<typeof setTimeout> }
   let press: CardPress | undefined
   let lastTap: { id: string; at: number } | undefined
@@ -285,7 +302,8 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (press) card(press.id)?.classList.remove('study-holding')
     press = undefined
   }
-  document.addEventListener('pointerdown', event => {
+  cleanups.push(() => clearPress())
+  onDocument('pointerdown', event => {
     if (press) { clearPress(); lastTap = undefined; return }
     if (event.button !== 0 || !event.isPrimary || (event.target as Element).closest('button,input,[contenteditable],.text-bar')) return
     const id = canvas.studyHitAt(event.clientX, event.clientY)
@@ -312,10 +330,10 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
       }, 600)
     }
   }, true)
-  document.addEventListener('pointermove', event => {
+  onDocument('pointermove', event => {
     if (press?.pointer === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) { clearPress(); lastTap = undefined }
   }, true)
-  document.addEventListener('pointerup', event => {
+  onDocument('pointerup', event => {
     if (!press || press.pointer !== event.pointerId) return
     const current = press; clearPress()
     if (current.held) return
@@ -339,21 +357,21 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
       send('open', { id: current.id, study })
     } else lastTap = { id: current.id, at: Date.now() }
   }, true)
-  document.addEventListener('pointercancel', () => { clearPress(); lastTap = undefined }, true)
-  window.addEventListener('blur', clearPress)
-  window.addEventListener('message', event => {
+  onDocument('pointercancel', () => { clearPress(); lastTap = undefined }, true)
+  onWindow('blur', clearPress)
+  onWindow('message', event => {
     if (event.origin !== location.origin || event.source !== parent || event.data?.session !== session || event.data?.boardId !== boardId) return
     if (event.data.type === 'study-board:open-finished') document.querySelectorAll('.study-opening').forEach(el => el.classList.remove('study-opening'))
   })
-  document.addEventListener('keydown', event => {
+  onDocument('keydown', event => {
     if ((event.target as Element)?.closest('input,textarea,select,[contenteditable],[role="textbox"]') || event.repeat || event.isComposing) return
     if (event.key === '<' && !event.ctrlKey && !event.altKey && !event.metaKey) { event.preventDefault(); event.stopImmediatePropagation(); send('toggle-pdf') }
   }, true)
   const board = document.getElementById('board')!
-  board.addEventListener('dragover', event => {
+  onBoard('dragover', event => {
     if ([BOARD_PDF_MIME, BOARD_LINK_MIME, BOARD_IMPORTANT_MIME, BOARD_SHORTCUT_MIME].some(mime => event.dataTransfer?.types.includes(mime)) || event.dataTransfer?.types.includes('Files')) { event.preventDefault(); event.stopImmediatePropagation() }
   }, true)
-  board.addEventListener('drop', event => {
+  onBoard('drop', event => {
     const transfer = event.dataTransfer; if (!transfer) return
     const pdf = parseBoardPdfDrag(transfer.getData(BOARD_PDF_MIME)), link = parseBoardLinkDrag(transfer.getData(BOARD_LINK_MIME)), important = parseImportantDrag(transfer.getData(BOARD_IMPORTANT_MIME))
     const shortcut = parseBoardShortcutDrag(transfer.getData(BOARD_SHORTCUT_MIME))
@@ -366,11 +384,14 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (important) doc.transact(() => insert(studyCard(crypto.randomUUID(), 'Importante', { kind: 'important', taskId: important.taskId }, x, y)))
     if (transfer.files.length) send('files', { files: [...transfer.files] })
   }, true)
-  const diagrams = document.createElement('button'); diagrams.type = 'button'; diagrams.className = 'tool'
+  const diagrams = document.querySelector<HTMLButtonElement>('.study-diagrams') || document.createElement('button'); diagrams.type = 'button'; diagrams.className = 'tool study-diagrams'
   diagrams.setAttribute('aria-label', 'Diagramas'); diagrams.title = 'Diagramas'
-  diagrams.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="5" rx="1.5"/><rect x="1" y="17" width="8" height="5" rx="1.5"/><rect x="15" y="17" width="8" height="5" rx="1.5"/><path d="M12 7v5M5 17v-5h14v5"/></svg>'
+  if (!diagrams.firstChild) diagrams.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="5" rx="1.5"/><rect x="1" y="17" width="8" height="5" rx="1.5"/><rect x="15" y="17" width="8" height="5" rx="1.5"/><path d="M12 7v5M5 17v-5h14v5"/></svg>'
   diagrams.onclick = () => send('diagrams')
-  const plus = document.createElement('button'); plus.type = 'button'; plus.className = 'tool study-plus'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Agregar a la pizarra'); plus.onclick = () => send('menu')
-  document.querySelector('komu-tool-dock')?.append(diagrams, plus)
+  const plus = document.querySelector<HTMLButtonElement>('.study-plus') || document.createElement('button'); plus.type = 'button'; plus.className = 'tool study-plus'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Agregar a la pizarra'); plus.onclick = () => send('menu')
+  const dock = document.querySelector('komu-tool-dock')
+  if (!diagrams.isConnected) dock?.append(diagrams)
+  if (!plus.isConnected) dock?.append(plus)
   send('request-init')
+  return dispose
 }

@@ -199,6 +199,7 @@ function sanitizePastedShape(o: BoardObject): BoardObject {
 }
 
 export class BoardCanvas {
+  private readonly lifetime = new AbortController();
   private readonly stage: Konva.Stage;
   private readonly overlay = new Konva.Layer();
   /** Top Konva layer for selection chrome (the marquee + the multi-select union box). */
@@ -897,7 +898,7 @@ export class BoardCanvas {
     this.opts.container.addEventListener("pointerleave", () => {
       this.opts.awareness.setLocalStateField("cursor", null);
       this.hidePeerTip();
-    });
+    }, { signal: this.lifetime.signal });
     window.addEventListener("blur", this.onWindowBlur);
   }
 
@@ -2861,7 +2862,7 @@ export class BoardCanvas {
     // the native edit menu (paste etc.) is still wanted.
     this.stage.container().addEventListener("contextmenu", (e) => {
       if (!(e.target as HTMLElement).closest?.(".komu-text-editor")) e.preventDefault();
-    });
+    }, { signal: this.lifetime.signal });
     // On touch, a tap normally generates emulated mouse events (mousedown/up/click) afterwards.
     // With the text/sticky tools that emulated mousedown lands on the canvas and blurs the editor
     // we just opened + focused → it commits instantly (the "menu flicker" + text never sticks on
@@ -3103,10 +3104,22 @@ export class BoardCanvas {
     this.raf = requestAnimationFrame(step);
   }
 
+  finishStudyEdits(): void {
+    this.suppressAutoSelect = true;
+    try { this.textLayer.commit(); } finally { this.suppressAutoSelect = false; }
+  }
+
+  studyToolPreferences() {
+    return { color: this.color, width: this.widthPx, style: this.style, sticky: this.stickyColor, shape: this.currentShape, custom: this.currentShapeCustom, stamp: this.currentStamp, connector: this.currentConnector };
+  }
+
   destroy(): void {
+    this.lifetime.abort();
+    this.undoManager.destroy();
     this.viewport.destroy();
     this.textLayer.destroy();
     cancelAnimationFrame(this.raf);
+    cancelAnimationFrame(this.eraserRaf);
     if (this.connGlideRaf) cancelAnimationFrame(this.connGlideRaf);
     this.connectorBar.destroy();
     this.opts.awareness.off("change", this.onAwarenessChange);
