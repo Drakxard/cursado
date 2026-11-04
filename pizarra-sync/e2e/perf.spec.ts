@@ -19,8 +19,7 @@ type ProfileWindow = {
  * Dense-board performance regression gate (ADR-0009 Phase 4).
  *
  * Injects a 3,000-object board (2,400 stickies/shapes, half with text + 600 strokes) and measures
- * rAF frame times while pumping wheel gestures (wheel = zoom here, so the sweeps cross the whole
- * zoom range — the worst case: mount/unmount churn + full-board relayout at far zoom).
+ * rAF frame times while pumping wheel (vertical pan) and Ctrl+wheel (zoom) gestures.
  *
  * Frame budgets are calibrated against an empty-board run on the same machine.
  * The separate profile gate checks board-wide work and style cost directly, since
@@ -200,9 +199,9 @@ test("perf: a 3000-object board stays interactive through full-range zoom sweeps
   test.setTimeout(180_000);
   const a = await connectPeer(browser, uniqueRoom("perf"));
   const page = a.page;
-  await sweep(page, { ms: 500, flipEvery: 60, ctrl: false }); // warm the renderer
-  const empty = await sweep(page, { ms: 3000, flipEvery: 60, ctrl: false });
-  console.log("empty-board wheel baseline:", JSON.stringify(empty));
+  await sweep(page, { ms: 500, flipEvery: 60, ctrl: true }); // warm the zoom renderer
+  const empty = await sweep(page, { ms: 3000, flipEvery: 60, ctrl: true });
+  console.log("empty-board Ctrl+wheel baseline:", JSON.stringify(empty));
   expect(empty.frames).toBeGreaterThan(5);
   // Preserve the legacy full-range ceilings on fast machines, and allow at most
   // twice the empty-board frame cost on a software-rendered/contended runner.
@@ -235,7 +234,7 @@ test("perf: a 3000-object board stays interactive through full-range zoom sweeps
   expect(near.mounted).toBeLessThan(300);
   expect(near.mounted).toBeGreaterThan(0);
 
-  // Wheel sweep at 100% (wheel = zoom → crosses the zoom range; worst-case mount churn).
+  // Plain wheel pans vertically and exercises viewport culling.
   const wheelNear = await sweep(page, { ms: 3000, flipEvery: 60, ctrl: false });
   console.log("wheel sweep from 100%:", JSON.stringify(wheelNear));
 
@@ -255,7 +254,7 @@ test("perf: a 3000-object board stays interactive through full-range zoom sweeps
   );
   expect(fit.mounted).toBeGreaterThanOrEqual(3000); // all 2400 boxes + 600 strokes are in the DOM
 
-  // Sweeps with the whole board mounted — per-frame relayout of every element.
+  // Plain wheel pans the full board; Ctrl+wheel then exercises zoom.
   const wheelFit = await sweep(page, { ms: 3000, flipEvery: 60, ctrl: false });
   console.log("wheel sweep from fit:", JSON.stringify(wheelFit));
 
@@ -357,6 +356,7 @@ test("zoom profile: dense board with a collaborating text editor", async ({ brow
           board.awareness.setLocalStateField("cursor", { x: i, y: i });
           el.dispatchEvent(
             new WheelEvent("wheel", {
+              ctrlKey: true,
               deltaY: i % 2 ? 2 : -2,
               bubbles: true,
               cancelable: true,

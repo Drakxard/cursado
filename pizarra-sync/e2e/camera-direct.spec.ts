@@ -126,7 +126,9 @@ test("content stays aligned through composited pan, zoom, rebase and settling", 
       expect(r.y - old.y).toBeCloseTo(20, 1);
     }
     await page.mouse.up();
+    await page.keyboard.down("Control");
     await page.mouse.wheel(0, -50);
+    await page.keyboard.up("Control");
     await frame(page);
     const moving = await rects();
     await page.waitForTimeout(220);
@@ -148,6 +150,55 @@ test("content stays aligned through composited pan, zoom, rebase and settling", 
   } finally { await finish(); await close(); }
 });
 
+test("plain wheel scrolls vertically without zoom and Ctrl+wheel switches back to zoom", async ({ browser }) => {
+  const { page, close } = await connectPeer(browser, uniqueRoom("wheel-scroll"));
+  try {
+    const result = await page.evaluate(async () => {
+      const { stage, viewport } = (window as CameraWindow).__komuboard.canvas;
+      viewport.zoomTo(2); // scrolling stays in screen pixels at any zoom
+      const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
+      const r = el.getBoundingClientRect();
+      const read = () => ({ x: stage.x(), y: stage.y(), scale: stage.scaleX() });
+      const send = (deltaY: number, deltaMode = 0, ctrlKey = false) => {
+        const event = new WheelEvent("wheel", { bubbles: true, cancelable: true,
+          clientX: r.left + 300, clientY: r.top + 250, deltaX: 40, deltaY, deltaMode, ctrlKey });
+        el.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const start = read();
+      const prevented = send(80); const down = read();
+      send(-20.5); const up = read();
+      send(2, 1); const lines = read();
+      send(.25, 2); const pages = read();
+      send(0); const invalid = read();
+      send(-30, 0, true); const zoomed = read();
+      send(10); const switched = read();
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      return { start, down, up, lines, pages, invalid, zoomed, switched, prevented, height: r.height,
+        documentZoom: window.visualViewport?.scale ?? 1 };
+    });
+    expect(result.prevented).toBe(true);
+    expect(result.down).toEqual({ ...result.start, y: result.start.y - 80 });
+    expect(result.up.y).toBeCloseTo(result.down.y + 20.5, 6);
+    expect(result.lines.y).toBeCloseTo(result.up.y - 32, 6);
+    expect(result.pages.y).toBeCloseTo(result.lines.y - result.height * .25, 6);
+    for (const state of [result.up, result.lines, result.pages, result.invalid]) {
+      expect(state.scale).toBe(2);
+      expect(state.x).toBe(result.start.x);
+    }
+    expect(result.invalid).toEqual(result.pages);
+    expect(result.zoomed.scale).toBeCloseTo(2 * Math.exp(.06), 6);
+    expect(result.switched).toEqual({ ...result.zoomed, y: result.zoomed.y - 10 });
+    expect(result.documentZoom).toBe(1);
+    // Exercise the real browser input route as well as normalized synthetic deltas.
+    await page.mouse.move(500, 350);
+    const before = await camera(page);
+    await page.mouse.wheel(0, 75);
+    await expect.poll(async () => (await camera(page)).y).toBeCloseTo(before.y - 75, 4);
+    expect((await camera(page)).scale).toBe(before.scale);
+  } finally { await close(); }
+});
+
 test("zoom uses normalized deltas, keeps its anchor and buttons have no animation tail", async ({ browser }) => {
   const { page, close } = await connectPeer(browser, uniqueRoom("direct-zoom"));
   try {
@@ -156,7 +207,7 @@ test("zoom uses normalized deltas, keeps its anchor and buttons have no animatio
       const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
       const r = el.getBoundingClientRect(), px = 300, py = 250;
       const wheel = (deltaY: number, deltaMode = 0) => el.dispatchEvent(new WheelEvent("wheel", {
-        bubbles: true, cancelable: true, clientX: r.left + px, clientY: r.top + py, deltaY, deltaMode,
+        bubbles: true, cancelable: true, ctrlKey: true, clientX: r.left + px, clientY: r.top + py, deltaY, deltaMode,
       }));
       const anchor = () => ({ x: (px - stage.x()) / stage.scaleX(), y: (py - stage.y()) / stage.scaleX() });
       const origin = anchor();
