@@ -27,6 +27,20 @@ No usa credenciales ni escribe en Cloudflare de producción.
 
 La sincronización Yjs, el protocolo de mensajes y el almacenamiento no cambian.
 
+## Regresión por adaptación nocturna (4 de noviembre de 2026)
+
+El observador de colores añadido para la lectura nocturna también recibía las
+mutaciones de estilo de `.text-layer` y `.canvas-grid`. Cada cuadro de cámara
+volvía a consultar y recorrer todos los textos y trazos, aunque no cambiaran sus
+colores. La transformación rápida de cámara seguía funcionando, pero este trabajo
+se añadía fuera de sus contadores de layout. Afectaba también al modo claro.
+
+Ahora las mutaciones de atributos solo se procesan dentro de textos, trazos e
+imágenes. Los cambios de tema conservan el recorrido completo necesario para
+aplicar o restaurar la paleta. La prueba `tests/night-readability.browser.mjs`
+comprueba que doce cuadros de cámara no consulten descendientes y que editar
+colores y regresar al modo claro siga funcionando.
+
 ## Pruebas y artefactos
 
 El workflow **Fluidez del zoom y colaboracion** se ejecuta en push y pull request

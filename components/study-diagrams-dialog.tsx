@@ -11,7 +11,7 @@ function PlantUmlSketch() {
   return <svg viewBox="0 0 340 130" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="2"><path d="M90 64h35l25-37h45M125 64l25 35h45M265 99h18l16 16" /><ellipse cx="52" cy="64" rx="42" ry="15" /><ellipse cx="234" cy="27" rx="45" ry="15" /><ellipse cx="234" cy="99" rx="45" ry="15" /><ellipse cx="311" cy="115" rx="22" ry="10" /></g></svg>
 }
 
-export function StudyDiagramsDialog({ onClose, onInsert, initialSource, editing = false }: { onClose: () => void; onInsert: (file: File, source: string, rootFile?: File) => Promise<void>; initialSource?: string; editing?: boolean }) {
+export function StudyDiagramsDialog({ onClose, onInsert, initialSource, editing = false, theme = 'light' }: { onClose: () => void; onInsert: (file: File, source: string, rootFile?: File) => Promise<void>; initialSource?: string; editing?: boolean; theme?: string }) {
   const [view, setView] = useState<'choose' | 'plantuml' | 'mermaid'>(initialSource !== undefined ? (/^\s*mindmap\s*$/m.test(initialSource) ? 'mermaid' : 'plantuml') : 'choose')
   const title = view === 'mermaid' ? 'Mermaid Mindmap' : 'PlantUML'
   const codeLabel = view === 'mermaid' ? 'Código Mermaid' : 'Código PlantUML'
@@ -85,7 +85,7 @@ export function StudyDiagramsDialog({ onClose, onInsert, initialSource, editing 
     }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setInserting(false) }
   }
-  return <div className={`study-diagrams-backdrop${maximized ? ' study-diagrams-maximized' : ''}`} style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+  return <div data-theme={theme} className={`study-diagrams-backdrop${maximized ? ' study-diagrams-maximized' : ''}`} style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
     <div ref={dialog} className="study-diagrams" role="dialog" aria-modal="true" aria-labelledby="study-diagrams-title">
       <header><div>{view !== 'choose' && <button className="study-diagrams-back" type="button" disabled={inserting} onClick={() => setView('choose')} aria-label="Volver a Diagramas">←</button>}<h2 id="study-diagrams-title">{view === 'choose' ? 'Diagramas' : title}</h2>{view === 'plantuml' && <PlantUmlPromptButton disabled={inserting} />}</div><button type="button" disabled={inserting} onClick={onClose} aria-label="Cerrar diagramas">×</button></header>
       {view === 'choose' ? <div className="study-diagrams-choices">

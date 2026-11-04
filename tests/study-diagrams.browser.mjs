@@ -10,7 +10,7 @@ test('study dialog renders local mindmaps with separate KaTeX rows and inserts t
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
     import {createRoot} from 'react-dom/client';
     import {StudyDiagramsDialog} from './components/study-diagrams-dialog';
-    createRoot(document.getElementById('root')).render(<StudyDiagramsDialog onClose={()=>window.closedDialog=true} onInsert={async(file,source,rootFile)=>{window.inserted={source,type:file.type,size:file.size,bytes:Array.from(new Uint8Array(await file.arrayBuffer())),rootBytes:rootFile?Array.from(new Uint8Array(await rootFile.arrayBuffer())):null}}}/>);
+    const root = createRoot(document.getElementById('root')); window.setDiagramTheme = theme => root.render(<StudyDiagramsDialog theme={theme} onClose={()=>window.closedDialog=true} onInsert={async(file,source,rootFile)=>{window.inserted={source,type:file.type,size:file.size,bytes:Array.from(new Uint8Array(await file.arrayBuffer())),rootBytes:rootFile?Array.from(new Uint8Array(await rootFile.arrayBuffer())):null}}}/>); window.setDiagramTheme('light');
   `, loader: 'tsx' }, bundle: true, format: 'esm', write: false, jsx: 'automatic', loader: { '.css': 'empty' } })
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' })
   t.after(() => browser.close())
@@ -40,7 +40,13 @@ test('study dialog renders local mindmaps with separate KaTeX rows and inserts t
   page.on('request', request => { if (request.url().includes('/api/')) apiCalls++ })
   await page.goto('http://study.test/')
   await page.addStyleTag({ path: 'components/study-diagrams.css' })
+  await page.evaluate(() => window.setDiagramTheme('dark'))
+  await expect(page.getByRole('dialog')).toHaveCSS('background-color', 'rgb(25, 30, 39)')
+  await expect(page.getByRole('button', { name: /PlantUML/ })).toHaveCSS('color', 'rgb(237, 240, 245)')
   await page.getByRole('button', { name: /PlantUML/ }).click()
+  await expect(page.getByRole('textbox', { name: /PlantUML/, exact: true })).toHaveCSS('background-color', 'rgb(34, 41, 54)')
+  await page.evaluate(() => window.setDiagramTheme('light'))
+  await expect(page.getByRole('dialog')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   await expect(page.locator('.study-diagrams-help')).toHaveCount(0)
   await page.evaluate(() => {
     window.copiedPrompts = []

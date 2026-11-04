@@ -73,10 +73,16 @@ export function installNightReadability() {
   const flush = () => { scheduled = false; for (const el of queue) if (el.isConnected) scan(el); queue.clear() }
   const observer = new MutationObserver(records => {
     for (const record of records) {
-      if (record.type === 'attributes') queue.add(record.target as Element)
+      if (record.type === 'attributes') {
+        const target = record.target as Element
+        // Camera transforms, grid variables and cursor chrome never change object colours.
+        // Scanning their descendants here defeats the compositor-only zoom path.
+        if (!target.matches('.komu-image img') && !target.closest('.komu-text, .komu-ink')) continue
+        queue.add(target)
+      }
       else for (const node of record.addedNodes) if (node instanceof Element) queue.add(node)
     }
-    if (!scheduled) { scheduled = true; requestAnimationFrame(flush) }
+    if (queue.size && !scheduled) { scheduled = true; requestAnimationFrame(flush) }
   })
   observer.observe(document.getElementById('board')!, { subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'fill', 'stroke', 'src', 'class'] })
   new MutationObserver(() => scan(document.getElementById('board')!)).observe(root, { attributes: true, attributeFilter: ['data-theme'] })
