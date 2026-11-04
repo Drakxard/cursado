@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { build } from 'esbuild'
 import { chromium, expect } from '@playwright/test'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 // Uses the existing local Vite + Worker stack; no Next production build is needed.
@@ -20,6 +20,7 @@ const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
   const persistentStudy=children=><NativeWorkspaceProvider rootHandle={fs}><StudyImportantTasks>{children}</StudyImportantTasks></NativeWorkspaceProvider>;
   window.openNamedBoard=(id,week)=>root.render(persistentStudy(<TopicBoardOverlay key={id} boardId={id} name="Base de Datos · temas" cooperationWeekNumber={week} rootHandle={fs} onClose={()=>root.render(persistentStudy(<button onClick={()=>window.openPersistentBoard()}>Abrir pizarra</button>))}/>));
   window.openPersistentBoard=()=>window.openNamedBoard('route-first',4);
+  window.openPagesBoard=()=>root.render(<TopicBoardOverlay boardId="pages-regression" name="Pages regression" rootHandle={fs} onClose={()=>root.render(null)} />);
   window.delegateBoard=()=>root.render(<StudyBoardNavigationContext.Provider value={reference=>{window.delegatedBoard=reference}}><TopicBoardOverlay boardId="target" name="Destino" rootHandle={fs} onClose={()=>{}} /></StudyBoardNavigationContext.Provider>);
   window.read=async path=>{let directory=fs;const parts=path.split('/');for(const part of parts.slice(0,-1))directory=await directory.getDirectoryHandle(part);return JSON.parse(await(await(await directory.getFileHandle(parts.at(-1))).getFile()).text())};
   window.openBoard=id=>root.render(<TopicBoardOverlay key={id} boardId={id} name={id} rootHandle={fs} pdfReferences={[{materialId:1,subjectId:'subject',fileName:'Uno.pdf',workspaceFileId:'workspace://teoria/uno.pdf'},{materialId:2,subjectId:'subject',fileName:'Dos.pdf',workspaceFileId:'workspace://teoria/dos.pdf'}]} onClose={()=>{window.boardClosed=true;root.render(<button onClick={()=>window.openBoard(id)}>Reabrir</button>)}}/>);
@@ -918,4 +919,145 @@ test('review markers migrate and repair accepted placeholders; countdown and mar
   const repaired=await engine(page).evaluate(id=>window.__komuboard.doc.getMap('objects').get(id).toJSON(),repairedId)
   assert.equal(repaired.x,280); assert.equal(repaired.y,330); assert.equal(repaired.width,56)
   await expect(page.getByText('Elemento anterior: shapes:review-marker')).toHaveCount(0)
+})
+
+
+async function pageRegression(t, name) {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' })
+  let page, context
+  t.after(async () => {
+    try {
+      if (process.env.STUDY_TEST_TRACE === '1' && page && context) {
+        await mkdir('test-results/study-pages', { recursive: true })
+        await page.screenshot({ path: `test-results/study-pages/${name}.png` }).catch(() => {})
+        await context.tracing.stop({ path: `test-results/study-pages/${name}.zip` })
+      }
+    } finally { await browser.close() }
+  })
+  context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+  if (process.env.STUDY_TEST_TRACE === '1') await context.tracing.start({ screenshots: true, snapshots: true })
+  await fixture(context)
+  page = await context.newPage()
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  return { page, errors }
+}
+
+test('study pages keep the shell mounted, release old documents and preserve edits and tools', { timeout: 120000 }, async t => {
+  const { page, errors } = await pageRegression(t, 'switching')
+  await page.goto(origin + '/study-fixture?defer=1')
+  await page.waitForFunction(() => typeof window.openPagesBoard === 'function')
+  await page.evaluate(() => window.openPagesBoard()); await loaded(page, 'pages-regression')
+  const frame = engine(page)
+  await frame.evaluate(() => {
+    window.shellSentinel = crypto.randomUUID()
+    window.originalDock = document.querySelector('komu-tool-dock')
+    window.originalZoom = document.querySelector('komu-zoombar')
+    window.oldDocDestroyed = 0
+    window.__komuboard.doc.on('destroy', () => window.oldDocDestroyed++)
+    window.__komuboard.canvas.pasteExternal([{ id: 'note-a', type: 'text', x: 300, y: 300, width: 240, fontSize: 24, runs: [{ text: 'Only on page A' }] }])
+  })
+  const sentinel = await frame.evaluate(() => window.shellSentinel)
+  await frame.locator('[data-tool="pen"]').click()
+  await frame.evaluate(() => {
+    document.getElementById('app').dispatchEvent(new CustomEvent('pen-change', { bubbles: true, detail: { color: '#cc3366', width: 13 } }))
+    window.__komuboard.canvas.zoomTo(.7)
+  })
+  await page.locator('.study-page-trigger').click()
+  await page.getByRole('button', { name: 'Crear página', exact: true }).click()
+  await expect.poll(() => frame.evaluate(() => new URLSearchParams(location.search).get('topicBoard'))).not.toBe('pages-regression')
+  await loaded(page)
+  await expect(page.locator('iframe[title^="Pizarra de"]')).toHaveCount(1)
+  assert.equal(await frame.evaluate(() => window.shellSentinel), sentinel)
+  assert.equal(await frame.evaluate(() => window.originalDock === document.querySelector('komu-tool-dock') && window.originalZoom === document.querySelector('komu-zoombar')), true)
+  assert.equal(await frame.evaluate(() => window.oldDocDestroyed), 1)
+  assert.equal(await frame.evaluate(() => window.__komuboard.doc.getMap('objects').size), 0)
+  assert.deepEqual(await frame.evaluate(() => { const p = window.__komuboard.canvas.studyToolPreferences(); return [p.color, p.width, window.__komuboard.canvas.tool] }), ['#cc3366', 13, 'pen'])
+  await expect(frame.locator('.study-plus')).toHaveCount(1)
+  await expect(frame.locator('.study-diagrams')).toHaveCount(1)
+  await frame.evaluate(() => window.__komuboard.canvas.pasteExternal([{ id: 'note-b', type: 'text', x: 300, y: 300, width: 240, fontSize: 24, runs: [{ text: 'Only on page B' }] }]))
+  const secondId = await frame.evaluate(() => new URLSearchParams(location.search).get('topicBoard'))
+  const select = async name => {
+    if (!await page.locator('#study-pages-panel').isVisible()) await page.locator('.study-page-trigger').click()
+    await page.getByRole('button', { name, exact: true }).click()
+    await expect(page.locator('iframe[title^="Pizarra de"]')).not.toHaveAttribute('inert', '')
+  }
+  const text = () => frame.evaluate(() => [...window.__komuboard.doc.getMap('objects').values()].flatMap(m => m.get('runs') || []).map(r => r.text).join(' '))
+  for (let round = 0; round < 3; round++) {
+    await select('Page 1'); await loaded(page, 'pages-regression')
+    assert.match(await text(), /Only on page A/); assert.doesNotMatch(await text(), /Only on page B/)
+    assert.ok(Math.abs(await frame.evaluate(() => window.__komuboard.canvas.getZoomPercent()) - 70) <= 1)
+    await select('Page 2'); await loaded(page, secondId)
+    assert.match(await text(), /Only on page B/); assert.doesNotMatch(await text(), /Only on page A/)
+    assert.equal(await frame.evaluate(() => window.shellSentinel), sentinel)
+    await expect(frame.locator('.study-plus')).toHaveCount(1)
+    await expect(frame.locator('.text-layer')).toHaveCount(1)
+    await expect(frame.locator('.canvas-grid')).toHaveCount(1)
+  }
+  let nativeDialogs = 0
+  page.on('dialog', async dialog => { nativeDialogs++; await dialog.dismiss() })
+  await page.locator('.study-page-trigger').click()
+  await page.getByRole('button', { name: 'Opciones de Page 2', exact: true }).click()
+  await page.getByRole('button', { name: 'Renombrar página', exact: true }).click()
+  const rename = page.getByRole('textbox', { name: 'Nombre de la página', exact: true })
+  await expect(rename).toBeFocused()
+  await rename.fill('Renamed inline'); await rename.press('Enter')
+  await expect(page.locator('.study-page-trigger')).toContainText('Renamed inline')
+  await expect.poll(() => page.evaluate(async () => (await window.read('progreso/pizarra-sync/pages-regression.pages.json')).find(p => p.boardId !== 'pages-regression').name)).toBe('Renamed inline')
+  await page.getByRole('button', { name: 'Opciones de Renamed inline', exact: true }).click()
+  await page.getByRole('button', { name: 'Renombrar página', exact: true }).click()
+  await rename.fill('Cancelled name'); await rename.press('Escape')
+  await expect(page.locator('.study-page-trigger')).toContainText('Renamed inline')
+  assert.equal(nativeDialogs, 0)
+  assert.deepEqual(errors, [])
+})
+
+test('night mode analyzes cross-origin images, inverts diagrams and restores originals', { timeout: 90000 }, async t => {
+  const { page, errors } = await pageRegression(t, 'night-images')
+  await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => typeof window.openPagesBoard === 'function'); await page.evaluate(() => window.openPagesBoard()); await loaded(page)
+  const frame = engine(page)
+  const ids = await frame.evaluate(async () => {
+    const result = []
+    const view = window.__komuboard.canvas.worldViewport()
+    for (const kind of ['paper', 'transparent', 'photo']) {
+      const image = document.createElement('canvas'); image.width = 240; image.height = 120
+      const ctx = image.getContext('2d')
+      if (kind === 'photo') {
+        const gradient = ctx.createLinearGradient(0, 0, 240, 120); gradient.addColorStop(0, '#ff3333'); gradient.addColorStop(1, '#3399ff'); ctx.fillStyle = gradient; ctx.fillRect(0, 0, 240, 120)
+      } else {
+        if (kind === 'paper') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 240, 120) }
+        ctx.fillStyle = '#000'; ctx.font = '24px Arial'; ctx.fillText('Night diagram', 10, 45); ctx.fillRect(10, 70, 180, 4)
+      }
+      const blob = await new Promise(resolve => image.toBlob(resolve, 'image/png'))
+      const response = await fetch('http://127.0.0.1:8787/upload', { method: 'POST', headers: { 'content-type': 'image/png' }, body: blob })
+      if (!response.ok) throw new Error('Upload failed: ' + response.status)
+      const { key } = await response.json()
+      result.push(window.__komuboard.canvas.placeImage({ key, width: 240, height: 120 }, { clientX: 600, clientY: 250 + result.length * 150 }))
+    }
+    window.__komuboard.canvas.pasteExternal([{ id: 'black-stroke', type: 'stroke', points: [500, 750, 700, 750], color: '#000000', width: 4, style: 'solid', opacity: 1, authorId: 'night-test' }])
+    return result
+  })
+  const images = ids.map(id => frame.locator(`.komu-image[data-id="${id}"] img`))
+  for (const img of images) { await expect.poll(() => img.evaluate(el => el.complete && el.naturalWidth > 0)).toBe(true); await expect(img).toHaveAttribute('crossorigin', 'anonymous') }
+  // The test must exercise a genuinely different origin, otherwise the missing-CORS bug passes.
+  assert.notEqual(new URL(await images[0].getAttribute('src')).origin, new URL(frame.url()).origin)
+  const before = await frame.evaluate(() => JSON.stringify([...window.__komuboard.doc.getMap('objects').values()].map(m => m.toJSON())))
+  await page.getByRole('switch', { name: 'Modo noche' }).click()
+  await expect(page.getByRole('switch', { name: 'Modo noche' })).toHaveAttribute('aria-checked', 'true')
+  for (const img of images.slice(0, 2)) { await expect(img).toHaveAttribute('data-night-diagram', 'true'); await expect(img).toHaveCSS('filter', 'invert(0.9) hue-rotate(180deg)') }
+  await expect(images[2]).toHaveCSS('filter', 'none')
+  const stroke = frame.locator('.komu-stroke path').last()
+  await expect.poll(() => stroke.getAttribute('stroke')).not.toBe('#000000')
+  await page.locator('.study-page-trigger').click()
+  const filter = page.getByRole('combobox', { name: 'Filtro nocturno de imágenes' })
+  await filter.selectOption('original')
+  for (const img of images) await expect(img).toHaveCSS('filter', 'none')
+  await filter.selectOption('invert')
+  for (const img of images) await expect(img).toHaveCSS('filter', 'invert(0.9) hue-rotate(180deg)')
+  await filter.selectOption('auto')
+  await page.locator('.study-page-trigger').click()
+  await page.getByRole('switch', { name: 'Modo noche' }).click()
+  for (const img of images) await expect(img).toHaveCSS('filter', 'none')
+  assert.equal(await frame.evaluate(() => JSON.stringify([...window.__komuboard.doc.getMap('objects').values()].map(m => m.toJSON()))), before)
+  assert.deepEqual(errors, [])
 })
