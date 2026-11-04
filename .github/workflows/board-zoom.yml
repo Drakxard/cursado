@@ -2,9 +2,9 @@ name: Fluidez del zoom y colaboracion
 
 on:
   push:
-    paths: ["pizarra-sync/**", ".github/workflows/board-zoom.yml"]
+    paths: ["pizarra-sync/**", "components/study-diagram*", "lib/client/study-mermaid.ts", "lib/study-svg-import.ts", "tests/study-mermaid.browser.mjs", "tests/study-board.browser.mjs", "tests/fixtures/select-mermaid-mindmap.txt", "package*.json", ".github/workflows/board-zoom.yml"]
   pull_request:
-    paths: ["pizarra-sync/**", ".github/workflows/board-zoom.yml"]
+    paths: ["pizarra-sync/**", "components/study-diagram*", "lib/client/study-mermaid.ts", "lib/study-svg-import.ts", "tests/study-mermaid.browser.mjs", "tests/study-board.browser.mjs", "tests/fixtures/select-mermaid-mindmap.txt", "package*.json", ".github/workflows/board-zoom.yml"]
   workflow_dispatch:
 
 permissions:
@@ -38,8 +38,24 @@ jobs:
       - run: pnpm --filter @komuboard/client-web typecheck
       - run: pnpm --filter @komuboard/client-web build
       - run: pnpm exec playwright install --with-deps chromium
+      - name: Preparar Chromium para las pruebas de diagramas integrados
+        run: npx playwright install chromium
+        working-directory: .
       - name: Comprobar rueda vertical, Ctrl+rueda, rendimiento y colaboracion
-        run: pnpm exec playwright test e2e/perf.spec.ts e2e/camera-direct.spec.ts e2e/viewport.spec.ts e2e/live-drag.spec.ts e2e/live-resize.spec.ts e2e/reconnect.spec.ts e2e/export.spec.ts --workers=1 --retries=0 --reporter=list,html
+        run: pnpm exec playwright test e2e/perf.spec.ts e2e/camera-direct.spec.ts e2e/viewport.spec.ts e2e/live-drag.spec.ts e2e/live-resize.spec.ts e2e/reconnect.spec.ts e2e/export.spec.ts e2e/image-download.spec.ts --workers=1 --retries=0 --reporter=list,html
+      - name: Renderizar el ejemplo SELECT con Mermaid, insertar raiz y conservar etiquetas
+        run: node --test tests/study-mermaid.browser.mjs
+        working-directory: .
+      - name: Compilar la pizarra integrada para comprobar apertura y edicion tras una actualizacion
+        run: node scripts/build-study-board.mjs
+        working-directory: .
+        env:
+          STUDY_BOARD_WORKER_HOST: 127.0.0.1:8787
+      - name: Abrir el diagrama completo desde la raiz y conservar arrastre y PlantUML
+        run: node scripts/test-study-board.mjs --test-name-pattern="diagram roots open|diagram chooser"
+        working-directory: .
+        env:
+          STUDY_TEST_BUILT: '1'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -49,3 +65,4 @@ jobs:
           path: |
             pizarra-sync/test-results/
             pizarra-sync/playwright-report/
+            test-results/

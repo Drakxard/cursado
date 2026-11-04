@@ -2,6 +2,35 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { connectPeer, injectImage, injectSticky, objJSON, uniqueRoom } from "./helpers";
 
+for (const source of ["@startmindmap\n* Root\n** Child\n@endmindmap", "mindmap\n  root((Root))\n    Child"]) {
+  test(`diagram download uses the complete image while the board displays its root (${source.startsWith('mindmap') ? 'Mermaid' : 'PlantUML'})`, async ({ browser }, info) => {
+    const { page, close } = await connectPeer(browser, uniqueRoom('diagram-download'));
+    const full = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="blue"/><text x="40" y="40">Complete diagram</text></svg>';
+    try {
+      await page.route('**/img/root-diagram.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60"><rect width="100" height="60" fill="red"/></svg>' }));
+      await page.route('**/img/complete-diagram.svg', route => route.fulfill({ contentType: 'image/svg+xml', body: full }));
+      await injectImage(page, { id: 'diagram', src: 'root-diagram.svg', x: 0, y: 0, width: 100, height: 60 });
+      await page.evaluate(source => {
+        const map = window.__komuboard!.doc.getMap('objects').get('diagram') as { set(k: string, v: unknown): void };
+        map.set('plantumlSource', source);
+        map.set('plantumlFullSrc', 'complete-diagram.svg');
+      }, source);
+      const root = page.locator('.komu-image[data-id="diagram"]');
+      await expect(root).toBeVisible();
+      expect(await root.locator('img').getAttribute('src')).toContain('root-diagram.svg');
+      const before = await objJSON(page, 'diagram');
+      const box = (await root.boundingBox())!;
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+      const pending = page.waitForEvent('download');
+      await page.locator('.ctx-item[data-act="downloadImage"]').click();
+      const download = await pending, output = info.outputPath('complete-diagram.svg');
+      await download.saveAs(output);
+      expect(await readFile(output, 'utf8')).toBe(full);
+      expect(await objJSON(page, 'diagram')).toEqual(before);
+    } finally { await close(); }
+  });
+}
+
 test("image context menu downloads original bytes, including locked images, and retries failures", async ({ browser }, info) => {
   const { page, close } = await connectPeer(browser, uniqueRoom("image-download"));
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="red"/></svg>';

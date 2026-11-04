@@ -2025,7 +2025,11 @@ export class BoardCanvas {
     const grouped =
       typeof gid === "string" && ids.every((id) => this.objects.get(id)?.get("groupId") === gid);
     const image = ids.length === 1 && first ? this.objects.get(first) : undefined;
-    const imageSrc = image?.get("type") === "image" && typeof image.get("src") === "string" ? image.get("src") as string : undefined;
+    const fullSrc = image?.get("plantumlFullSrc");
+    const imageSrc = image?.get("type") === "image"
+      ? typeof fullSrc === "string" && fullSrc ? fullSrc
+        : typeof image.get("src") === "string" ? image.get("src") as string : undefined
+      : undefined;
     return { count: ids.length, locked, grouped, overlapping: this.selectionOverlapsOthers(ids), imageSrc };
   }
 
