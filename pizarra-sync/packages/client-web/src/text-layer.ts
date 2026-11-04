@@ -1733,7 +1733,7 @@ export class TextLayer {
   }
 
   /** The topmost text object whose world bbox contains the point, or null. */
-  hitTest(world: { x: number; y: number }, rotatedBoxes = false): string | null {
+  hitTest(world: { x: number; y: number }, visualBoxes = false): string | null {
     const order = orderArray(this.opts.doc).toArray();
     for (let i = order.length - 1; i >= 0; i--) {
       const id = order[i];
@@ -1778,20 +1778,22 @@ export class TextLayer {
       const size = this.sizes.get(id);
       if (!size) continue;
       // Stamps are centre-anchored (obj.x/y = centre); text/shapes are top-left anchored.
-      const left = obj.type === "stamp" ? obj.x - size.w / 2 : obj.x;
-      const top = obj.type === "stamp" ? obj.y - size.h / 2 : obj.y;
+      const geometry = visualBoxes ? this.effectiveGeom(id, obj) : null;
+      const left = geometry?.x ?? (obj.type === "stamp" ? obj.x - size.w / 2 : obj.x);
+      const top = geometry?.y ?? (obj.type === "stamp" ? obj.y - size.h / 2 : obj.y);
+      const width = geometry?.width ?? size.w, height = geometry?.height ?? size.h;
       let point = world;
-      if (rotatedBoxes && obj.rotation) {
-        const angle = -obj.rotation * Math.PI / 180;
-        const cx = left + size.w / 2, cy = top + size.h / 2;
+      if (geometry?.rotation) {
+        const angle = -geometry.rotation * Math.PI / 180;
+        const cx = left + width / 2, cy = top + height / 2;
         const dx = world.x - cx, dy = world.y - cy;
         point = { x: cx + dx * Math.cos(angle) - dy * Math.sin(angle), y: cy + dx * Math.sin(angle) + dy * Math.cos(angle) };
       }
       if (
         point.x >= left &&
-        point.x <= left + size.w &&
+        point.x <= left + width &&
         point.y >= top &&
-        point.y <= top + size.h
+        point.y <= top + height
       ) {
         return id;
       }

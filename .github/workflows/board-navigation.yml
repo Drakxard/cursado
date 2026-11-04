@@ -2,9 +2,9 @@ name: Respuesta de navegacion de la pizarra
 
 on:
   push:
-    branches: ['perf/board-navigation']
+    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
   pull_request:
-    paths: ['pizarra-sync/**', '.github/workflows/board-navigation.yml']
+    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
   workflow_dispatch:
 
 permissions:
@@ -39,6 +39,9 @@ jobs:
         env:
           VITE_WORKER_HOST: 127.0.0.1:8787
       - run: pnpm exec playwright install --with-deps chromium
+      - name: Preparar la version de Chromium de las pruebas integradas
+        run: npx playwright install chromium
+        working-directory: .
       - name: Medir enlaces, ediciones y gestos en el bundle de produccion
         run: pnpm exec playwright test --config playwright.navigation.config.ts
       - name: Resumir respuesta y trabajo por gesto
