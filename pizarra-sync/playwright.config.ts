@@ -19,6 +19,9 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:5173",
     trace: "on-first-retry",
+    launchOptions: process.env.E2E_BROWSER_PATH
+      ? { executablePath: process.env.E2E_BROWSER_PATH }
+      : {},
   },
   // Boot the worker AND the web client; Playwright waits for both to be ready
   // (the worker via its /health endpoint) before running tests — no boot race.

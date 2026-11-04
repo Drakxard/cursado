@@ -340,6 +340,8 @@ export class TextLayer {
   private editTimer: number | null = null;
   /** clientID → ephemeral element showing that peer's in-progress text. */
   private readonly remoteEdits = new Map<number, HTMLDivElement>();
+  /** Cursor/selection awareness updates carry the same editor payload. Do not repaint it. */
+  private readonly remoteEditSignatures = new Map<number, string>();
   /** clientID → that peer's broadcast geometry, so a camera change can re-lay-out it. */
   private readonly remoteGeom = new Map<number, Geom>();
   /** Object ids a *remote* peer is currently editing — their doc display copy stays hidden. */
@@ -348,7 +350,6 @@ export class TextLayer {
    *  <svg> hides while the peer's glide draft (`remote:<id>`) shows, so there's no double-draw. */
   private remoteInkHidden = new Set<string>();
   private readonly onAwareness = (): void => {
-    if (this.remoteEdits.size) this.finishCameraMotion();
     this.renderRemoteEdits();
     this.renderRemoteSelDrag();
   };
@@ -1556,6 +1557,7 @@ export class TextLayer {
   /** Swap in a new set of peer-edited ids: hide/un-hide the affected copies, then re-measure any
    *  box that was just un-hidden (it may have cached a 0 size while it was display:none). */
   private setRemoteEditIds(next: Set<string>): void {
+    if (next.size === this.remoteEditIds.size && [...next].every(id => this.remoteEditIds.has(id))) return;
     const unhidden: string[] = [];
     for (const id of this.remoteEditIds) if (!next.has(id)) unhidden.push(id);
     this.remoteEditIds = next;
@@ -1606,13 +1608,16 @@ export class TextLayer {
   syncTransform(interactive = false): boolean {
     if (interactive && this.renderedCamera && !this.edit && !this.moveState && !this.resizing && !this.rotating &&
       !this.groupResize && !this.groupRotate && !this.groupPreview && !this.stickyGhost && !this.stampGhost &&
-      !this.glideRaf && !this.remoteEdits.size && !this.remoteDrag.size && !this.remoteResize.size && !this.remoteRotate.size) {
+      !this.glideRaf && !this.remoteDrag.size && !this.remoteResize.size && !this.remoteRotate.size) {
       const camera = this.opts.camera();
       const base = this.cameraBase || this.renderedCamera;
       const scale = camera.scale / base.scale;
       const x = camera.x - base.x * scale, y = camera.y - base.y * scale;
       const area = this.cameraArea;
-      if (this.cameraBase && (-x / scale < -area.width * .45 || -y / scale < -area.height * .45 ||
+      // If every object is already mounted (e.g. zoom-to-fit), there is nothing to
+      // discover beyond the cached viewport. Rebasing would only relayout the whole board.
+      const allMounted = this.els.size + this.inkEls.size === this.objects.size;
+      if (this.cameraBase && !allMounted && (-x / scale < -area.width * .45 || -y / scale < -area.height * .45 ||
         (area.width - x) / scale > area.width * 1.45 || (area.height - y) / scale > area.height * 1.45)) {
         this.syncTransform(); // refresh newly visible objects before the cached margin runs out
         return this.syncTransform(true);
@@ -4553,10 +4558,15 @@ export class TextLayer {
       const te = st.textedit as TextEditState | undefined;
       if (!te || typeof te !== "object" || !Array.isArray(te.runs)) continue;
       if (typeof te.x !== "number" || typeof te.y !== "number") continue;
-      this.finishCameraMotion();
       any = true;
       active.add(cid);
       if (typeof te.id === "string") editingIds.add(te.id);
+      const signature = JSON.stringify([te, st.color]);
+      if (this.remoteEditSignatures.get(cid) === signature) continue;
+      // The payload really changed: settle before writing current-camera geometry
+      // into the transformed layer. Unrelated presence events keep the cached zoom.
+      this.finishCameraMotion();
+      this.remoteEditSignatures.set(cid, signature);
       const g: Geom = {
         x: te.x,
         y: te.y,
@@ -4609,8 +4619,11 @@ export class TextLayer {
     }
     for (const [cid, el] of this.remoteEdits) {
       if (active.has(cid)) continue;
+      // Unhiding the committed copy below relayouts it in current-camera space.
+      this.finishCameraMotion();
       el.remove();
       this.remoteEdits.delete(cid);
+      this.remoteEditSignatures.delete(cid);
       this.remoteGeom.delete(cid);
     }
     this.setRemoteEditIds(editingIds);
@@ -4706,6 +4719,7 @@ export class TextLayer {
     if (this.glideRaf) cancelAnimationFrame(this.glideRaf);
     for (const el of this.remoteEdits.values()) el.remove();
     this.remoteEdits.clear();
+    this.remoteEditSignatures.clear();
     this.remoteGeom.clear();
     this.bar.destroy();
     this.removeLinkCard();

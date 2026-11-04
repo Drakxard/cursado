@@ -791,7 +791,14 @@ body {
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;
-
+}
+/* Isolate the animated background from content style inheritance and painting. */
+.canvas > .canvas-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  contain: strict;
+  will-change: transform;
   /* ---- DOTS ---- */
   /* Fallback (no relative-color syntax): single tier — still LOD-sized, just no crossfade. */
   background-image: radial-gradient(
@@ -816,7 +823,7 @@ body {
 }
 
 /* ---- LINES (Figma-style) ---- two tiers of centered 1px lines (H + V) that crossfade. */
-.canvas[data-grid="lines"] {
+.canvas[data-grid="lines"] > .canvas-grid {
   /* Fallback (no relative-color syntax): single tier of crisp lines, no crossfade. */
   background-image:
     linear-gradient(

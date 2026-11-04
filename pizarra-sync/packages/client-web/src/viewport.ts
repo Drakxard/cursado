@@ -19,6 +19,7 @@ const ZOOM_STOPS = [1, 5, 10, 15, 20, 33, 50, 75, 100, 125, 150, 200, 250, 300, 
  * `screenPx()`, replacing the `1 / stage.scaleX()` idiom that used to be scattered around.
  */
 export class ViewportController {
+  private readonly grid: HTMLDivElement;
   private zoomListener: ((pct: number) => void) | null = null;
   // Last-applied dot-grid LOD values, so a pan (position-only change) skips the
   // gradient-size/opacity writes and only nudges background-position.
@@ -46,6 +47,12 @@ export class ViewportController {
     /** localStorage key to persist this board's camera across reloads; omitted = no persistence. */
     private readonly storageKey?: string,
   ) {
+    // Keep per-frame grid variables off the ancestor of every board object.
+    // Otherwise inherited custom properties invalidate the entire text/SVG tree.
+    this.grid = document.createElement("div");
+    this.grid.className = "canvas-grid";
+    this.grid.setAttribute("aria-hidden", "true");
+    container.prepend(this.grid);
     this.bindWheel();
     this.stage.on("dragmove", () => {
       this.scheduleSync(true); // hand-pan: composite the existing layer during the gesture
@@ -176,7 +183,7 @@ export class ViewportController {
    * the LOD steps are seamless rather than popping.
    *
    * This only computes the LOD numbers and feeds them to CSS custom properties; styles.css
-   * `.canvas` turns them into either a dot grid (default) or a line grid ([data-grid="lines"]).
+   * `.canvas-grid` turns them into dots or lines (the board's [data-grid="lines"] mode).
    * Positions are emitted as --gx/--gy props (not background-position) so the dot mode
    * (2 layers) and line mode (4 layers) can each compose their own background-position.
    */
@@ -188,7 +195,7 @@ export class ViewportController {
     const coarse = fine * 2;
     const fade = 1 - (lod - step); // 1 at the start of an octave → 0 as it steps to the next
 
-    const s = this.container.style;
+    const s = this.grid.style;
     // Spacing + fade only change with zoom; guard the writes so a pan touches positions alone.
     if (fine !== this.gridFine) {
       this.gridFine = fine;
@@ -304,6 +311,7 @@ export class ViewportController {
   }
 
   destroy(): void {
+    this.grid.remove();
     this.stopZoomAnim();
     cancelAnimationFrame(this.syncFrame);
     if (this.saveTimer !== null) {
