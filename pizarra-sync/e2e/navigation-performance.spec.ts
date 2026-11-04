@@ -42,6 +42,13 @@ for (const theme of ['light', 'dark']) test(`production navigation: links, edits
       const hoverStart = performance.now();
       for (let i = 0; i < 30; i++) layer.linkAtPoint(-10 - i, -10);
       const hoverMs = performance.now() - hoverStart;
+      const outsideRectReads = rectReads;
+      rectReads = 0;
+      const stage = board.canvas.stage;
+      const bounds = document.querySelector('#board')!.getBoundingClientRect();
+      // Blank space between two cards, INSIDE the board (not just an early bounds return).
+      for (let i = 0; i < 30; i++) layer.linkAtPoint(bounds.x + stage.x() + (200 + i / 100) * stage.scaleX(), bounds.y + stage.y() + 50 * stage.scaleX());
+      const insideRectReads = rectReads;
       Element.prototype.getClientRects = rects;
 
       const changed = new Set<string>();
@@ -90,7 +97,7 @@ for (const theme of ['light', 'dark']) test(`production navigation: links, edits
         return { p50: sorted[Math.floor(sorted.length * .5)] ?? 0, p95: sorted[Math.floor(sorted.length * .95)] ?? 0,
           max: sorted.at(-1) ?? 0, samples: sorted.length, over50: sorted.filter(x => x > 50).length };
       };
-      return { hoverMs, rectReads, changed: [...changed], moved, editMs, settleMs,
+      return { hoverMs, rectReads: outsideRectReads, insideRectReads, changed: [...changed], moved, editMs, settleMs,
         frames: stats(frames), handler: stats(handlerMs), inputToCameraCallback: stats(presentationMs), longTasks: stats(tasks),
         mounted: layer.root.querySelectorAll('[data-id]').length, total: board.doc.getMap('objects').size };
     });
@@ -102,6 +109,58 @@ for (const theme of ['light', 'dark']) test(`production navigation: links, edits
     await info.attach('navigation.cpuprofile', { body: JSON.stringify(profile), contentType: 'application/json' });
     expect(report.total).toBe(1200);
     expect(report.frames.samples).toBe(40);
+    expect(report.rectReads).toBe(0);
+    expect(report.insideRectReads).toBe(0);
+    expect(report.changed).toEqual(['nav-0']);
+    expect(report.moved).toBe(0);
     await expect(page.locator('[data-id="nav-0"]')).toContainText('Updated material');
+
+    // Warm reopen includes fetching the real persisted room and its first visible content.
+    const reopenStart = Date.now();
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__komuboard?.doc.getMap('objects').size === 1200);
+    await expect(page.locator('.komu-text').first()).toBeVisible();
+    await info.attach('reopen.json', { body: JSON.stringify({ ms: Date.now() - reopenStart, navigation: await page.evaluate(() => performance.getEntriesByType('navigation')[0]?.toJSON()) }), contentType: 'application/json' });
+  } finally { await peer.close(); }
+});
+
+test('cached notes retain links, stacking, edits, undo and remounting', async ({ browser }) => {
+  const peer = await connectPeer(browser, uniqueRoom('navigation-correctness'));
+  const { page } = peer;
+  try {
+    const result = await page.evaluate(async () => {
+      const { doc, canvas } = (window as any).__komuboard;
+      const objects = doc.getMap('objects'), order = doc.getArray('order'), MapType = objects.constructor;
+      doc.transact(() => {
+        for (let i = 0; i < 3; i++) {
+          const map = new MapType();
+          for (const [k, v] of Object.entries({ id: `link-${i}`, type: 'text', x: i * 250, y: 0, width: 200, height: 120,
+            fontSize: 16, fontFamily: 'Inter', align: 'left', bg: '#ffec99', runs: [{ text: `Linked note ${i}`, link: `https://example.test/${i}` }] })) map.set(k, v);
+          objects.set(`link-${i}`, map); order.push([`link-${i}`]);
+        }
+      });
+      canvas.zoomToFit();
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const layer = canvas.textLayer, text = layer.els.get('link-0'), originalLink = text.querySelector('a');
+      objects.get('link-1').set('runs', [{ text: 'Other note changed' }]);
+      const retained = originalLink === text.querySelector('a');
+      const r = originalLink.getClientRects()[0];
+      const hit = layer.linkAtPoint(r.x + r.width / 2, r.y + r.height / 2)?.href;
+      doc.transact(() => { order.delete(0, 1); order.push(['link-0']); });
+      const domOrder = [...layer.root.children].map((el: any) => el.dataset.id).filter(Boolean);
+      objects.get('link-0').set('runs', [{ text: 'Changed link', link: 'https://example.test/new' }]);
+      const changed = text.querySelector('a')?.href;
+      canvas.undoManager.undo();
+      const undone = text.querySelector('a')?.href;
+      canvas.viewport.applyTransform(1, { x: -100000, y: -100000 });
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const culled = !layer.els.has('link-0');
+      canvas.zoomToFit();
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const remounted = layer.els.get('link-0')?.querySelector('a')?.href;
+      return { retained, hit, domOrder, changed, undone, culled, remounted };
+    });
+    expect(result).toEqual({ retained: true, hit: 'https://example.test/0', domOrder: ['link-1', 'link-2', 'link-0'],
+      changed: 'https://example.test/new', undone: 'https://example.test/0', culled: true, remounted: 'https://example.test/0' });
   } finally { await peer.close(); }
 });

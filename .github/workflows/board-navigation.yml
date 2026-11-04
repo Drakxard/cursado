@@ -41,6 +41,8 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - name: Medir enlaces, ediciones y gestos en el bundle de produccion
         run: pnpm exec playwright test --config playwright.navigation.config.ts
+      - name: Comprobar gestos reales, colaboracion, orden y editores
+        run: pnpm exec playwright test e2e/camera-direct.spec.ts e2e/perf.spec.ts e2e/zorder.spec.ts e2e/stamp-zorder.spec.ts e2e/live-drag.spec.ts e2e/live-resize.spec.ts e2e/clipboard.spec.ts e2e/polish.spec.ts --workers=1 --retries=0 --reporter=list,html
       - uses: actions/upload-artifact@v4
         if: always()
         with:
