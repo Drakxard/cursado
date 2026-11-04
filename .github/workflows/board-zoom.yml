@@ -38,7 +38,7 @@ jobs:
       - run: pnpm --filter @komuboard/client-web typecheck
       - run: pnpm --filter @komuboard/client-web build
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Medir zoom y comprobar geometria y colaboracion
+      - name: Comprobar rueda vertical, Ctrl+rueda, rendimiento y colaboracion
         run: pnpm exec playwright test e2e/perf.spec.ts e2e/camera-direct.spec.ts e2e/viewport.spec.ts e2e/live-drag.spec.ts e2e/live-resize.spec.ts e2e/reconnect.spec.ts e2e/export.spec.ts --workers=1 --retries=0 --reporter=list,html
       - uses: actions/upload-artifact@v4
         if: always()

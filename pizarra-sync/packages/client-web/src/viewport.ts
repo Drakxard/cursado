@@ -9,7 +9,7 @@ const ZOOM_STOPS = [1, 5, 10, 15, 20, 33, 50, 75, 100, 125, 150, 200, 250, 300, 
 
 /**
  * ViewportController — owns the board *camera*: the Konva stage's scale + position
- * (pan/zoom), wheel-zoom, hand-pan grid tracking, the dot-grid background sync, and
+ * (pan/zoom), wheel scrolling, Ctrl+wheel zoom, the dot-grid background sync, and
  * the zoom-readout plumbing. It deliberately does NOT touch content or interaction —
  * BoardCanvas supplies an `onTransform` callback so its viewport-dependent chrome
  * (cursors, transform box, selection outlines) re-syncs after any camera change.
@@ -289,6 +289,16 @@ export class ViewportController {
     this.stage.on("wheel", (e) => {
       e.evt.preventDefault();
       this.stopZoomAnim();
+      // Wheel scrolls vertically; Ctrl+wheel (also emitted by trackpad pinch)
+      // zooms around the pointer. Both paths use screen pixels after normalization.
+      const unit = e.evt.deltaMode === 1 ? 16 : e.evt.deltaMode === 2 ? this.stage.height() : 1;
+      const delta = e.evt.deltaY * unit;
+      if (!Number.isFinite(delta) || delta === 0) return;
+      if (!e.evt.ctrlKey) {
+        this.stage.position({ x: this.stage.x(), y: this.stage.y() - delta });
+        this.afterTransform(true);
+        return;
+      }
       const oldScale = this.stage.scaleX();
       const pointer = this.stage.getPointerPosition();
       if (!pointer) return;
@@ -296,10 +306,6 @@ export class ViewportController {
         x: (pointer.x - this.stage.x()) / oldScale,
         y: (pointer.y - this.stage.y()) / oldScale,
       };
-      // Normalize line/page wheels while preserving fractional trackpad/pinch input.
-      const unit = e.evt.deltaMode === 1 ? 16 : e.evt.deltaMode === 2 ? this.stage.height() : 1;
-      const delta = e.evt.deltaY * unit;
-      if (!Number.isFinite(delta) || delta === 0) return;
       const newScale = this.clamp(oldScale * Math.exp(-Math.max(-100, Math.min(100, delta)) * .002));
       this.stage.scale({ x: newScale, y: newScale });
       this.stage.position({

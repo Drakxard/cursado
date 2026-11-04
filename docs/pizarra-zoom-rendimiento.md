@@ -1,5 +1,10 @@
 # Diagnóstico del zoom de la pizarra
 
+Gestos de navegación: **rueda sola desplaza verticalmente** y **Ctrl + rueda hace
+zoom alrededor del puntero**. Los deltas de rueda se normalizan en píxeles, líneas
+y páginas; el desplazamiento mantiene la misma distancia en pantalla a cualquier
+nivel de zoom. El pellizco táctil y los botones de zoom conservan su comportamiento.
+
 La prueba reproduce una pizarra con 2.400 notas/formas y 600 trazos. Usa dos
 contextos independientes conectados al Worker local; comprueba presencia, texto
 remoto, actualización del contenido y confirmación del texto después del zoom.

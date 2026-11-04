@@ -56,7 +56,9 @@ test("grid follows zoom and pan without inheriting camera variables into content
     };
     expect(await checkGrid()).toContain("radial-gradient");
     await page.mouse.move(500, 350);
+    await page.keyboard.down("Control");
     await page.mouse.wheel(0, -80);
+    await page.keyboard.up("Control");
     await page.waitForTimeout(200);
     await checkGrid();
     await page.keyboard.press("h");
@@ -87,7 +89,9 @@ test("viewport: wheel-zoom and pan keep world geometry fixed", async ({ browser 
 
   // Wheel-zoom in over the canvas centre — zoom % changes, world rect does not.
   await page.mouse.move(cx, cy);
+  await page.keyboard.down("Control");
   await page.mouse.wheel(0, -200);
+  await page.keyboard.up("Control");
   const z1 = await zoomOf(page);
   expect(z1).toBeGreaterThan(z0);
   const r1 = await rectOf(page, id);
