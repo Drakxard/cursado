@@ -8,7 +8,7 @@ function files(directory) {
     return entry.isDirectory() ? files(filename) : [filename]
   })
 }
-const reports = files('pizarra-sync/navigation-results').filter(file => /navigation-[\da-f]+\.json$/.test(file)).map(file => JSON.parse(readFileSync(file, 'utf8'))).filter(value => value.report)
+const reports = files('pizarra-sync/navigation-results').filter(file => path.basename(file) === 'navigation.json').map(file => JSON.parse(readFileSync(file, 'utf8'))).filter(value => value.report)
 const ms = value => `${value.toFixed(1)} ms`
 const lines = ['## Navegacion de la pizarra (bundle de produccion)', '',
   '| Tema | Hover (30 consultas) | Notas reconstruidas al editar una | Nodos reordenados | Edicion + siguiente cuadro | Cuadro p95 | Pausa al terminar gesto |',

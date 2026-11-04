@@ -1,5 +1,14 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type TestInfo } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { connectPeer, uniqueRoom } from './helpers';
+
+async function artifact(info: TestInfo, name: string, value: unknown) {
+  const filename = info.outputPath(name);
+  await mkdir(path.dirname(filename), { recursive: true });
+  await writeFile(filename, JSON.stringify(value, null, 2));
+  await info.attach(name, { path: filename, contentType: 'application/json' });
+}
 
 // Runtime hooks are deliberately inspected here; production has no benchmark branches.
 // Timing metrics diagnose responsiveness. Work counters provide deterministic regression gates.
@@ -105,8 +114,8 @@ for (const theme of ['light', 'dark']) test(`production navigation: links, edits
     const { profile } = await cdp.send('Profiler.stop');
     const metrics = Object.fromEntries(after.metrics.map(m => [m.name, m.value - (before.metrics.find(b => b.name === m.name)?.value ?? 0)]));
     console.log(theme, JSON.stringify({ ...report, changed: report.changed.length, metrics }));
-    await info.attach('navigation.json', { body: JSON.stringify({ theme, report, metrics }, null, 2), contentType: 'application/json' });
-    await info.attach('navigation.cpuprofile', { body: JSON.stringify(profile), contentType: 'application/json' });
+    await artifact(info, 'navigation.json', { theme, report, metrics });
+    await artifact(info, 'navigation.cpuprofile', profile);
     expect(report.total).toBe(1200);
     expect(report.frames.samples).toBe(40);
     expect(report.rectReads).toBe(0);
@@ -120,7 +129,7 @@ for (const theme of ['light', 'dark']) test(`production navigation: links, edits
     await page.reload();
     await page.waitForFunction(() => (window as any).__komuboard?.doc.getMap('objects').size === 1200);
     await expect(page.locator('.komu-text').first()).toBeVisible();
-    await info.attach('reopen.json', { body: JSON.stringify({ ms: Date.now() - reopenStart, navigation: await page.evaluate(() => performance.getEntriesByType('navigation')[0]?.toJSON()) }), contentType: 'application/json' });
+    await artifact(info, 'reopen.json', { ms: Date.now() - reopenStart, navigation: await page.evaluate(() => performance.getEntriesByType('navigation')[0]?.toJSON()) });
   } finally { await peer.close(); }
 });
 
@@ -220,7 +229,7 @@ test('large scanned pages keep decoded images during night-mode navigation', asy
       frames.sort((a, b) => a - b);
       return { retained: current.length === originals.length && originals.every((img, i) => img === current[i]), p50: frames[15], p95: frames[28], max: frames[29], decodedPixels: 12 * 2048 * 3072 };
     });
-    await info.attach('scanned-pages.json', { body: JSON.stringify({ ...report, requests }), contentType: 'application/json' });
+    await artifact(info, 'scanned-pages.json', { ...report, requests });
     expect(report.retained).toBe(true);
     expect(requests).toBe(12);
   } finally { await peer.close(); }
