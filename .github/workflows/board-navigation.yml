@@ -2,9 +2,10 @@ name: Respuesta de navegacion de la pizarra
 
 on:
   push:
-    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
+    branches: ['main']
+    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'tests/study-board.browser.mjs', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
   pull_request:
-    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
+    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'tests/study-board.browser.mjs', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
   workflow_dispatch:
 
 permissions:
