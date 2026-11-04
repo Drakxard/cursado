@@ -861,6 +861,9 @@ export class TextLayer {
     if (!img) {
       img = document.createElement("img");
       img.draggable = false;
+      // Worker images are cross-origin. Anonymous CORS keeps their pixels readable
+      // for the bounded night-mode classifier (the worker already allows CORS).
+      img.crossOrigin = "anonymous";
       img.alt = "";
       el.appendChild(img);
     }

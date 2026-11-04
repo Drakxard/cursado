@@ -15,7 +15,7 @@ export function installNightReadability() {
     if (/^#[\da-f]{6}$/i.test(normalized)) channels = [1, 3, 5].map(at => parseInt(normalized.slice(at, at + 2), 16))
     else if (/^rgba?\(/.test(normalized)) channels = normalized.match(/[\d.]+/g)!.map(Number)
     else return raw
-    const [r, g, b] = channels.map(v => v / 255)
+    const r = channels[0]! / 255, g = channels[1]! / 255, b = channels[2]! / 255
     const high = Math.max(r, g, b), low = Math.min(r, g, b), light = (high + low) / 2
     // Reflect lightness, retaining hue and saturation. Avoid pure white glare.
     const target = 0.08 + (1 - light) * 0.82
@@ -47,14 +47,16 @@ export function installNightReadability() {
       const pixels = ctx.getImageData(0, 0, 48, 48).data
       let visible = 0, white = 0, black = 0, neutral = 0
       for (let i = 0; i < pixels.length; i += 4) {
-        if (pixels[i + 3] < 128) continue
+        if (pixels[i + 3]! < 128) continue
         visible++
-        const hi = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]), lo = Math.min(pixels[i], pixels[i + 1], pixels[i + 2])
+        const hi = Math.max(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!), lo = Math.min(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!)
         if (hi - lo < 35) neutral++
-        if (lo > 220) white++
+        if (lo > 205) white++
         if (hi < 110) black++
       }
-      if (visible && white / visible > .6 && neutral / visible > .85 && black / visible > .015) img.dataset.nightDiagram = 'true'
+      const lightDocument = white / visible > .6 && black / visible > .005
+      const transparentInk = visible < 48 * 48 * .75 && black / visible > .6
+      if (visible && neutral / visible > .85 && (lightDocument || transparentInk)) img.dataset.nightDiagram = 'true'
     } catch { /* CORS-protected images retain their original colours. */ }
   }
   const paint = (el: Element) => {

@@ -15,6 +15,7 @@ on:
           - interaction-ui
           - pizarra-text
           - study-camera
+          - study-pages
 
 permissions:
   contents: read
@@ -25,7 +26,7 @@ concurrency:
 
 jobs:
   worker-package:
-    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' && inputs.focus != 'study-camera' }}
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' && inputs.focus != 'study-camera' && inputs.focus != 'study-pages' }}
     name: Preparar servicio Cloudflare
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -44,7 +45,7 @@ jobs:
           path: ${{ runner.temp }}/cursado-worker/
 
   checks:
-    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' && inputs.focus != 'study-camera' }}
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' && inputs.focus != 'study-camera' && inputs.focus != 'study-pages' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -123,7 +124,7 @@ jobs:
             ${{ runner.temp }}/cursado-next.log
 
   board-cooperation:
-    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' && inputs.focus != 'study-camera' }}
+    if: ${{ inputs.focus != 'explanations' && inputs.focus != 'interaction-ui' && inputs.focus != 'pizarra-text' && inputs.focus != 'study-camera' && inputs.focus != 'study-pages' }}
     name: Pizarra, API chat y cooperación semanal
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -314,3 +315,43 @@ jobs:
             pizarra-sync/test-results/
             pizarra-sync/playwright-report/
             test-results/
+
+  study-pages:
+    name: Paginas y modo noche de estudio
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.focus == 'all' || inputs.focus == 'study-pages' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: pizarra-sync/pnpm-lock.yaml
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+        working-directory: pizarraproyecto-main
+      - run: pnpm install --frozen-lockfile
+        working-directory: pizarra-sync
+      - run: pnpm --filter @komuboard/client-web typecheck
+        working-directory: pizarra-sync
+      - run: npm run typecheck
+      - name: Compilar el motor integrado que se publica
+        run: node scripts/build-study-board.mjs
+        env:
+          STUDY_BOARD_WORKER_HOST: 127.0.0.1:8787
+      - run: npx playwright install --with-deps chromium
+      - name: Cambiar paginas sin recargar controles, renombrar inline y filtrar imagenes remotas
+        run: node scripts/test-study-board.mjs --test-name-pattern="study pages keep|night mode analyzes"
+        env:
+          STUDY_TEST_BUILT: '1'
+          STUDY_TEST_TRACE: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: study-pages-diagnostics
+          if-no-files-found: ignore
+          path: test-results/study-pages/
