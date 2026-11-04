@@ -1,7 +1,8 @@
 "use client"
 
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { StudyBoardNavigationContext } from './study-board-navigation'
+import { StudyBoardPages } from './study-board-pages'
 import { StudyDiagramsDialog } from './study-diagrams-dialog'
 import { StudyImageViewer, type StudyImage } from './study-image-viewer'
 import { InlineTableEditor } from './study-inline-table-editor'
@@ -29,17 +30,18 @@ export function StudyTopicBoardOverlay(props: StudyTopicBoardProps) {
   useEffect(() => {
     if (delegate) delegate({ boardId: `local:important-${props.boardId}`, name: props.name, topic: { pdfReferences: props.pdfReferences, cooperationSubjectId: props.cooperationSubjectId, cooperationWeekNumber: props.cooperationWeekNumber } })
   }, [delegate, props.boardId, props.name, props.pdfReferences, props.cooperationSubjectId, props.cooperationWeekNumber])
+  const [page, setPage] = useState<{ boardId: string; name: string } | null>(null)
   const [stack, setStack] = useState<Destination[]>([{ boardId: props.boardId, name: props.name, pdfReferences: props.pdfReferences, cooperationSubjectId: props.cooperationSubjectId, cooperationWeekNumber: props.cooperationWeekNumber }])
-  const destination = stack[stack.length - 1]!
+  const destination = useMemo(() => ({ ...stack[stack.length - 1]!, ...page }), [stack, page])
   useEffect(() => { if (!delegate) writeStudyBoardLocation(destination) }, [delegate, destination])
   if (delegate) return null
   // A new session owns all iframe messages and resources for one board.
   return <StudyBoardSession key={destination.boardId} {...props} {...destination} backLabel={stack.length > 1 ? 'Volver a la pizarra anterior' : props.backLabel}
     onClose={() => { if (stack.length > 1) setStack(current => current.slice(0, -1)); else { writeStudyBoardLocation(null); props.onClose() } }}
-    onNavigate={value => setStack(current => [...current, value])} onCancel={() => { writeStudyBoardLocation(null); props.onClose() }} />
+    sharedRoomId={page && page.boardId !== props.boardId ? undefined : props.sharedRoomId} cooperationSubjectId={page && page.boardId !== props.boardId ? undefined : destination.cooperationSubjectId} pagesRootId={stack[stack.length - 1]!.boardId} onPage={setPage} onNavigate={value => { setPage(null); setStack(current => [...current, value]) }} onCancel={() => { writeStudyBoardLocation(null); props.onClose() }} />
 }
 
-function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoomId, cooperationSubjectId, onClose, onNavigate, onCancel, backLabel = 'Volver a Estudio' }: StudyTopicBoardProps & { onNavigate: (value: Destination) => void; onCancel: () => void }) {
+function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoomId, cooperationSubjectId, onClose, onNavigate, onCancel, backLabel = 'Volver a Estudio', pagesRootId, onPage }: StudyTopicBoardProps & { onNavigate: (value: Destination) => void; onCancel: () => void; pagesRootId: string; onPage: (page: { boardId: string; name: string }) => void }) {
   const [session] = useState(() => crypto.randomUUID())
   const frame = useRef<HTMLIFrameElement>(null), library = useRef<HTMLIFrameElement>(null), readerFrame = useRef<HTMLIFrameElement>(null)
   const [initial, setInitial] = useState<Awaited<ReturnType<typeof openStudyBoard>> | null>(null)
@@ -260,6 +262,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       </aside>}
     </div>
     {(!readerVisible || readerLoading) && <button aria-label={backLabel} title={backLabel} disabled={closing} onClick={() => close()} className="absolute left-3 top-3 z-20 h-10 w-10 rounded-xl border bg-white shadow">{closing ? '…' : '←'}</button>}
+    {!readerVisible && <StudyBoardPages rootHandle={rootHandle} rootId={pagesRootId} boardId={boardId} disabled={!ready || closing} onSelect={page => close(() => onPage(page))} onDuplicate={action => close(() => { void action().catch(reason => { setClosing(false); setError(String(reason)) }) })} onTheme={() => send('toggle-theme')} />}
     {menu && <div className="absolute bottom-16 left-16 z-30 flex flex-col gap-1 rounded-xl border bg-white p-2 shadow-lg">
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { files.current?.click(); setMenu(false) }}>Agregar material</button>
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { setUrlInput(true); setMenu(false) }}>Link YouTube</button>

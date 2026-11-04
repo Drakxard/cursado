@@ -181,6 +181,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   window.addEventListener('message', event => {
     if (event.origin !== location.origin || event.source !== parent || event.data?.session !== session || event.data?.boardId !== boardId) return
     const data = event.data
+    if (data.type === 'study-board:toggle-theme') document.querySelector<HTMLElement>('[data-theme-toggle]')?.click()
     if(data.type === 'study-board:pdf-published') {
       const map = objectsMap(doc).get(data.id), study = map?.get('study') as any
       if(study?.kind === 'pdf' && study.reference.materialId === data.reference?.materialId && study.reference.workspaceFileId === data.reference?.workspaceFileId) map!.set('study',{...study,reference:{...study.reference,sharedPdf:data.sharedPdf}})

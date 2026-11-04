@@ -30,3 +30,8 @@
 @keyframes study-opening{from{box-shadow:inset 0 0 0 1000px #22c55e12}to{box-shadow:inset 0 0 0 1000px #22c55e40}}
 @keyframes study-hold{to{box-shadow:inset 0 0 0 1000px #22c55e50}}
 @media(prefers-reduced-motion:reduce){.study-opening,.study-holding{animation-duration:.01ms}}
+
+/* Study pages own the compact navigation strip. Keep sharing and presence in the board. */
+.study-embedded #topbar .brand,.study-embedded #topbar .room-pill{display:none}
+.study-embedded #topbar{left:300px;width:calc(100% - 312px);pointer-events:none;background:transparent;border:0;box-shadow:none}
+.study-embedded #topbar button,.study-embedded #topbar komu-avatar-presence-row{pointer-events:auto}
