@@ -756,7 +756,7 @@ test('image reader opens on double click, loads one image at a time and returns 
       requests.push(name)
       if (name === 'reader-third.svg') return route.fulfill({ status: 404, body: '' })
     }
-    return route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="8192"><rect width="4096" height="8192" fill="white"/><text x="500" y="500" font-size="100">Diagrama grande</text></svg>' })
+    return route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="8192"><rect width="4096" height="8192" fill="white"/><rect x="100" y="800" width="1500" height="6500" fill="#a0d0ff"/><text x="500" y="500" font-size="100">Diagrama grande</text></svg>' })
   })
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message))
   await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openBoard)
@@ -787,6 +787,7 @@ test('image reader opens on double click, loads one image at a time and returns 
   assert.equal(await reader.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)')
   await send(page, 'toggle-theme')
   await expect(reader).toHaveCSS('background-color', 'rgb(16, 20, 27)')
+  await expect(frame.locator('.komu-image img').first()).toHaveAttribute('data-night-diagram', 'true')
   await expect(reader.locator('[data-study-image-detail]')).toHaveCSS('filter', 'invert(0.9) hue-rotate(180deg)')
   await send(page, 'night-images', { mode: 'original' })
   await expect(reader.locator('[data-study-image-detail]')).toHaveCSS('filter', 'none')

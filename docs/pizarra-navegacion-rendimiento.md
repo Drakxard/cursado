@@ -60,6 +60,34 @@ hardware. La pausa final aun rondaba 49 ms en el candidato y el p95 de cuadros
 oscuros fue 44 ms: queda trabajo de composicion y reconciliacion por investigar.
 Estas mejoras no demuestran navegacion instantanea para cualquier tablero.
 
+## Visor de imagenes y salida de PDF
+
+El visor completo tiene su propia camara; probar el zoom de la pizarra no mide
+ese recorrido. Ahora sus gestos transforman una textura de hasta 2048 pixeles de
+lado una sola vez por cuadro, sin ejecutar un segundo motor de tiles ni dibujar
+la imagen original. Al terminar el gesto se dibuja solo el recorte visible en un
+canvas del tamano de la ventana (DPR maximo 2). El arrastre no se reconcilia mientras
+el puntero sigue presionado. Se cancelan listeners, capturas, cuadros y temporizadores
+al cerrar o cambiar la imagen.
+
+`tests/study-image-viewer.browser.mjs` comprueba rafagas de 320 eventos de rueda,
+anclaje, primer pixel de arrastre, inversion, espera con el puntero presionado,
+pellizco, cancelacion, cambio de imagen, redimensionado y liberacion de entrada.
+Registra cuadros, costo de cada rafaga, tamano de textura y dibujos de detalle
+durante los gestos; estos ultimos deben ser cero. Tambien verifica el fondo y el
+filtro nocturnos y que cambiar de tema no vuelva a descargar la imagen. El JSON
+y una captura nocturna quedan en `test-results/image-reader`.
+
+El visor hereda el tema y la preferencia auto/original/invertir de la pizarra.
+Los diagramas conocidos conservan esa identificacion aunque tengan colores y no
+cumplan la heuristica de documentos monocromos. El mismo clasificador acotado se
+usa en la pizarra y en el visor. Las fotos de color conservan sus colores en auto.
+
+Al abrir un PDF se termina primero la edicion nativa. La regresion integrada abre
+desde un editor activo, vuelve y cambia entre 17% y 70%, comprobando que el acceso
+escale y que no quede un editor duplicado. Sus estilos nocturnos se verifican en
+el acceso y en el editor.
+
 ## Reportes
 
 La pagina de cada ejecucion muestra una tabla de resultados. El artefacto

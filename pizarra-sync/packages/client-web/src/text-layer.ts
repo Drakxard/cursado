@@ -629,7 +629,7 @@ export class TextLayer {
         el.dataset.id = id;
         this.els.set(id, el);
       }
-      this.paintImage(el, obj.src, typeof obj.plantumlSource === "string");
+      this.paintImage(el, obj.src, typeof this.objects.get(id)?.get("plantumlSource") === "string");
       el.toggleAttribute("data-locked", obj.locked === true);
       if (el.parentNode !== this.root) this.root.appendChild(el);
       const g = this.effectiveGeom(id, obj);
