@@ -3,9 +3,9 @@ name: Respuesta de navegacion de la pizarra
 on:
   push:
     branches: ['main']
-    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'tests/study-board.browser.mjs', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
+    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'components/study-image-viewer.tsx', 'lib/client/study-image*', 'lib/client/study-document-image.ts', 'tests/study-image-viewer.browser.mjs', 'tests/study-board.browser.mjs', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
   pull_request:
-    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'tests/study-board.browser.mjs', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
+    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'components/study-image-viewer.tsx', 'lib/client/study-image*', 'lib/client/study-document-image.ts', 'tests/study-image-viewer.browser.mjs', 'tests/study-board.browser.mjs', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
   workflow_dispatch:
 
 permissions:
@@ -43,6 +43,9 @@ jobs:
       - name: Preparar la version de Chromium de las pruebas integradas
         run: npx playwright install chromium
         working-directory: .
+      - name: Probar zoom del visor de imagenes y tema nocturno
+        run: node --test tests/study-image-viewer.browser.mjs tests/night-readability.browser.mjs
+        working-directory: .
       - name: Medir enlaces, ediciones y gestos en el bundle de produccion
         run: pnpm exec playwright test --config playwright.navigation.config.ts
       - name: Resumir respuesta y trabajo por gesto
@@ -57,7 +60,7 @@ jobs:
         env:
           STUDY_BOARD_WORKER_HOST: 127.0.0.1:8787
       - name: Probar navegacion integrada, paginas, enlaces PDF y modo noche
-        run: node scripts/test-study-board.mjs --test-name-pattern="dense Study board|study pages keep|PDF names open|dragged shortcuts|night mode analyzes|library navigation replaces"
+        run: node scripts/test-study-board.mjs --test-name-pattern="dense Study board|study pages keep|PDF names open|dragged shortcuts|night mode analyzes|library navigation replaces|image reader opens"
         working-directory: .
         env:
           STUDY_TEST_BUILT: '1'
@@ -71,3 +74,4 @@ jobs:
             pizarra-sync/playwright-report/
             pizarra-sync/navigation-results/
             pizarra-sync/navigation-report/
+            test-results/image-reader/

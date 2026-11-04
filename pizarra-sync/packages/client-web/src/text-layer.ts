@@ -629,7 +629,7 @@ export class TextLayer {
         el.dataset.id = id;
         this.els.set(id, el);
       }
-      this.paintImage(el, obj.src);
+      this.paintImage(el, obj.src, typeof obj.plantumlSource === "string");
       el.toggleAttribute("data-locked", obj.locked === true);
       if (el.parentNode !== this.root) this.root.appendChild(el);
       const g = this.effectiveGeom(id, obj);
@@ -869,7 +869,12 @@ export class TextLayer {
   }
 
   /** Paint an uploaded image: resolve its R2 key → the worker serve URL into an <img> filling the box. */
-  private paintImage(el: HTMLDivElement, key: string): void {
+  private paintImage(el: HTMLDivElement, key: string, documentImage = false): void {
+    const previous = el.querySelector<HTMLImageElement>('img');
+    if (previous) {
+      previous.dataset.studyDocument = String(documentImage);
+      if (documentImage) previous.dataset.nightDiagram = 'true';
+    }
     if (el.dataset.src === key) return; // already showing this image
     el.dataset.src = key;
     let img = el.querySelector<HTMLImageElement>("img");
@@ -882,6 +887,7 @@ export class TextLayer {
       img.alt = "";
       el.appendChild(img);
     }
+    img.dataset.studyDocument = String(documentImage);
     // A faint placeholder until the bytes decode, and a clear "unavailable" state if they're gone (a
     // deleted R2 object / offline) — better than a blank box or the browser's broken-image glyph. The
     // handlers are attached BEFORE src so a cached (immutable) image still clears the loading state.
@@ -2056,6 +2062,9 @@ export class TextLayer {
   ): void {
     const el = document.createElement("div");
     el.className = "komu-text komu-text-editor";
+    if (session.id && (this.objects.get(session.id)?.get('study') as TextObject['study'])?.kind === 'pdf') {
+      el.dataset.study = 'pdf'; el.dataset.id = session.id;
+    }
     el.style.color = INK;
     this.applyRotation(el, session.rotation ?? 0);
     // Shape (outline + fixed height) or sticky (coloured square) styling on the box itself.

@@ -57,14 +57,15 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   let initialized = false, busy = false, report: MigrationReport | undefined, checkpointTimer: ReturnType<typeof setTimeout> | undefined
   cleanups.push(() => { if (checkpointTimer) clearTimeout(checkpointTimer) })
   const send = (type: string, data: Record<string, unknown> = {}) => { if (lifetime.signal.aborted) return; parent.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin) }
-  const notifyTheme = () => send('theme', { theme: document.documentElement.dataset.theme || 'light' })
+  const notifyTheme = () => send('theme', { theme: document.documentElement.dataset.theme || 'light', nightImages: document.documentElement.dataset.nightImages || 'auto' })
   const themeObserver = new MutationObserver(notifyTheme)
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-night-images'] })
   cleanups.push(() => themeObserver.disconnect())
   const readImage = (id: string) => {
+    canvas.finishStudyEdits()
     const images = [...new Set(orderArray(doc).toArray())].flatMap(imageId => {
       const map = objectsMap(doc).get(imageId), src = map?.get('plantumlFullSrc') || map?.get('src')
-      return map?.get('type') === 'image' && typeof src === 'string' ? [{ id: imageId, url: imageSrcUrl(src) }] : []
+      return map?.get('type') === 'image' && typeof src === 'string' ? [{ id: imageId, url: imageSrcUrl(src), document: typeof map.get('plantumlSource') === 'string' }] : []
     })
     send('read-image', { initialId: id, images })
   }
@@ -290,6 +291,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   const openPdf = (id: string) => {
     const study = objectsMap(doc).get(id)?.get('study') as StudyAttachment | undefined
     if (study?.kind !== 'pdf') return
+    canvas.finishStudyEdits()
     card(id)?.classList.add('study-opening'); send('open', { id, study })
   }
   onDocument('study-open-pdf', ((event: CustomEvent) => openPdf(event.detail.id)) as EventListener)

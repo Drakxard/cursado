@@ -1,3 +1,4 @@
+import { isStudyDocumentImage } from '../../../../lib/client/study-document-image'
 /** Viewer-only night palette. Never writes transformed colours into the shared document. */
 export function installNightReadability() {
   const root = document.documentElement
@@ -39,25 +40,7 @@ export function installNightReadability() {
     if (!img.complete || !img.naturalWidth || analyzed.get(img) === img.currentSrc) return
     analyzed.set(img, img.currentSrc)
     img.removeAttribute('data-night-diagram')
-    // A tiny thumbnail bounds CPU/memory regardless of source resolution.
-    const sample = document.createElement('canvas'); sample.width = sample.height = 48
-    const ctx = sample.getContext('2d', { willReadFrequently: true })!
-    try {
-      ctx.drawImage(img, 0, 0, 48, 48)
-      const pixels = ctx.getImageData(0, 0, 48, 48).data
-      let visible = 0, white = 0, black = 0, neutral = 0
-      for (let i = 0; i < pixels.length; i += 4) {
-        if (pixels[i + 3]! < 128) continue
-        visible++
-        const hi = Math.max(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!), lo = Math.min(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!)
-        if (hi - lo < 35) neutral++
-        if (lo > 205) white++
-        if (hi < 110) black++
-      }
-      const lightDocument = white / visible > .6 && black / visible > .005
-      const transparentInk = visible < 48 * 48 * .75 && black / visible > .6
-      if (visible && neutral / visible > .85 && (lightDocument || transparentInk)) img.dataset.nightDiagram = 'true'
-    } catch { /* CORS-protected images retain their original colours. */ }
+    if (img.dataset.studyDocument === 'true' || isStudyDocumentImage(img)) img.dataset.nightDiagram = 'true'
   }
   const paint = (el: Element) => {
     if (el instanceof HTMLImageElement && el.closest('.komu-image')) { if (dark()) analyze(el); return }
