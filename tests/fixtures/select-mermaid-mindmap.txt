@@ -1,0 +1,75 @@
+%%{init: { 'theme': 'default', 'themeVariables': { 'fontSize': '14px', 'mindmapPadding': '20' }, 'mindmap': { 'padding': 32 } }}%%
+mindmap
+  root((U4: SELECT))
+    Cláusulas<br/>Principales
+      SELECT
+        Lista de atributos
+        Alias de columna AS
+        Uso de DISTINCT
+      FROM
+        Tablas de origen
+        Alias de tabla
+      WHERE
+        Filtros por fila
+        Lógica de 3 valores
+      GROUP BY
+        Agrupamiento
+        Regla de inclusión
+      HAVING
+        Filtro de grupos
+      ORDER BY
+        ASC / DESC
+        Manejo de NULL
+    Predicados
+      Comparación
+        Operadores relacionales
+        BETWEEN (rangos)
+      Conjuntos
+        IN / NOT IN
+      Patrones
+        LIKE (% y _)
+      Nulos
+        IS NULL / IS NOT NULL
+      Existencia
+        EXISTS / NOT EXISTS
+    Funciones<br/>Agregadas
+      Conteo
+        COUNT(*)
+        COUNT(columna)
+      Cálculos
+        SUM (suma)
+        AVG (promedio)
+      Extremos
+        MIN / MAX
+    Vinculación<br/>JOINs
+      Interno
+        INNER JOIN
+      Externos
+        LEFT JOIN
+        RIGHT JOIN
+        FULL JOIN
+      Cartesiano
+        CROSS JOIN
+      Condiciones
+        Diferencia ON vs WHERE
+    Subconsultas
+      Ubicación
+        En WHERE / FROM / SELECT
+      Tipos
+        Anidadas (independientes)
+        Correlacionadas
+    Operaciones de<br/>Conjuntos
+      UNION
+        Elimina duplicados
+      UNION ALL
+        Conserva duplicados
+    Conceptos<br/>Avanzados
+      Vistas
+        Virtuales (estándar)
+        Materializadas (en disco)
+      Diccionario
+        INFORMATION_SCHEMA
+      Volatilidad
+        IMMUTABLE
+        STABLE
+        VOLATILE

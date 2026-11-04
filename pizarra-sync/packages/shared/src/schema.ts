@@ -202,7 +202,7 @@ export const DEFAULT_STAMP_SIZE = 48;
  *  `src` is a stable reference to the bytes in R2 (the client resolves it to a URL) — never the bytes
  *  themselves, which would bloat the doc. Selectable / movable / resizable like any box. */
 export interface ImageObject {
-  /** Source retained for editable PlantUML diagrams. */
+  /** Source/full image for editable PlantUML or Mermaid diagrams (legacy field names). */
   plantumlSource?: string;
   plantumlFullSrc?: string;
   id: string;

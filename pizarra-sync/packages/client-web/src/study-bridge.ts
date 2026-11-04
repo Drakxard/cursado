@@ -45,16 +45,19 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   document.querySelector('komu-tool-dock [data-tool="image"]')?.remove()
   let initialized = false, busy = false, report: MigrationReport | undefined, checkpointTimer: ReturnType<typeof setTimeout> | undefined
   const send = (type: string, data: Record<string, unknown> = {}) => parent.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin)
-  document.getElementById('board')!.addEventListener('dblclick', event => {
-    if (event.button !== 0 || (event.target as Element).closest('button,input,textarea,[contenteditable]')) return
-    const id = canvas.studyHitAt(event.clientX, event.clientY)
-    if (!id || objectsMap(doc).get(id)?.get('type') !== 'image') return
-    event.preventDefault(); event.stopImmediatePropagation()
+  const readImage = (id: string) => {
     const images = [...new Set(orderArray(doc).toArray())].flatMap(imageId => {
       const map = objectsMap(doc).get(imageId), src = map?.get('plantumlFullSrc') || map?.get('src')
       return map?.get('type') === 'image' && typeof src === 'string' ? [{ id: imageId, url: imageSrcUrl(src) }] : []
     })
     send('read-image', { initialId: id, images })
+  }
+  document.getElementById('board')!.addEventListener('dblclick', event => {
+    if (event.button !== 0 || (event.target as Element).closest('button,input,textarea,[contenteditable]')) return
+    const id = canvas.studyHitAt(event.clientX, event.clientY)
+    if (!id || objectsMap(doc).get(id)?.get('type') !== 'image') return
+    event.preventDefault(); event.stopImmediatePropagation()
+    readImage(id)
   }, true)
   const checkpoint = () => { send('checkpoint', { draft: encode(Y.encodeStateAsUpdate(doc)), report, imported: !!doc.getMap('study-migration').get('complete') }); checkpointTimer = undefined }
   const atCenter = () => { const view = canvas.worldViewport(); return { x: view.x + view.width / 2, y: view.y + view.height / 2 } }
@@ -311,7 +314,12 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (!press || press.pointer !== event.pointerId) return
     const current = press; clearPress()
     if (current.held) return
-    if (current.diagram) { lastTap = undefined; return }
+    if (current.diagram) {
+      lastTap = undefined
+      if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey &&
+        typeof objectsMap(doc).get(current.id)?.get('plantumlFullSrc') === 'string') readImage(current.id)
+      return
+    }
     const study = objectsMap(doc).get(current.id)?.get('study') as StudyAttachment | undefined
     if (study?.kind === 'pdf') {
       lastTap = undefined

@@ -2,8 +2,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
-export function StudyDiagramPreview({ url, maximized, onMaximize, onError }: {
-  url: string; maximized: boolean; onMaximize: () => void; onError: () => void
+export function StudyDiagramPreview({ url, maximized, onMaximize, onError, label = 'PlantUML' }: {
+  url: string; maximized: boolean; onMaximize: () => void; onError: () => void; label?: string
 }) {
   const viewport = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 1, height: 1 })
@@ -84,7 +84,7 @@ export function StudyDiagramPreview({ url, maximized, onMaximize, onError }: {
       }}
       onPointerUp={event => points.current.delete(event.pointerId)} onPointerCancel={event => points.current.delete(event.pointerId)} onLostPointerCapture={event => points.current.delete(event.pointerId)}>
       <div style={{ position: 'relative', width: Math.max(size.width, image.width * scale + 32), height: Math.max(size.height, image.height * scale + 32) }}>
-        <img src={url} alt="Vista previa de PlantUML" draggable={false} onLoad={event => setImage({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={onError}
+        <img src={url} alt={`Vista previa de ${label}`} draggable={false} onLoad={event => setImage({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={onError}
           style={{ position: 'absolute', left: Math.max(16, (size.width - image.width * scale) / 2), top: Math.max(16, (size.height - image.height * scale) / 2), width: image.width * scale, height: image.height * scale, maxWidth: 'none', maxHeight: 'none' }} />
       </div>
     </div>

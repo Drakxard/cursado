@@ -689,6 +689,38 @@ test('dense Study board composites zoom and pan frames, then restores crisp geom
   assert.deepEqual(errors, [])
 })
 
+test('diagram roots open the complete image on a tap, while dragging keeps the board editable', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
+  const requested = []
+  await context.route('**/img/tap-diagram-*', route => {
+    const name = route.request().url().split('/').at(-1)
+    if (route.request().frame().parentFrame() === null) requested.push(name)
+    return route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: `<svg xmlns="http://www.w3.org/2000/svg" width="${name.includes('full') ? 1000 : 100}" height="${name.includes('full') ? 600 : 60}"><rect width="100%" height="100%" fill="blue"/></svg>` })
+  })
+  const page = await context.newPage()
+  await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openBoard)
+  await page.evaluate(() => window.openBoard('diagram-tap')); await loaded(page)
+  const frame = engine(page)
+  await send(page, 'insert', { object: { id: 'diagram-root', type: 'image', src: 'tap-diagram-root.svg', plantumlFullSrc: 'tap-diagram-full.svg', plantumlSource: 'mindmap\n  root((Root))\n    Child', x: 300, y: 300, width: 100, height: 60 } })
+  await frame.evaluate(() => { window.__komuboard.canvas.setTool('select'); window.__komuboard.canvas.restoreStudyView({ x: 0, y: 0, zoom: 1 }) })
+  const root = frame.locator('.komu-image:has(img[src*="tap-diagram-root.svg"])')
+  await expect(root).toBeVisible()
+  const reader = page.getByRole('dialog', { name: 'Visor de imágenes de la pizarra', exact: true })
+  const box = await root.boundingBox()
+  await page.mouse.move(box.x + 30, box.y + 25); await page.mouse.down()
+  await page.mouse.move(box.x + 80, box.y + 70, { steps: 5 }); await page.mouse.up()
+  await expect(reader).toHaveCount(0)
+  const moved = await root.boundingBox()
+  await page.mouse.click(moved.x + moved.width / 2, moved.y + moved.height / 2)
+  await expect(reader).toBeVisible()
+  await expect.poll(() => requested).toEqual(['tap-diagram-full.svg'])
+  await page.getByRole('button', { name: 'Volver a la pizarra', exact: true }).click()
+  await expect(reader).toHaveCount(0)
+  await expect(root).toBeVisible()
+  assert.ok((await root.locator('img').getAttribute('src')).includes('tap-diagram-root.svg'))
+})
+
 test('image reader opens on double click, loads one image at a time and returns without editing the board', { timeout: 60000 }, async t => {
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
