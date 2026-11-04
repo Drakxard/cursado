@@ -45,6 +45,8 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   document.querySelector('komu-tool-dock [data-tool="image"]')?.remove()
   let initialized = false, busy = false, report: MigrationReport | undefined, checkpointTimer: ReturnType<typeof setTimeout> | undefined
   const send = (type: string, data: Record<string, unknown> = {}) => parent.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin)
+  const notifyTheme = () => send('theme', { theme: document.documentElement.dataset.theme || 'light' })
+  new MutationObserver(notifyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   const readImage = (id: string) => {
     const images = [...new Set(orderArray(doc).toArray())].flatMap(imageId => {
       const map = objectsMap(doc).get(imageId), src = map?.get('plantumlFullSrc') || map?.get('src')
@@ -181,12 +183,14 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   window.addEventListener('message', event => {
     if (event.origin !== location.origin || event.source !== parent || event.data?.session !== session || event.data?.boardId !== boardId) return
     const data = event.data
+    if (data.type === 'study-board:night-images' && ['auto', 'original', 'invert'].includes(data.mode)) { document.documentElement.dataset.nightImages = data.mode; localStorage.setItem('study-night-images', data.mode) }
     if (data.type === 'study-board:toggle-theme') document.querySelector<HTMLElement>('[data-theme-toggle]')?.click()
     if(data.type === 'study-board:pdf-published') {
       const map = objectsMap(doc).get(data.id), study = map?.get('study') as any
       if(study?.kind === 'pdf' && study.reference.materialId === data.reference?.materialId && study.reference.workspaceFileId === data.reference?.workspaceFileId) map!.set('study',{...study,reference:{...study.reference,sharedPdf:data.sharedPdf}})
     }
     if (data.type === 'study-board:init') {
+      notifyTheme()
       if (provider.synced) void initialize(data)
       else { const sync = (synced: boolean) => { if (synced) { provider.off('sync', sync); void initialize(data) } }; provider.on('sync', sync) }
     }

@@ -4653,3 +4653,12 @@ input[type="range"] {
     display: grid; /* …and the launcher itself appears */
   }
 }
+
+/* Image filters apply once, only to raster content, never photos in automatic mode
+   unless the thumbnail resembles a light monochrome document. */
+:root[data-theme="dark"][data-night-images="auto"] .komu-image img[data-night-diagram="true"],
+:root[data-theme="dark"][data-night-images="invert"] .komu-image img {
+  filter: invert(.9) hue-rotate(180deg);
+}
+
+:root[data-theme="dark"] .komu-text-editor:not(.sticky):not(.shape) { background-color: #f1f3f5 !important; caret-color: #111827; }

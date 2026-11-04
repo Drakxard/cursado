@@ -50,6 +50,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const [pins, setPins] = useState<Pin[]>([]), [reader, setReader] = useState<BoardPdfReference | null>(null), [readerVisible, setReaderVisible] = useState(false)
   const [review, setReview] = useState<MigrationReport | null>(null), [attachment, setAttachment] = useState<{ id: string; study: StudyAttachment } | null>(null)
   const [closing, setClosing] = useState(false)
+  const [boardTheme, setBoardTheme] = useState('light')
   const [diagrams, setDiagrams] = useState(false)
   const [imageReader, setImageReader] = useState<{ images: StudyImage[]; initialId: string } | null>(null)
   const [diagramEdit, setDiagramEdit] = useState<{ id: string; source: string } | null>(null)
@@ -123,6 +124,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       const data = event.data
       if (event.origin !== location.origin || data?.session !== session || data?.boardId !== boardId) return
       if (event.source === frame.current?.contentWindow) {
+        if (data.type === 'study-board:theme' && ['light', 'dark'].includes(data.theme)) setBoardTheme(data.theme)
         if (data.type === 'study-board:read-image' && typeof data.initialId === 'string' && Array.isArray(data.images)) {
           const images = data.images.filter((image: any): image is StudyImage => typeof image?.id === 'string' && typeof image.url === 'string' && /^https?:\/\//.test(image.url))
           if (images.some((image: StudyImage) => image.id === data.initialId)) setImageReader({ images, initialId: data.initialId })
@@ -262,7 +264,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       </aside>}
     </div>
     {(!readerVisible || readerLoading) && <button aria-label={backLabel} title={backLabel} disabled={closing} onClick={() => close()} className="absolute left-3 top-3 z-20 h-10 w-10 rounded-xl border bg-white shadow">{closing ? '…' : '←'}</button>}
-    {!readerVisible && <StudyBoardPages rootHandle={rootHandle} rootId={pagesRootId} boardId={boardId} disabled={!ready || closing} onSelect={page => close(() => onPage(page))} onDuplicate={action => close(() => { void action().catch(reason => { setClosing(false); setError(String(reason)) }) })} onTheme={() => send('toggle-theme')} />}
+    {!readerVisible && <StudyBoardPages rootHandle={rootHandle} rootId={pagesRootId} boardId={boardId} disabled={!ready || closing} onSelect={page => close(() => onPage(page))} onDuplicate={action => close(() => { void action().catch(reason => { setClosing(false); setError(String(reason)) }) })} theme={boardTheme} onImages={mode => send('night-images', { mode })} onTheme={() => send('toggle-theme')} />}
     {menu && <div className="absolute bottom-16 left-16 z-30 flex flex-col gap-1 rounded-xl border bg-white p-2 shadow-lg">
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { files.current?.click(); setMenu(false) }}>Agregar material</button>
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { setUrlInput(true); setMenu(false) }}>Link YouTube</button>

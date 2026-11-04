@@ -1,3 +1,4 @@
+import { installNightReadability } from "./night-readability";
 import { installStudyBridge } from "./study-bridge";
 import { loadBoardIdentity, saveBoardIdentity, PROFILE_KEY } from "./identity";
 import { startVisibleTask } from '../../../../lib/client/visible-task';
@@ -1137,6 +1138,7 @@ window.addEventListener("keyup", (e) => {
 // --------------------------------------------------------------------------
 const topbar = document.querySelector("komu-topbar");
 const drawer = document.querySelector("komu-drawer");
+installNightReadability();
 const roomMetadata = ydoc.getMap<string>("metadata");
 let migratingTitle = "";
 let renamingRoom = false;

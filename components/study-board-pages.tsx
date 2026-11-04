@@ -1,13 +1,15 @@
-﻿'use client'
+'use client'
 
 import { useEffect, useRef, useState } from 'react'
 import { readWorkspaceJson, writeWorkspaceJson } from '@/lib/workspace-json'
 import { openStudyBoard, saveStudyBoard } from '@/lib/study-board-workspace'
 
 type Page = { boardId: string; name: string }
-type Props = { rootHandle: FileSystemDirectoryHandle; rootId: string; boardId: string; disabled: boolean; onSelect: (page: Page) => void; onDuplicate: (action: () => Promise<void>) => void; onTheme: () => void }
+type Props = { rootHandle: FileSystemDirectoryHandle; rootId: string; boardId: string; disabled: boolean; onSelect: (page: Page) => void; onDuplicate: (action: () => Promise<void>) => void; onTheme: () => void; theme: string; onImages: (mode: string) => void }
 
-export function StudyBoardPages({ rootHandle, rootId, boardId, disabled, onSelect, onDuplicate, onTheme }: Props) {
+export function StudyBoardPages({ rootHandle, rootId, boardId, disabled, onSelect, onDuplicate, onTheme, theme, onImages }: Props) {
+  const [imageMode, setImageMode] = useState('auto')
+  useEffect(() => { try { setImageMode(localStorage.getItem('study-night-images') || 'auto') } catch {} }, [])
   const [pages, setPages] = useState<Page[]>([])
   const [open, setOpen] = useState(false)
   const [actions, setActions] = useState<string | null>(null)
@@ -48,13 +50,28 @@ export function StudyBoardPages({ rootHandle, rootId, boardId, disabled, onSelec
     await saveStudyBoard(rootHandle, page.boardId, { draft: original.record.draft, imported: original.record.imported, status: original.record.status, localPdfReferences: original.record.localPdfReferences })
     await persist([...pages, page]); onSelect(page)
   })
-  return <div ref={panel} className="absolute left-[60px] top-3 z-30 text-sm text-slate-800">
+  return <div ref={panel} data-board-theme={theme} className="absolute left-[60px] top-3 z-30 text-sm text-slate-800">
     <div className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
       <button type="button" title="Cambiar tema claro u oscuro" aria-label="Cambiar tema claro u oscuro" onClick={onTheme} className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">☼ ☾</button>
       <button type="button" aria-expanded={open} aria-controls="study-pages-panel" disabled={disabled || busy || !pages.length} onClick={() => setOpen(value => !value)} className="flex max-w-40 items-center gap-2 rounded-lg bg-purple-100 px-3 py-1.5 text-purple-600 disabled:opacity-50"><span aria-hidden="true">▧</span><span className="truncate">{current?.name || 'Página 1'}</span></button>
     </div>
+    <style>{`
+      [data-board-theme="dark"] { color: #e5e7eb; }
+      [data-board-theme="dark"] .bg-white { background-color: #191e27; border-color: #343c49; }
+      [data-board-theme="dark"] .bg-slate-100 { background-color: #2a3240; color: #e5e7eb; }
+      [data-board-theme="dark"] .bg-purple-100 { background-color: #40305d; color: #dfc9ff; }
+      [data-board-theme="dark"] .text-purple-600 { color: #d8b4fe; }
+      [data-board-theme="dark"] button:hover { background-color: #30394a; }
+    `}</style>
     {open && <div id="study-pages-panel" aria-label="Páginas" className="mt-2 w-60 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
       <div className="mb-2 flex items-center justify-between px-2 py-1"><span>Páginas</span><button aria-label="Crear página" disabled={busy || disabled} onClick={add} className="rounded px-2 text-xl hover:bg-slate-100">+</button></div>
+      {theme === 'dark' && <label className="mb-2 block border-b border-slate-600 px-2 pb-3 text-xs">Imágenes de noche
+        <select aria-label="Filtro nocturno de imágenes" value={imageMode} onChange={event => { const mode = event.target.value; setImageMode(mode); try { localStorage.setItem('study-night-images', mode) } catch {}; onImages(mode) }} className="mt-1 w-full rounded border border-slate-600 bg-transparent p-1.5">
+          <option className="bg-slate-900 text-white" value="auto">Automático (esquemas claros)</option>
+          <option className="bg-slate-900 text-white" value="original">Colores originales</option>
+          <option className="bg-slate-900 text-white" value="invert">Invertir todas</option>
+        </select>
+      </label>}
       <div className="max-h-[60vh] overflow-y-auto">{pages.map((page, index) => <div key={page.boardId} className="mb-1">
         <div className={`flex items-center rounded-md ${page.boardId === boardId ? 'bg-purple-100' : 'hover:bg-slate-100'}`}>
           <button disabled={busy || disabled} aria-current={page.boardId === boardId ? 'page' : undefined} className="min-w-0 flex-1 truncate px-2 py-1.5 text-left" onClick={() => { if (page.boardId !== boardId) onSelect(page); setOpen(false) }}>{page.name}</button>
