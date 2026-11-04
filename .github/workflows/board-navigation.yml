@@ -41,8 +41,22 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - name: Medir enlaces, ediciones y gestos en el bundle de produccion
         run: pnpm exec playwright test --config playwright.navigation.config.ts
+      - name: Resumir respuesta y trabajo por gesto
+        if: always()
+        run: node scripts/summarize-board-navigation.mjs
+        working-directory: .
       - name: Comprobar gestos reales, colaboracion, orden y editores
         run: pnpm exec playwright test e2e/camera-direct.spec.ts e2e/perf.spec.ts e2e/zorder.spec.ts e2e/stamp-zorder.spec.ts e2e/live-drag.spec.ts e2e/live-resize.spec.ts e2e/clipboard.spec.ts e2e/polish.spec.ts --workers=1 --retries=0 --reporter=list,html
+      - name: Compilar pizarra integrada de Materias e Importantes
+        run: node scripts/build-study-board.mjs
+        working-directory: .
+        env:
+          STUDY_BOARD_WORKER_HOST: 127.0.0.1:8787
+      - name: Probar navegacion integrada, paginas, enlaces PDF y modo noche
+        run: node scripts/test-study-board.mjs --test-name-pattern="dense Study board|study pages keep|PDF names open|dragged shortcuts|night mode analyzes|library navigation replaces"
+        working-directory: .
+        env:
+          STUDY_TEST_BUILT: '1'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -51,3 +65,5 @@ jobs:
           path: |
             pizarra-sync/test-results/
             pizarra-sync/playwright-report/
+            pizarra-sync/navigation-results/
+            pizarra-sync/navigation-report/

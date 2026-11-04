@@ -146,6 +146,13 @@ test('cached notes retain links, stacking, edits, undo and remounting', async ({
       const retained = originalLink === text.querySelector('a');
       const r = originalLink.getClientRects()[0];
       const hit = layer.linkAtPoint(r.x + r.width / 2, r.y + r.height / 2)?.href;
+      objects.get('link-0').set('rotation', 45);
+      const rotatedRect = text.querySelector('a').getClientRects()[0];
+      const rotatedHit = layer.linkAtPoint(rotatedRect.x + rotatedRect.width / 2, rotatedRect.y + rotatedRect.height / 2)?.href;
+      layer.beginEdit('link-0');
+      const editorRect = layer.edit.el.querySelector('a').getClientRects()[0];
+      const editorHit = layer.linkAtPoint(editorRect.x + editorRect.width / 2, editorRect.y + editorRect.height / 2)?.href;
+      layer.commit();
       doc.transact(() => { order.delete(0, 1); order.push(['link-0']); });
       const domOrder = [...layer.root.children].map((el: any) => el.dataset.id).filter(Boolean);
       objects.get('link-0').set('runs', [{ text: 'Changed link', link: 'https://example.test/new' }]);
@@ -158,9 +165,63 @@ test('cached notes retain links, stacking, edits, undo and remounting', async ({
       canvas.zoomToFit();
       await new Promise(resolve => setTimeout(resolve, 300));
       const remounted = layer.els.get('link-0')?.querySelector('a')?.href;
-      return { retained, hit, domOrder, changed, undone, culled, remounted };
+      return { retained, hit, rotatedHit, editorHit, domOrder, changed, undone, culled, remounted };
     });
-    expect(result).toEqual({ retained: true, hit: 'https://example.test/0', domOrder: ['link-1', 'link-2', 'link-0'],
+    expect(result).toEqual({ retained: true, hit: 'https://example.test/0', rotatedHit: 'https://example.test/0', editorHit: 'https://example.test/0', domOrder: ['link-1', 'link-2', 'link-0'],
       changed: 'https://example.test/new', undone: 'https://example.test/0', culled: true, remounted: 'https://example.test/0' });
+  } finally { await peer.close(); }
+});
+
+test('large scanned pages keep decoded images during night-mode navigation', async ({ browser }, info) => {
+  const peer = await connectPeer(browser, uniqueRoom('navigation-images'));
+  const { page } = peer;
+  try {
+    const data = await page.evaluate(() => {
+      const canvas = document.createElement('canvas'); canvas.width = 2048; canvas.height = 3072;
+      const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#111'; ctx.font = '32px sans-serif';
+      for (let y = 100; y < 2900; y += 60) ctx.fillText('Documento de estudio: formulas, temas y diagramas', 80, y);
+      return canvas.toDataURL('image/png').split(',')[1];
+    });
+    let requests = 0;
+    await page.route('**/img/nav-scan-*', async route => {
+      requests++;
+      await route.fulfill({ body: Buffer.from(data, 'base64'), contentType: 'image/png', headers: { 'access-control-allow-origin': '*' } });
+    });
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = 'dark';
+      const { doc, canvas } = (window as any).__komuboard, objects = doc.getMap('objects'), order = doc.getArray('order');
+      const MapType = objects.constructor;
+      doc.transact(() => {
+        for (let i = 0; i < 12; i++) {
+          const map = new MapType();
+          for (const [k, v] of Object.entries({ id: `scan-${i}`, type: 'image', x: (i % 4) * 550, y: Math.floor(i / 4) * 800, width: 512, height: 768, src: `nav-scan-${i}` })) map.set(k, v);
+          objects.set(`scan-${i}`, map); order.push([`scan-${i}`]);
+        }
+      });
+      canvas.zoomToFit();
+    });
+    await page.waitForFunction(() => {
+      const imgs = [...document.querySelectorAll<HTMLImageElement>('.komu-image img')];
+      return imgs.length === 12 && imgs.every(img => img.complete && img.naturalWidth === 2048);
+    });
+    await page.waitForTimeout(300);
+    const report = await page.evaluate(async () => {
+      const { canvas } = (window as any).__komuboard, originals = [...document.querySelectorAll('.komu-image img')];
+      const target = document.querySelector('#board canvas')!, bounds = target.getBoundingClientRect();
+      const frames = []; let previous = performance.now();
+      for (let i = 0; i < 30; i++) {
+        target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: i % 2 ? 3 : -3, clientX: bounds.x + bounds.width / 2, clientY: bounds.y + bounds.height / 2 }));
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const now = performance.now(); frames.push(now - previous); previous = now;
+      }
+      canvas.textLayer.finishCameraMotion();
+      const current = [...document.querySelectorAll('.komu-image img')];
+      frames.sort((a, b) => a - b);
+      return { retained: current.length === originals.length && originals.every((img, i) => img === current[i]), p50: frames[15], p95: frames[28], max: frames[29], decodedPixels: 12 * 2048 * 3072 };
+    });
+    await info.attach('scanned-pages.json', { body: JSON.stringify({ ...report, requests }), contentType: 'application/json' });
+    expect(report.retained).toBe(true);
+    expect(requests).toBe(12);
   } finally { await peer.close(); }
 });

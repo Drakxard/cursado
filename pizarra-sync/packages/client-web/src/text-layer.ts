@@ -1733,7 +1733,7 @@ export class TextLayer {
   }
 
   /** The topmost text object whose world bbox contains the point, or null. */
-  hitTest(world: { x: number; y: number }): string | null {
+  hitTest(world: { x: number; y: number }, rotatedBoxes = false): string | null {
     const order = orderArray(this.opts.doc).toArray();
     for (let i = order.length - 1; i >= 0; i--) {
       const id = order[i];
@@ -1780,11 +1780,18 @@ export class TextLayer {
       // Stamps are centre-anchored (obj.x/y = centre); text/shapes are top-left anchored.
       const left = obj.type === "stamp" ? obj.x - size.w / 2 : obj.x;
       const top = obj.type === "stamp" ? obj.y - size.h / 2 : obj.y;
+      let point = world;
+      if (rotatedBoxes && obj.rotation) {
+        const angle = -obj.rotation * Math.PI / 180;
+        const cx = left + size.w / 2, cy = top + size.h / 2;
+        const dx = world.x - cx, dy = world.y - cy;
+        point = { x: cx + dx * Math.cos(angle) - dy * Math.sin(angle), y: cy + dx * Math.sin(angle) + dy * Math.cos(angle) };
+      }
       if (
-        world.x >= left &&
-        world.x <= left + size.w &&
-        world.y >= top &&
-        world.y <= top + size.h
+        point.x >= left &&
+        point.x <= left + size.w &&
+        point.y >= top &&
+        point.y <= top + size.h
       ) {
         return id;
       }
@@ -2193,7 +2200,7 @@ export class TextLayer {
     const bounds = this.opts.container.getBoundingClientRect();
     if (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) return null;
     const cam = this.opts.camera();
-    const id = this.hitTest({ x: (x - bounds.left - cam.x) / cam.scale, y: (y - bounds.top - cam.y) / cam.scale });
+    const id = this.hitTest({ x: (x - bounds.left - cam.x) / cam.scale, y: (y - bounds.top - cam.y) / cam.scale }, true);
     // A new (uncommitted) editor has no document id yet. Check it before the display copy.
     const candidates = [this.edit?.el, id ? this.els.get(id) : undefined];
     for (const candidate of candidates) {
