@@ -1,0 +1,51 @@
+name: Respuesta de navegacion de la pizarra
+
+on:
+  push:
+    branches: ['perf/board-navigation']
+  pull_request:
+    paths: ['pizarra-sync/**', '.github/workflows/board-navigation.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: board-navigation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  navigation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: pizarra-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: pizarra-sync/pnpm-lock.yaml
+      - run: npm ci
+        working-directory: .
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @komuboard/client-web typecheck
+      - run: pnpm --filter @komuboard/client-web build
+        env:
+          VITE_WORKER_HOST: 127.0.0.1:8787
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Medir enlaces, ediciones y gestos en el bundle de produccion
+        run: pnpm exec playwright test --config playwright.navigation.config.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: board-navigation-${{ github.sha }}
+          retention-days: 14
+          path: |
+            pizarra-sync/test-results/
+            pizarra-sync/playwright-report/
