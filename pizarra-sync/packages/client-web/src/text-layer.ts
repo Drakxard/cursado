@@ -325,6 +325,9 @@ export class TextLayer {
    *  run per object per frame (recull + camera sync walk the whole board). Entries are invalidated
    *  from the doc observer's events, so cached reads always match the doc. */
   private readonly objCache = new Map<string, BoardObject | null>();
+  // Materialized objects keep their identity until the Yjs observer invalidates them.
+  // Camera changes and edits to other notes must not rebuild this note's rich DOM.
+  private readonly paintedText = new WeakMap<HTMLElement, TextObject>();
   /** How layout() records an element's world size (see layout()):
    *  - "inline": measure immediately (single-object paths — one reflow is fine).
    *  - "defer":  bulk passes (render/recull) queue elements and measure once after ALL style writes —
@@ -587,6 +590,7 @@ export class TextLayer {
       this.inkLockBadges.get(id)?.remove(); // drop its lock badge, if any
       this.inkLockBadges.delete(id);
     }
+    this.reorderZ();
     if (this.linkCardFor && !this.linkCardFor.isConnected) this.removeLinkCard(); // repaint detached it
     this.updateDisplayVisibility();
     this.refreshSelectionChrome();
@@ -610,7 +614,7 @@ export class TextLayer {
       }
       this.paintStamp(el, obj.src);
       el.toggleAttribute("data-locked", obj.locked === true);
-      this.root.appendChild(el);
+      if (el.parentNode !== this.root) this.root.appendChild(el);
       const g = this.effectiveGeom(id, obj);
       this.layout(el, g.x, g.y, g.width, g.fontSize, "", "left", g.height);
       this.applyRotation(el, g.rotation);
@@ -625,9 +629,9 @@ export class TextLayer {
         el.dataset.id = id;
         this.els.set(id, el);
       }
-      this.paintImage(el, obj.src);
+      this.paintImage(el, obj.src, typeof this.objects.get(id)?.get("plantumlSource") === "string");
       el.toggleAttribute("data-locked", obj.locked === true);
-      this.root.appendChild(el);
+      if (el.parentNode !== this.root) this.root.appendChild(el);
       const g = this.effectiveGeom(id, obj);
       this.layout(el, g.x, g.y, g.width, g.fontSize, "", "left", g.height);
       this.applyRotation(el, g.rotation);
@@ -640,7 +644,7 @@ export class TextLayer {
         el = this.makeInkSvg(id, "stroke");
         this.inkEls.set(id, el);
       }
-      this.root.appendChild(el);
+      if (el.parentNode !== this.root) this.root.appendChild(el);
       this.paintStroke(el, obj);
       return;
     }
@@ -650,7 +654,7 @@ export class TextLayer {
         el = this.makeInkSvg(id, "connector");
         this.inkEls.set(id, el);
       }
-      this.root.appendChild(el);
+      if (el.parentNode !== this.root) this.root.appendChild(el);
       this.paintConnector(el, obj);
       el.style.display = this.remoteInkHidden.has(id) ? "none" : ""; // hidden while a peer edits it
       return;
@@ -665,7 +669,7 @@ export class TextLayer {
     }
     this.paint(el, obj);
     el.toggleAttribute("data-locked", obj.locked === true);
-    this.root.appendChild(el);
+    if (el.parentNode !== this.root) this.root.appendChild(el);
     const g = this.effectiveGeom(id, obj);
     this.layout(el, g.x, g.y, g.width, g.fontSize, obj.fontFamily, obj.align, g.height);
     this.applyRotation(el, g.rotation);
@@ -791,9 +795,18 @@ export class TextLayer {
    *  recull() runs at ~30 Hz during a peer's gesture. With no chrome, this is a plain append. */
   private reorderZ(): void {
     const anchor = this.edit?.el ?? this.stickyGhost ?? this.stampGhost ?? null;
+    let next: ChildNode | null = this.root.firstChild;
     for (const id of orderArray(this.opts.doc).toArray()) {
       const el = this.els.get(id) ?? this.inkEls.get(id);
-      if (el) this.root.insertBefore(el, anchor); // anchor=null → append (same as before)
+      if (!el) continue;
+      // Ignore draft/editor/presence chrome when comparing committed siblings.
+      while (next) {
+        const nextId = (next as HTMLElement).dataset?.id;
+        if (nextId && (this.els.get(nextId) === next || this.inkEls.get(nextId) === next)) break;
+        next = next.nextSibling;
+      }
+      if (el === next) next = next.nextSibling;
+      else this.root.insertBefore(el, next ?? anchor);
     }
   }
 
@@ -806,6 +819,8 @@ export class TextLayer {
 
   /** Render a text object's runs into its display element. */
   private paint(el: HTMLElement, obj: TextObject): void {
+    if (this.paintedText.get(el) === obj) return;
+    this.paintedText.set(el, obj);
     if (paintStudy(el, obj)) return;
     const runs = obj.study?.kind === 'pdf' ? studyPdfRuns(obj.id, obj.runs) : obj.runs;
     // A shape wraps its label in an inner `.komu-text-body` (matching the editor) so the centred
@@ -854,7 +869,12 @@ export class TextLayer {
   }
 
   /** Paint an uploaded image: resolve its R2 key → the worker serve URL into an <img> filling the box. */
-  private paintImage(el: HTMLDivElement, key: string): void {
+  private paintImage(el: HTMLDivElement, key: string, documentImage = false): void {
+    const previous = el.querySelector<HTMLImageElement>('img');
+    if (previous) {
+      previous.dataset.studyDocument = String(documentImage);
+      if (documentImage) previous.dataset.nightDiagram = 'true';
+    }
     if (el.dataset.src === key) return; // already showing this image
     el.dataset.src = key;
     let img = el.querySelector<HTMLImageElement>("img");
@@ -867,6 +887,7 @@ export class TextLayer {
       img.alt = "";
       el.appendChild(img);
     }
+    img.dataset.studyDocument = String(documentImage);
     // A faint placeholder until the bytes decode, and a clear "unavailable" state if they're gone (a
     // deleted R2 object / offline) — better than a blank box or the browser's broken-image glyph. The
     // handlers are attached BEFORE src so a cached (immutable) image still clears the loading state.
@@ -1718,7 +1739,7 @@ export class TextLayer {
   }
 
   /** The topmost text object whose world bbox contains the point, or null. */
-  hitTest(world: { x: number; y: number }): string | null {
+  hitTest(world: { x: number; y: number }, visualBoxes = false): string | null {
     const order = orderArray(this.opts.doc).toArray();
     for (let i = order.length - 1; i >= 0; i--) {
       const id = order[i];
@@ -1763,13 +1784,22 @@ export class TextLayer {
       const size = this.sizes.get(id);
       if (!size) continue;
       // Stamps are centre-anchored (obj.x/y = centre); text/shapes are top-left anchored.
-      const left = obj.type === "stamp" ? obj.x - size.w / 2 : obj.x;
-      const top = obj.type === "stamp" ? obj.y - size.h / 2 : obj.y;
+      const geometry = visualBoxes ? this.effectiveGeom(id, obj) : null;
+      const left = geometry?.x ?? (obj.type === "stamp" ? obj.x - size.w / 2 : obj.x);
+      const top = geometry?.y ?? (obj.type === "stamp" ? obj.y - size.h / 2 : obj.y);
+      const width = geometry?.width ?? size.w, height = geometry?.height ?? size.h;
+      let point = world;
+      if (geometry?.rotation) {
+        const angle = -geometry.rotation * Math.PI / 180;
+        const cx = left + width / 2, cy = top + height / 2;
+        const dx = world.x - cx, dy = world.y - cy;
+        point = { x: cx + dx * Math.cos(angle) - dy * Math.sin(angle), y: cy + dx * Math.sin(angle) + dy * Math.cos(angle) };
+      }
       if (
-        world.x >= left &&
-        world.x <= left + size.w &&
-        world.y >= top &&
-        world.y <= top + size.h
+        point.x >= left &&
+        point.x <= left + width &&
+        point.y >= top &&
+        point.y <= top + height
       ) {
         return id;
       }
@@ -2032,6 +2062,9 @@ export class TextLayer {
   ): void {
     const el = document.createElement("div");
     el.className = "komu-text komu-text-editor";
+    if (session.id && (this.objects.get(session.id)?.get('study') as TextObject['study'])?.kind === 'pdf') {
+      el.dataset.study = 'pdf'; el.dataset.id = session.id;
+    }
     el.style.color = INK;
     this.applyRotation(el, session.rotation ?? 0);
     // Shape (outline + fixed height) or sticky (coloured square) styling on the box itself.
@@ -2175,13 +2208,20 @@ export class TextLayer {
   };
   /** The rendered link under a screen point (per-line rects), or null. */
   private linkAtPoint(x: number, y: number): HTMLAnchorElement | null {
-    const links = this.root.querySelectorAll<HTMLAnchorElement>(".komu-text a");
-    for (let i = 0; i < links.length; i++) {
-      const a = links[i]!;
-      const rects = a.getClientRects();
-      for (let j = 0; j < rects.length; j++) {
-        const r = rects[j]!;
-        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return a;
+    const bounds = this.opts.container.getBoundingClientRect();
+    if (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) return null;
+    const cam = this.opts.camera();
+    const id = this.hitTest({ x: (x - bounds.left - cam.x) / cam.scale, y: (y - bounds.top - cam.y) / cam.scale }, true);
+    // A new (uncommitted) editor has no document id yet. Check it before the display copy.
+    const candidates = [this.edit?.el, id ? this.els.get(id) : undefined];
+    for (const candidate of candidates) {
+      if (!candidate || candidate.style.display === 'none') continue;
+      const box = candidate.getBoundingClientRect();
+      if (x < box.left || x > box.right || y < box.top || y > box.bottom) continue;
+      for (const a of candidate.querySelectorAll<HTMLAnchorElement>('a')) {
+        for (const r of a.getClientRects()) {
+          if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return a;
+        }
       }
     }
     return null;

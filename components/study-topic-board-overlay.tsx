@@ -60,6 +60,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const [review, setReview] = useState<MigrationReport | null>(null), [attachment, setAttachment] = useState<{ id: string; study: StudyAttachment } | null>(null)
   const [closing, setClosing] = useState(false)
   const [boardTheme, setBoardTheme] = useState('light')
+  const [nightImages, setNightImages] = useState('auto')
   const [diagrams, setDiagrams] = useState(false)
   const [imageReader, setImageReader] = useState<{ images: StudyImage[]; initialId: string } | null>(null)
   const [diagramEdit, setDiagramEdit] = useState<{ id: string; source: string } | null>(null)
@@ -139,7 +140,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       const data = event.data
       if (event.origin !== location.origin || data?.session !== session || data?.boardId !== boardId) return
       if (event.source === frame.current?.contentWindow) {
-        if (data.type === 'study-board:theme' && ['light', 'dark'].includes(data.theme)) setBoardTheme(data.theme)
+        if (data.type === 'study-board:theme' && ['light', 'dark'].includes(data.theme)) { setBoardTheme(data.theme); if (['auto', 'original', 'invert'].includes(data.nightImages)) setNightImages(data.nightImages) }
         if (data.type === 'study-board:read-image' && typeof data.initialId === 'string' && Array.isArray(data.images)) {
           const images = data.images.filter((image: any): image is StudyImage => typeof image?.id === 'string' && typeof image.url === 'string' && /^https?:\/\//.test(image.url))
           if (images.some((image: StudyImage) => image.id === data.initialId)) setImageReader({ images, initialId: data.initialId })
@@ -266,7 +267,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     } catch (reason) { setError(String(reason)) }
   }
   return <div role="dialog" aria-modal="true" aria-label={`Pizarra de ${name}`} className="fixed inset-0 z-[150] bg-white text-slate-900">
-    {imageReader && <StudyImageViewer {...imageReader} onClose={() => { setImageReader(null); requestAnimationFrame(focusBoard) }} />}
+    {imageReader && <StudyImageViewer {...imageReader} theme={boardTheme} nightImages={nightImages} onClose={() => { setImageReader(null); requestAnimationFrame(focusBoard) }} />}
     <div inert={!!imageReader} style={{ display: 'contents' }}>
     <div className="flex h-full">
       <div className="relative min-w-0" style={{ width: split ? '50%' : '100%', height: '100%' }}>

@@ -1,0 +1,77 @@
+name: Respuesta de navegacion de la pizarra
+
+on:
+  push:
+    branches: ['main']
+    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'components/study-image-viewer.tsx', 'lib/client/study-image*', 'lib/client/study-document-image.ts', 'tests/study-image-viewer.browser.mjs', 'tests/study-board.browser.mjs', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
+  pull_request:
+    paths: ['pizarra-sync/**', 'components/study-topic-board-overlay.tsx', 'components/study-image-viewer.tsx', 'lib/client/study-image*', 'lib/client/study-document-image.ts', 'tests/study-image-viewer.browser.mjs', 'tests/study-board.browser.mjs', 'scripts/summarize-board-navigation.mjs', '.github/workflows/board-navigation.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: board-navigation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  navigation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: pizarra-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: pizarra-sync/pnpm-lock.yaml
+      - run: npm ci
+        working-directory: .
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @komuboard/client-web typecheck
+      - run: pnpm --filter @komuboard/client-web build
+        env:
+          VITE_WORKER_HOST: 127.0.0.1:8787
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Preparar la version de Chromium de las pruebas integradas
+        run: npx playwright install chromium
+        working-directory: .
+      - name: Probar zoom del visor de imagenes y tema nocturno
+        run: node --test tests/study-image-viewer.browser.mjs tests/night-readability.browser.mjs
+        working-directory: .
+      - name: Medir enlaces, ediciones y gestos en el bundle de produccion
+        run: pnpm exec playwright test --config playwright.navigation.config.ts
+      - name: Resumir respuesta y trabajo por gesto
+        if: always()
+        run: node scripts/summarize-board-navigation.mjs
+        working-directory: .
+      - name: Comprobar gestos reales, colaboracion, orden y editores
+        run: pnpm exec playwright test e2e/camera-direct.spec.ts e2e/perf.spec.ts e2e/zorder.spec.ts e2e/stamp-zorder.spec.ts e2e/live-drag.spec.ts e2e/live-resize.spec.ts e2e/clipboard.spec.ts e2e/polish.spec.ts --workers=1 --retries=0 --reporter=list,html
+      - name: Compilar pizarra integrada de Materias e Importantes
+        run: node scripts/build-study-board.mjs
+        working-directory: .
+        env:
+          STUDY_BOARD_WORKER_HOST: 127.0.0.1:8787
+      - name: Probar navegacion integrada, paginas, enlaces PDF y modo noche
+        run: node scripts/test-study-board.mjs --test-name-pattern="dense Study board|study pages keep|PDF names open|dragged shortcuts|night mode analyzes|library navigation replaces|image reader opens"
+        working-directory: .
+        env:
+          STUDY_TEST_BUILT: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: board-navigation-${{ github.sha }}
+          retention-days: 14
+          path: |
+            pizarra-sync/test-results/
+            pizarra-sync/playwright-report/
+            pizarra-sync/navigation-results/
+            pizarra-sync/navigation-report/
+            test-results/image-reader/

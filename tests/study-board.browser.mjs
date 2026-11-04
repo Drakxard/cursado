@@ -63,7 +63,7 @@ async function fixture(context) {
       destroy() { this.frame.remove() }
     } }
   })
-  await context.route('**/study-fixture**', route => route.fulfill({ contentType: 'text/html', body: `<style>body{margin:0}.fixed{position:fixed}.inset-0{inset:0}.inset-8{inset:32px}.flex-1{flex:1}.overflow-auto{overflow:auto}.absolute{position:absolute}.relative{position:relative}.flex{display:flex}.h-full{height:100%}.w-full{width:100%}.w-1\\/2{width:50%}.top-3{top:12px}.left-3{left:12px}.right-4{right:16px}.bottom-4{bottom:16px}.bottom-3{bottom:12px}.bottom-16{bottom:64px}.left-16{left:64px}.z-20{z-index:20}.z-30{z-index:30}.z-40{z-index:40}.z-50{z-index:50}.flex-col{flex-direction:column}.bg-white{background:white}iframe{border:0}button{cursor:pointer} [inert]{pointer-events:none}</style><div id="root"></div><script type="module" src="/study-parent.js"></script>` }))
+  await context.route('**/study-fixture**', route => route.fulfill({ contentType: 'text/html', body: `<style>body{margin:0}.fixed{position:fixed}.inset-0{inset:0}.inset-8{inset:32px}.flex-1{flex:1}.overflow-auto{overflow:auto}.absolute{position:absolute}.relative{position:relative}.flex{display:flex}.h-full{height:100%}.w-full{width:100%}.w-1\\/2{width:50%}.top-3{top:12px}.left-0{left:0}.left-3{left:12px}.left-12{left:48px}.h-11{height:44px}.w-11{width:44px}.right-4{right:16px}.bottom-4{bottom:16px}.bottom-3{bottom:12px}.bottom-16{bottom:64px}.left-16{left:64px}.z-20{z-index:20}.z-30{z-index:30}.z-40{z-index:40}.z-50{z-index:50}.flex-col{flex-direction:column}.bg-white{background:white}iframe{border:0}button{cursor:pointer} [inert]{pointer-events:none}</style><div id="root"></div><script type="module" src="/study-parent.js"></script>` }))
   await context.route('**/study-parent.js', route => route.fulfill({ contentType: 'text/javascript', body: bundle.outputFiles[0].text }))
   await context.route('**/pizarra/api/excel/import', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ sheets: [{ name: 'Hoja importada', cells: [[{ input: '=2+3' }]], truncated: false }] }) }))
   await context.route('**/study-board/index.html?**', async route => {
@@ -361,13 +361,37 @@ test('PDF names open on one click and restore their destination after native tex
   const id = await pdf().getAttribute('data-id')
   const card = () => engine(page).locator(`.komu-text[data-id="${id}"]:not(.komu-text-editor)`)
   const originalHref = await card().locator('a').getAttribute('href')
+  await send(page, 'toggle-theme')
+  await expect(card()).toHaveCSS('background-color', 'rgb(30, 41, 59)')
+  await expect(card().locator('a')).toHaveCSS('color', 'rgb(147, 197, 253)')
   const box = await card().boundingBox()
   // The blank part of the object uses the engine's ordinary text editor.
   await page.mouse.click(box.x + box.width - 25, box.y + box.height / 2)
   const editor = engine(page).locator('.komu-text-editor [contenteditable=true],.komu-text-editor[contenteditable=true]')
   await expect(editor).toBeVisible()
+  await expect(engine(page).locator('.komu-text-editor')).toHaveCSS('background-color', 'rgb(30, 41, 59)')
   await editor.fill('Mi resumen de ecuaciones')
-  await editor.press('Escape')
+  // Open from the active editor before focus can leave the iframe. It must
+  // synchronously finish editing so no enlarged duplicate survives the reader.
+  const editingAfterOpen = await engine(page).evaluate(id => {
+    document.dispatchEvent(new CustomEvent('study-open-pdf', { detail: { id } }))
+    return window.__komuboard.canvas.textLayer.isEditing()
+  }, id)
+  assert.equal(editingAfterOpen, false)
+  await expect(page.getByTitle('Lector de PDF de la pizarra')).toBeVisible()
+  await expect(engine(page).locator('.komu-text-editor')).toHaveCount(0)
+  const firstReader = page.frames().find(frame => frame.url().includes('mode=reader'))
+  await firstReader.locator('body').press('Escape')
+  await expect(page.getByTitle('Lector de PDF de la pizarra')).toHaveCount(0)
+  const widths = []
+  for (const zoom of [.17, .7]) {
+    await engine(page).evaluate(zoom => window.__komuboard.canvas.restoreStudyView({ x: 200, y: 200, zoom }), zoom)
+    await expect.poll(() => card().evaluate(el => parseFloat(el.style.width))).toBeGreaterThan(0)
+    await engine(page).evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    widths.push(await card().evaluate(el => el.getBoundingClientRect().width))
+  }
+  assert.ok(Math.abs(widths[1] / widths[0] - .7 / .17) < .05)
+  await expect(engine(page).locator('.komu-text-editor')).toHaveCount(0)
   await expect(card().locator('a')).toHaveText('Mi resumen de ecuaciones')
   await expect(card().locator('a')).toHaveAttribute('href', originalHref)
   await card().locator('a').click({ force: true })
@@ -574,7 +598,7 @@ test('cooperative container opens the same live room across independent devices'
 test('study URL reload restores the current nested board and closing clears its location', { timeout: 60000 }, async t => {
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)
-  await context.route(/\/(?:estudio|imp|pizarra\/[^/]+\/[^/]+\/[^/?]+)(?:\?|$)/, route => route.fulfill({ contentType: 'text/html', body: '<style>body{margin:0}.fixed{position:fixed}.absolute{position:absolute}.top-3{top:12px}.left-3{left:12px}.inset-0{inset:0}.h-full{height:100%}.w-full{width:100%}.flex{display:flex}iframe{border:0}</style><div id="root"></div><script type="module" src="/study-parent.js"></script>' }))
+  await context.route(/\/(?:estudio|imp|pizarra\/[^/]+\/[^/]+\/[^/?]+)(?:\?|$)/, route => route.fulfill({ contentType: 'text/html', body: '<style>body{margin:0}.fixed{position:fixed}.absolute{position:absolute}.top-3{top:12px}.left-0{left:0}.left-3{left:12px}.left-12{left:48px}.h-11{height:44px}.w-11{width:44px}.inset-0{inset:0}.h-full{height:100%}.w-full{width:100%}.flex{display:flex}iframe{border:0}</style><div id="root"></div><script type="module" src="/study-parent.js"></script>' }))
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message))
   await page.goto(origin + '/estudio?persist=1&untouched=yes#anchor')
   await page.getByRole('button', { name: 'Abrir pizarra', exact: true }).click(); await loaded(page, 'route-first')
@@ -732,7 +756,7 @@ test('image reader opens on double click, loads one image at a time and returns 
       requests.push(name)
       if (name === 'reader-third.svg') return route.fulfill({ status: 404, body: '' })
     }
-    return route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="8192"><rect width="4096" height="8192" fill="white"/><text x="500" y="500" font-size="100">Diagrama grande</text></svg>' })
+    return route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="8192"><rect width="4096" height="8192" fill="white"/><rect x="100" y="800" width="1500" height="6500" fill="#a0d0ff"/><text x="500" y="500" font-size="100">Diagrama grande</text></svg>' })
   })
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message))
   await page.goto(origin + '/study-fixture?defer=1'); await page.waitForFunction(() => window.openBoard)
@@ -761,6 +785,17 @@ test('image reader opens on double click, loads one image at a time and returns 
   await expect.poll(painted).toBe(true)
   await expect(reader.getByRole('button')).toHaveCount(1)
   assert.equal(await reader.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)')
+  await send(page, 'toggle-theme')
+  await expect(reader).toHaveCSS('background-color', 'rgb(16, 20, 27)')
+  await expect(frame.locator('.komu-image img').first()).toHaveAttribute('data-night-diagram', 'true')
+  await expect(reader.locator('[data-study-image-detail]')).toHaveCSS('filter', 'invert(0.9) hue-rotate(180deg)')
+  await send(page, 'night-images', { mode: 'original' })
+  await expect(reader.locator('[data-study-image-detail]')).toHaveCSS('filter', 'none')
+  await send(page, 'night-images', { mode: 'auto' })
+  await expect(reader.locator('[data-study-image-detail]')).toHaveCSS('filter', 'invert(0.9) hue-rotate(180deg)')
+  await send(page, 'toggle-theme')
+  await expect(reader).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  assert.deepEqual(requests, ['reader-first.svg'])
   const surface = reader.locator('[data-study-image-viewer]')
   await expect(surface).toHaveAttribute('data-render-mode', 'detail')
   const initialTransform = await reader.locator('[data-study-image-preview]').evaluate(canvas => canvas.style.transform)
@@ -790,10 +825,12 @@ test('image reader opens on double click, loads one image at a time and returns 
   // A single pixel must be presented in full, with no spring following behind the pointer.
   const dragStart = await projection()
   await page.mouse.move(701, 501)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const firstPixel = await projection()
   assert.ok(Math.abs(firstPixel.x - dragStart.x - 1) < .05)
   assert.ok(Math.abs(firstPixel.y - dragStart.y - 1) < .05)
   await page.mouse.move(699, 499)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const reversed = await projection()
   assert.ok(Math.abs(reversed.x - firstPixel.x + 2) < .05)
   assert.ok(Math.abs(reversed.y - firstPixel.y + 2) < .05)
