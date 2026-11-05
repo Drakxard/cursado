@@ -150,6 +150,44 @@ test("content stays aligned through composited pan, zoom, rebase and settling", 
   } finally { await finish(); await close(); }
 });
 
+test("zoom crossing the cached viewport waits for rest before mounting new content", async ({ browser }) => {
+  const { page, close } = await connectPeer(browser, uniqueRoom("zoom-defer-render"));
+  try {
+    await injectSticky(page, { id: "near", x: 0, y: 0 });
+    await injectSticky(page, { id: "far", x: 2400, y: 0 });
+    await expect(page.locator('.text-layer [data-id="near"]')).toBeAttached();
+    await expect(page.locator('.text-layer [data-id="far"]')).toHaveCount(0);
+    const result = await page.evaluate(async () => {
+      const board = (window as unknown as { __komuboard: { canvas: {
+        textLayer: { recull(): void; syncTransform(interactive?: boolean): boolean };
+      } } }).__komuboard.canvas;
+      const layer = board.textLayer, original = layer.recull;
+      let culls = 0;
+      layer.recull = function () { culls++; return original.call(this); };
+      try {
+        const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
+        const r = el.getBoundingClientRect();
+        for (let i = 0; i < 16; i++) {
+          el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true,
+            ctrlKey: true, clientX: r.left + 100, clientY: r.top + 100, deltaY: 100 }));
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        }
+        const during = culls;
+        const moving = document.querySelector('.text-layer')?.getAttribute('data-camera-motion');
+        await new Promise(resolve => setTimeout(resolve, 250));
+        return { during, moving, after: culls,
+          mounted: !!document.querySelector('.text-layer [data-id="far"]'),
+          settled: !document.querySelector('.text-layer')?.hasAttribute('data-camera-motion') };
+      } finally { layer.recull = original; }
+    });
+    expect(result.during).toBe(0);
+    expect(result.moving).toBe("true");
+    expect(result.after).toBeGreaterThan(0);
+    expect(result.mounted).toBe(true);
+    expect(result.settled).toBe(true);
+  } finally { await close(); }
+});
+
 test("plain wheel scrolls vertically without zoom and Ctrl+wheel switches back to zoom", async ({ browser }) => {
   const { page, close } = await connectPeer(browser, uniqueRoom("wheel-scroll"));
   try {

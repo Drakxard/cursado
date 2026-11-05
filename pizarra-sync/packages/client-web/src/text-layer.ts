@@ -1608,7 +1608,6 @@ export class TextLayer {
   private cameraBase: Camera | null = null;
   private previewCamera: Camera | null = null;
   private cameraTimer: ReturnType<typeof setTimeout> | null = null;
-  private cameraArea = { width: 0, height: 0 };
 
   /** A fresh edit/document update must use the current camera, never a stale preview. */
   readonly finishCameraMotion = (): void => {
@@ -1627,8 +1626,8 @@ export class TextLayer {
   };
 
   /** Gesture frames change one compositor transform, leaving text/SVG/image layout
-   *  cached. Rebase when the camera exhausts the culling margin, then restore crisp
-   *  screen-space layout once the gesture is quiet. */
+   *  cached. Discover newly visible objects and restore crisp screen-space layout
+   *  once the gesture is quiet; rebasing mid-gesture blocks further camera input. */
   syncTransform(interactive = false): boolean {
     if (interactive && this.renderedCamera && !this.edit && !this.moveState && !this.resizing && !this.rotating &&
       !this.groupResize && !this.groupRotate && !this.groupPreview && !this.stickyGhost && !this.stampGhost &&
@@ -1637,18 +1636,8 @@ export class TextLayer {
       const base = this.cameraBase || this.renderedCamera;
       const scale = camera.scale / base.scale;
       const x = camera.x - base.x * scale, y = camera.y - base.y * scale;
-      const area = this.cameraArea;
-      // If every object is already mounted (e.g. zoom-to-fit), there is nothing to
-      // discover beyond the cached viewport. Rebasing would only relayout the whole board.
-      const allMounted = this.els.size + this.inkEls.size === this.objects.size;
-      if (this.cameraBase && !allMounted && (-x / scale < -area.width * .45 || -y / scale < -area.height * .45 ||
-        (area.width - x) / scale > area.width * 1.45 || (area.height - y) / scale > area.height * 1.45)) {
-        this.syncTransform(); // refresh newly visible objects before the cached margin runs out
-        return this.syncTransform(true);
-      }
       if (!this.cameraBase) {
         this.cameraBase = { ...base };
-        this.cameraArea = { width: this.opts.container.clientWidth, height: this.opts.container.clientHeight };
         this.root.style.transformOrigin = '0 0';
         this.root.style.willChange = 'transform';
         this.root.style.overflow = 'visible'; // the board clips; cached off-screen objects may enter
