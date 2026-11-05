@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from 'react'
 
 const DEFAULT_PROMPT = 'Puedes expresar  los temas y subtemas, solo sus nombres e implicaciones en PlantUML Mindmap, cómo arbol de implicaciones horizontal.'
-const STORAGE_KEY = 'cursado-plantuml-prompt'
+const MINDMAP_PROMPT = 'Expresá los temas y subtemas, sus nombres e implicaciones, como un mapa mental en código Mermaid. Usá la sintaxis mindmap con un único root y sangría para las ramas y subramas. Devolvé solo el código Mermaid.'
 
-export function PlantUmlPromptButton({ disabled }: { disabled?: boolean }) {
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT)
+export function PlantUmlPromptButton({ disabled, variant = 'plantuml' }: { disabled?: boolean; variant?: 'plantuml' | 'mermaid' }) {
+  const label = variant === 'mermaid' ? 'Mermaid Mindmap' : 'PlantUML'
+  const storageKey = variant === 'mermaid' ? 'cursado-mermaid-mindmap-prompt' : 'cursado-plantuml-prompt'
+  const defaultPrompt = variant === 'mermaid' ? MINDMAP_PROMPT : DEFAULT_PROMPT
+  const [prompt, setPrompt] = useState(defaultPrompt)
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -20,9 +23,10 @@ export function PlantUmlPromptButton({ disabled }: { disabled?: boolean }) {
   const stopHold = () => { clearTimeout(hold.current) }
 
   useEffect(() => {
-    try { const saved = localStorage.getItem(STORAGE_KEY); if (saved?.trim()) setPrompt(saved) } catch {}
+    setPrompt(defaultPrompt)
+    try { const saved = localStorage.getItem(storageKey); if (saved?.trim()) setPrompt(saved) } catch {}
     return () => { clearTimeout(hold.current); clearTimeout(feedback.current) }
-  }, [])
+  }, [storageKey, defaultPrompt])
   useEffect(() => { if (editing) input.current?.focus() }, [editing])
 
   function edit() {
@@ -41,7 +45,7 @@ export function PlantUmlPromptButton({ disabled }: { disabled?: boolean }) {
 
   return <div className="plantuml-prompt-control">
     <button ref={button} className="plantuml-prompt-copy" type="button" disabled={disabled}
-      aria-label="Copiar prompt de PlantUML" title="Copiar prompt · Mantené presionado para editar"
+      aria-label={`Copiar prompt de ${label}`} title="Copiar prompt · Mantené presionado para editar"
       aria-expanded={editing} aria-controls={editing ? 'plantuml-prompt-editor' : undefined}
       onClick={() => void copy()}
       onPointerDown={event => {
@@ -72,10 +76,10 @@ export function PlantUmlPromptButton({ disabled }: { disabled?: boolean }) {
         event.preventDefault()
         if (!draft.trim()) return
         setPrompt(draft)
-        try { localStorage.setItem(STORAGE_KEY, draft) } catch {}
+        try { localStorage.setItem(storageKey, draft) } catch {}
         close()
       }}>
-      <label htmlFor="plantuml-prompt-text">Prompt de PlantUML</label>
+      <label htmlFor="plantuml-prompt-text">Prompt de {label}</label>
       <textarea ref={input} id="plantuml-prompt-text" value={draft} onChange={event => setDraft(event.target.value)} rows={5} maxLength={10000} />
       <div><button type="button" onClick={close}>Cancelar edición</button><button type="submit" disabled={!draft.trim()}>Guardar prompt</button></div>
     </form>}

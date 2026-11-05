@@ -188,6 +188,36 @@ test("zoom crossing the cached viewport waits for rest before mounting new conte
   } finally { await close(); }
 });
 
+test("document updates during zoom wait for settlement and retain the latest content", async ({ browser }) => {
+  const { page, close } = await connectPeer(browser, uniqueRoom("zoom-document"));
+  try {
+    await injectSticky(page, { id: "note", x: 0, y: 0 });
+    const result = await page.evaluate(async () => {
+      const { doc, canvas } = (window as unknown as { __komuboard: {
+        doc: { getMap(n: string): { get(id: string): { set(k: string, v: unknown): void } } };
+        canvas: { textLayer: { recull(): void } };
+      } }).__komuboard;
+      const layer = canvas.textLayer, original = layer.recull;
+      let culls = 0;
+      layer.recull = function () { culls++; return original.call(this); };
+      try {
+        const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
+        const r = el.getBoundingClientRect();
+        for (let i = 0; i < 12; i++) {
+          el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true,
+            ctrlKey: true, clientX: r.left + 100, clientY: r.top + 100, deltaY: -2 }));
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          doc.getMap("objects").get("note").set("runs", [{ text: `Revision ${i}` }]);
+        }
+        return { culls, moving: document.querySelector('.text-layer')?.hasAttribute('data-camera-motion') };
+      } finally { layer.recull = original; }
+    });
+    expect(result).toEqual({ culls: 0, moving: true });
+    await expect(page.locator('.text-layer')).not.toHaveAttribute('data-camera-motion');
+    await expect(page.locator('.text-layer [data-id="note"]')).toContainText('Revision 11');
+  } finally { await close(); }
+});
+
 test("plain wheel scrolls vertically without zoom and Ctrl+wheel switches back to zoom", async ({ browser }) => {
   const { page, close } = await connectPeer(browser, uniqueRoom("wheel-scroll"));
   try {

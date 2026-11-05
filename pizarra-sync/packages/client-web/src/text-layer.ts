@@ -553,6 +553,13 @@ export class TextLayer {
 
   /** Reconcile display elements with the doc's text objects (z-ordered), then lay them out. */
   private render(): void {
+    // Document observers may fire many times while a peer edits or files load.
+    // Keep the composited snapshot stable until navigation settles. Cache
+    // invalidation still happens synchronously, so the final pass reads fresh data.
+    if (this.cameraBase) {
+      this.pendingCameraRender = true;
+      return;
+    }
     this.finishCameraMotion();
     const order = orderArray(this.opts.doc).toArray();
     const cull = this.cullRect();
@@ -1608,6 +1615,7 @@ export class TextLayer {
   private cameraBase: Camera | null = null;
   private previewCamera: Camera | null = null;
   private cameraTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingCameraRender = false;
 
   /** A fresh edit/document update must use the current camera, never a stale preview. */
   readonly finishCameraMotion = (): void => {
@@ -1698,6 +1706,10 @@ export class TextLayer {
     this.positionBar(); // follows the editor OR the selection-mode box as the camera moves
     this.updateResizeChrome();
     this.renderedCamera = { ...this.opts.camera() };
+    if (this.pendingCameraRender) {
+      this.pendingCameraRender = false;
+      this.render();
+    }
     if (wasMoving) this.opts.onCameraSettled?.();
     return false;
   }

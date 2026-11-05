@@ -1,5 +1,14 @@
 # Diagnóstico del zoom de la pizarra
 
+Los cambios del documento recibidos durante la transformación de cámara se
+acumulan hasta que termina el gesto. La invalidación de datos sigue siendo
+inmediata y el render final lee la versión más reciente. Iniciar una interacción
+con un objeto fuerza la reconciliación antes del hit-test. Esto evita que cada
+edición o carga entrante interrumpa el zoom con un recorrido completo del tablero.
+La regresión se cubre en `e2e/camera-direct.spec.ts` con cambios de texto durante
+doce cuadros de zoom, comprobando ausencia de reconciliaciones durante el gesto
+y aparición de la última revisión al terminar.
+
 Gestos de navegación: **rueda sola desplaza verticalmente** y **Ctrl + rueda hace
 zoom alrededor del puntero**. Los deltas de rueda se normalizan en píxeles, líneas
 y páginas; el desplazamiento mantiene la misma distancia en pantalla a cualquier
