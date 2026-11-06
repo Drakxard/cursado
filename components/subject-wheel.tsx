@@ -55,6 +55,7 @@ import {
   getLocalCronograma,
   getLatestLocalSubjectContentDate,
   isWorkspaceFileId,
+  listLocalSubjectDayMaterials,
   listLocalSubjectWeekNumbersWithContent,
   listLocalWeekNumbersWithContent,
   readLocalWorkspaceTabsState,
@@ -3026,6 +3027,7 @@ export function SubjectWheel({
               scope: "pinned",
             }).toString()}`]
 
+      const readyMaterialGroups: SubjectDayMaterial[][] = []
       const [entriesResult, ...materialResults] = await Promise.all([
         withTimeout(fetch(`/api/subject-day-entries?${entriesParams.toString()}`), LOCAL_REQUEST_TIMEOUT_MS, "La lectura de dudas tardo demasiado. Podes reintentar.")
           .then(async (response) => {
@@ -3040,8 +3042,15 @@ export function SubjectWheel({
             ok: false,
             payload: null,
             error: error instanceof Error ? error.message : "No se pudieron cargar las dudas del dia.",
-          })),
-        ...materialRequestUrls.map((url) =>
+          }))
+          .then(result => {
+            if (requestId === subjectDayDataRequestIdRef.current) {
+              if (result.ok) setEntries(sortSubjectDayEntries(Array.isArray(result.payload) ? result.payload : []))
+              setIsEntriesLoading(false)
+            }
+            return result
+          }),
+        ...materialRequestUrls.map((url, index) =>
           withTimeout(fetch(url), LOCAL_REQUEST_TIMEOUT_MS, "La lectura de materiales tardo demasiado. Podes reintentar.")
             .then(async (response) => {
               const payload = await parseJsonResponse(response)
@@ -3056,6 +3065,18 @@ export function SubjectWheel({
               payload: null,
               error: error instanceof Error ? error.message : "No se pudieron cargar los materiales del dia.",
             }))
+            .then(result => {
+              if (requestId !== subjectDayDataRequestIdRef.current) return result
+              if (result.ok) {
+                readyMaterialGroups[index] = Array.isArray(result.payload) ? result.payload as SubjectDayMaterial[] : []
+                setMaterials(mergeSubjectDayMaterials(...readyMaterialGroups.filter(Boolean)))
+                if (index === 0) {
+                  setIsMaterialsLoading(false)
+                  setHasResolvedSubjectDayData(true)
+                }
+              }
+              return result
+            })
         ),
       ])
 
@@ -3096,11 +3117,29 @@ export function SubjectWheel({
       setIsEntriesLoading(false)
       setIsMaterialsLoading(false)
     }
-  }, [currentSubject, dialogSelectedWeekNumber, isDialogOpen, isWeeklyExercisesScope, practiceSectionView, subjectDialogDateKey])
+  }, [currentSubject, dialogSelectedWeekNumber, isDialogOpen, isWeeklyExercisesScope, subjectDialogDateKey])
 
   useEffect(() => {
     void loadSubjectDayData()
   }, [loadSubjectDayData])
+
+  useEffect(() => {
+    if (!LOCAL_STORAGE_MODE || !isDialogOpen || !currentSubject || isMaterialsLoading || !hasResolvedSubjectDayData) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const weeks = await listLocalSubjectWeekNumbersWithContent(currentSubject.id)
+        if (cancelled) return
+        const adjacent = [
+          weeks.filter(week => week < dialogSelectedWeekNumber).sort((a, b) => b - a)[0],
+          weeks.filter(week => week > dialogSelectedWeekNumber).sort((a, b) => a - b)[0],
+        ].filter((week): week is number => week !== undefined)
+        await Promise.allSettled(adjacent.map(weekNumber => listLocalSubjectDayMaterials({ subjectId: currentSubject.id, weekNumber })))
+      })().catch(() => { /* Opening a week reports its own actionable read errors. */ })
+    }, 250)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [currentSubject, dialogSelectedWeekNumber, hasResolvedSubjectDayData, isDialogOpen, isMaterialsLoading])
+
   useEffect(() => {
     const refresh = (event: Event) => {
       if (!currentSubject || (event as CustomEvent<SphereBinding>).detail?.subjectId !== currentSubject.id) return

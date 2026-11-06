@@ -4,6 +4,7 @@ import { isNativeReadOnly, nativeFileUrl, readOnlyError } from './native-workspa
 import { COOPERATIVE_TAB_ID } from './cooperation-model.ts'
 import { readWorkspaceJson, writeWorkspaceJson } from './workspace-json.ts'
 import { withWorkspaceFileLock } from './workspace-file-lock.ts'
+import { WorkspaceReadCache } from './workspace-read-cache.ts'
 
 import type {
   CronogramaRecord,
@@ -833,16 +834,50 @@ async function getFileHandleBySegments(
   return directoryHandle.getFileHandle(fileName, { create })
 }
 
-async function readJsonFile<T>(pathSegments: string[], fallback: T): Promise<T> {
+async function readJsonFile<T>(pathSegments: string[], fallback: T, viewOnly = false): Promise<T> {
   const rootHandle = await ensureWorkspaceRootHandle()
 
-  return readWorkspaceJson(rootHandle, pathSegments.join("/"), fallback, isNativeReadOnly())
+  return readWorkspaceJson(rootHandle, pathSegments.join("/"), fallback, viewOnly || isNativeReadOnly())
+}
+
+const workspaceViews = new WorkspaceReadCache()
+let observingWorkspaceViews = false
+
+async function localSubjectViewIdentity(subjectId: string) {
+  return cachedWorkspaceView(`identity:${subjectId}`, async () => {
+    // A display read must not verify/write recovery copies of the catalog.
+    const raw = await readJsonFile<LegacyLocalSubjectCatalog | null>(SUBJECT_CATALOG_MANIFEST, null, true)
+    const catalog = raw ? normalizeLocalSubjectCatalog(raw) : createEmptyLocalSubjectCatalog()
+    const storageKey = findCatalogSubjectByAnyId(catalog, subjectId)?.storageKey ?? subjectId
+    return { storageKey, sourceIds: [storageKey] }
+  })
+}
+
+async function cachedWorkspaceView<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const root = await ensureWorkspaceRootHandle()
+  if (!observingWorkspaceViews && typeof window !== "undefined") {
+    observingWorkspaceViews = true
+    const clear = () => workspaceViews.clear()
+    window.addEventListener("cursado-workspace-saved", clear)
+    window.addEventListener("cursado-cooperation-applied", clear)
+    window.addEventListener("focus", clear)
+    window.addEventListener("storage", event => {
+      if (event.key === "subject-day-materials:refresh") clear()
+    })
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) clear() })
+    if (typeof BroadcastChannel !== "undefined") {
+      const channel = new BroadcastChannel("subject-day-materials")
+      channel.addEventListener("message", clear)
+    }
+  }
+  return workspaceViews.read(root, key, load)
 }
 
 const jsonWriteQueues = new Map<string, Promise<unknown>>()
 
 async function writeJsonFile(pathSegments: string[], value: unknown) {
   if (isNativeReadOnly()) readOnlyError()
+  workspaceViews.clear()
   const queueKey = pathSegments.join("/")
   const previous = jsonWriteQueues.get(queueKey) ?? Promise.resolve()
   const write = previous.catch(() => undefined).then(async () => {
@@ -854,12 +889,14 @@ async function writeJsonFile(pathSegments: string[], value: unknown) {
   try {
     await write
   } finally {
+    workspaceViews.clear()
     if (jsonWriteQueues.get(queueKey) === write) jsonWriteQueues.delete(queueKey)
   }
 }
 
 async function deleteJsonFile(pathSegments: string[]) {
   if (pathSegments.length === 0) return
+  workspaceViews.clear()
 
   const rootHandle = await ensureWorkspaceRootHandle()
   const directorySegments = pathSegments.slice(0, -1)
@@ -867,6 +904,7 @@ async function deleteJsonFile(pathSegments: string[]) {
   const directoryHandle = await getDirectoryHandleBySegments(rootHandle, directorySegments, false).catch(() => null)
   if (!directoryHandle) return
   await directoryHandle.removeEntry(fileName).catch(() => {})
+  workspaceViews.clear()
 }
 
 async function jsonFileExists(pathSegments: string[]) {
@@ -876,6 +914,7 @@ async function jsonFileExists(pathSegments: string[]) {
 }
 
 async function persistWorkspaceBlob(workspaceId: string, blob: Blob) {
+  workspaceViews.clear()
   const rootHandle = await ensureWorkspaceRootHandle()
   const fileHandle = await getFileHandleBySegments(rootHandle, workspaceIdToSegments(workspaceId), true)
   const writable = await fileHandle.createWritable()
@@ -885,11 +924,13 @@ async function persistWorkspaceBlob(workspaceId: string, blob: Blob) {
 }
 
 async function deleteWorkspaceBlob(workspaceId: string) {
+  workspaceViews.clear()
   const rootHandle = await ensureWorkspaceRootHandle()
   const segments = workspaceIdToSegments(workspaceId)
   const fileName = segments[segments.length - 1]
   const directoryHandle = await getDirectoryHandleBySegments(rootHandle, segments.slice(0, -1), false)
   await directoryHandle.removeEntry(fileName).catch(() => {})
+  workspaceViews.clear()
 }
 
 export async function getWorkspaceFile(workspaceId: string) {
@@ -1083,12 +1124,6 @@ function normalizeLocalWorkspaceTabsState(input: Partial<LocalWorkspaceTabsState
     subjectWeekdays,
     isMainWorkspaceTabVisible,
   }
-}
-
-async function workspaceFileExists(workspaceId: string) {
-  if (!isWorkspaceFileId(workspaceId)) return false
-  const rootHandle = await ensureWorkspaceRootHandle()
-  return Boolean(await getFileHandleBySegments(rootHandle, workspaceIdToSegments(workspaceId), false).catch(() => null))
 }
 
 async function removeDirectoryBySegments(pathSegments: string[]) {
@@ -2215,8 +2250,8 @@ async function writeCronogramaManifest(value: Exclude<CronogramaManifest, null>)
   await writeJsonFile([MANIFESTS_DIR, "cronograma.json"], value)
 }
 
-async function readMaterialManifest(subjectId: string, weekNumber: number): Promise<MaterialManifest> {
-  const payload = await readJsonFile<MaterialManifest | null>(materialManifestPath(subjectId, weekNumber), null)
+async function readMaterialManifest(subjectId: string, weekNumber: number, viewOnly = false): Promise<MaterialManifest> {
+  const payload = await readJsonFile<MaterialManifest | null>(materialManifestPath(subjectId, weekNumber), null, viewOnly)
   return payload ?? {
     version: 1,
     subjectId,
@@ -2240,8 +2275,8 @@ async function writeMaterialManifest(subjectId: string, weekNumber: number, mate
   } satisfies MaterialManifest)
 }
 
-async function readTagManifest(): Promise<TagManifest> {
-  const payload = await readJsonFile<TagManifest | null>(TAGS_MANIFEST, null)
+async function readTagManifest(viewOnly = false): Promise<TagManifest> {
+  const payload = await readJsonFile<TagManifest | null>(TAGS_MANIFEST, null, viewOnly)
   if (!payload) return { version: 2, tags: [], assignments: {}, regions: {} }
 
   const assignments: Record<string, number[]> = {}
@@ -2496,8 +2531,8 @@ export async function unassignLocalTagFromMaterial(materialId: number, tagId: nu
   return listLocalTagsForMaterial(materialId)
 }
 
-async function readMaterialContainersManifest() {
-  return readJsonFile<Record<string, SubjectMaterialContainer[]>>(MATERIAL_CONTAINERS_MANIFEST, {})
+async function readMaterialContainersManifest(viewOnly = false) {
+  return readJsonFile<Record<string, SubjectMaterialContainer[]>>(MATERIAL_CONTAINERS_MANIFEST, {}, viewOnly)
 }
 
 async function writeMaterialContainersManifest(value: Record<string, SubjectMaterialContainer[]>) {
@@ -2561,10 +2596,14 @@ async function ensureLocalDefaultContainersForSubjects(subjects: LocalSubjectCat
   })
 }
 
-export async function listLocalSubjectMaterialContainers(subjectId: string) {
-  const manifest = await readMaterialContainersManifest()
-  const storageKey = await resolveLocalSubjectStorageKey(subjectId)
-  const sourceIds = await resolveLocalSubjectSourceIds(subjectId)
+export async function listLocalSubjectMaterialContainers(subjectId: string, includeCounts = true): Promise<SubjectMaterialContainer[]> {
+  return cachedWorkspaceView(`containers:${subjectId}:${includeCounts}`, () => readLocalSubjectMaterialContainers(subjectId, includeCounts))
+}
+
+async function readLocalSubjectMaterialContainers(subjectId: string, includeCounts: boolean) {
+  const [manifest, { storageKey, sourceIds }] = await Promise.all([
+    readMaterialContainersManifest(true), localSubjectViewIdentity(subjectId),
+  ])
   let containers = manifest[storageKey]
   if (!Array.isArray(containers) || !containers.some((container) => container.kind === "theory") || !containers.some((container) => container.kind === "practice")) {
     const existing = Array.isArray(containers) ? containers.filter((container) => container.kind === "custom") : []
@@ -2578,16 +2617,17 @@ export async function listLocalSubjectMaterialContainers(subjectId: string) {
     ...aliasCustomContainers.filter((container) => !containers.some((current) => current.id === container.id)),
   ]
   const counts = new Map<number, number>()
-  for (const sourceId of sourceIds) {
-    for (const weekNumber of await listWeekNumbersForManifestKind(MATERIALS_DIR, sourceId)) {
-      const materials = (await readMaterialManifest(sourceId, weekNumber)).materials
-      for (const material of materials) {
-        const container = material.container_id == null
-          ? containers.find((candidate) => candidate.kind === material.material_type)
-          : containers.find((candidate) => candidate.id === material.container_id) ??
-            containers.find((candidate) => candidate.kind === material.material_type)
-        if (container) counts.set(container.id, (counts.get(container.id) ?? 0) + 1)
-      }
+  const countedManifests = includeCounts ? (await Promise.all(sourceIds.map(async sourceId => {
+    const weeks = await listWeekNumbersForManifestKind(MATERIALS_DIR, sourceId)
+    return Promise.all(weeks.map(week => readMaterialManifest(sourceId, week, true)))
+  }))).flat() : []
+  for (const manifest of countedManifests) {
+    for (const material of manifest.materials) {
+      const container = material.container_id == null
+        ? containers.find((candidate) => candidate.kind === material.material_type)
+        : containers.find((candidate) => candidate.id === material.container_id) ??
+          containers.find((candidate) => candidate.kind === material.material_type)
+      if (container) counts.set(container.id, (counts.get(container.id) ?? 0) + 1)
     }
   }
   return containers
@@ -2790,8 +2830,8 @@ export async function replaceLocalMaterialTagRegions(
   return normalized
 }
 
-async function readEntryManifest(subjectId: string, weekNumber: number): Promise<EntryManifest> {
-  const payload = await readJsonFile<EntryManifest | null>(entryManifestPath(subjectId, weekNumber), null)
+async function readEntryManifest(subjectId: string, weekNumber: number, viewOnly = false): Promise<EntryManifest> {
+  const payload = await readJsonFile<EntryManifest | null>(entryManifestPath(subjectId, weekNumber), null, viewOnly)
   return payload ?? {
     version: 1,
     subjectId,
@@ -3337,53 +3377,36 @@ export async function completeLocalMaterialUpload(input: {
   })
 }
 
-const LOCAL_WEEK_MATERIAL_CACHE_MS = 1_500
-const localWeekMaterialReads = new Map<string, { promise: Promise<SubjectDayMaterial[]>; expiresAt: number }>()
-
 async function readLocalSubjectWeekMaterials(subjectId: string, weekNumber: number) {
-  const cacheKey = `${subjectId}:${weekNumber}`
-  const existing = localWeekMaterialReads.get(cacheKey)
-  if (existing && existing.expiresAt > Date.now()) return existing.promise
-  const pending = (async () => {
-    const sourceIds = await resolveLocalSubjectSourceIds(subjectId)
+  return cachedWorkspaceView(`materials:${subjectId}:${weekNumber}`, async () => {
+    const { sourceIds } = await localSubjectViewIdentity(subjectId)
     const [manifests, containers, tagManifest] = await Promise.all([
-      Promise.all(sourceIds.map((sourceId) => readMaterialManifest(sourceId, weekNumber))),
-      listLocalSubjectMaterialContainers(subjectId),
-      readTagManifest(),
+      Promise.all(sourceIds.map((sourceId) => readMaterialManifest(sourceId, weekNumber, true))),
+      listLocalSubjectMaterialContainers(subjectId, false),
+      readTagManifest(true),
     ])
-    const tagsWithCounts = withLocalTagUsageCounts(tagManifest)
-    const byId = new Map<number, SubjectDayMaterial>()
-    const materialsWithStatus = await Promise.all(manifests.flatMap((manifest) => manifest.materials).map(async (material) => ({
-      material,
-      exists: await workspaceFileExists(material.drive_file_id),
-    })))
-    for (const { material, exists } of materialsWithStatus) {
-      const assigned = new Set(tagManifest.assignments[String(material.id)] ?? [])
-      const resolvedContainerId = material.container_id != null &&
-        containers.some((container) => container.id === material.container_id)
-        ? material.container_id
-        : containers.find((container) => container.kind === material.material_type)?.id ?? null
-      byId.set(material.id, {
-        ...material,
-        local_file_status: exists ? material.local_file_status ?? "available" : "missing",
-        container_id: resolvedContainerId,
-        tags: tagsWithCounts.filter((tag) => assigned.has(tag.id)),
-      })
-    }
-    return sortMaterials(Array.from(byId.values()))
-  })()
-  const cacheEntry = { promise: pending, expiresAt: Date.now() + LOCAL_WEEK_MATERIAL_CACHE_MS }
-  localWeekMaterialReads.set(cacheKey, cacheEntry)
-  try {
-    const result = await pending
-    window.setTimeout(() => {
-      if (localWeekMaterialReads.get(cacheKey) === cacheEntry) localWeekMaterialReads.delete(cacheKey)
-    }, LOCAL_WEEK_MATERIAL_CACHE_MS)
-    return result
-  } catch (error) {
-    if (localWeekMaterialReads.get(cacheKey) === cacheEntry) localWeekMaterialReads.delete(cacheKey)
-    throw error
+    return decorateLocalSubjectMaterials(manifests.flatMap(manifest => manifest.materials), containers, tagManifest)
+  })
+}
+
+function decorateLocalSubjectMaterials(materials: SubjectDayMaterial[], containers: SubjectMaterialContainer[], tagManifest: TagManifest) {
+  const tagsWithCounts = withLocalTagUsageCounts(tagManifest)
+  const byId = new Map<number, SubjectDayMaterial>()
+  // The manifest already contains the display metadata. Read the actual PDF
+  // only when opening it; listing must not stat every file on disk.
+  for (const material of materials) {
+    const assigned = new Set(tagManifest.assignments[String(material.id)] ?? [])
+    const resolvedContainerId = material.container_id != null &&
+      containers.some((container) => container.id === material.container_id)
+      ? material.container_id
+      : containers.find((container) => container.kind === material.material_type)?.id ?? null
+    byId.set(material.id, {
+      ...material,
+      container_id: resolvedContainerId,
+      tags: tagsWithCounts.filter((tag) => assigned.has(tag.id)),
+    })
   }
+  return sortMaterials(Array.from(byId.values()))
 }
 
 export async function listLocalSubjectDayMaterials(scope: {
@@ -3409,18 +3432,27 @@ export async function listLocalSubjectDayMaterials(scope: {
   return materials
 }
 
-export async function listLocalPinnedSubjectMaterials(subjectId: string) {
-  const pinnedIds = new Set(
-    (await listLocalSubjectMaterialContainers(subjectId))
-      .filter((container) => container.kind === "custom" && container.isPinned)
-      .map((container) => container.id)
-  )
+export async function listLocalPinnedSubjectMaterials(subjectId: string): Promise<SubjectDayMaterial[]> {
+  return cachedWorkspaceView(`pinned:${subjectId}`, () => readLocalPinnedSubjectMaterials(subjectId))
+}
+
+async function readLocalPinnedSubjectMaterials(subjectId: string) {
+  const containers = await listLocalSubjectMaterialContainers(subjectId, false)
+  const pinnedIds = new Set(containers
+    .filter(container => container.kind === "custom" && container.isPinned)
+    .map(container => container.id))
   if (pinnedIds.size === 0) return []
-  const weekNumbers = await listLocalSubjectWeekNumbersWithContent(subjectId)
-  const groups = await Promise.all(
-    weekNumbers.map((weekNumber) => listLocalSubjectDayMaterials({ subjectId, weekNumber }))
-  )
-  return sortMaterials(groups.flat().filter((material) => material.container_id != null && pinnedIds.has(material.container_id)))
+  const { sourceIds } = await localSubjectViewIdentity(subjectId)
+  const [groups, tags] = await Promise.all([
+    Promise.all(sourceIds.map(async sourceId => {
+      const weeks = await listWeekNumbersForManifestKind(MATERIALS_DIR, sourceId)
+      return Promise.all(weeks.map(week => readMaterialManifest(sourceId, week, true)))
+    })),
+    readTagManifest(true),
+  ])
+  const materials = groups.flat().flatMap(manifest => manifest.materials)
+    .filter(material => material.container_id != null && pinnedIds.has(material.container_id))
+  return decorateLocalSubjectMaterials(materials, containers, tags)
 }
 
 export async function updateLocalMaterial(
@@ -3648,15 +3680,25 @@ export async function listLocalSubjectDayEntries(scope: {
   weekNumber?: number
   sessionDate?: string
   materialId?: number | null
+}): Promise<SubjectDayEntry[]> {
+  return cachedWorkspaceView(`entries:${JSON.stringify([scope.subjectId, scope.weekNumber, scope.sessionDate, scope.materialId])}`,
+    () => readLocalSubjectDayEntries(scope))
+}
+
+async function readLocalSubjectDayEntries(scope: {
+  subjectId: string
+  weekNumber?: number
+  sessionDate?: string
+  materialId?: number | null
 }) {
-  const sourceIds = await resolveLocalSubjectSourceIds(scope.subjectId)
+  const { sourceIds } = await localSubjectViewIdentity(scope.subjectId)
   const entries: SubjectDayEntry[] = []
   for (const sourceId of sourceIds) {
     const weekNumbers = typeof scope.weekNumber === "number"
       ? [scope.weekNumber]
       : await listWeekNumbersForManifestKind(ENTRIES_DIR, sourceId)
     for (const weekNumber of weekNumbers) {
-      const manifest = await readEntryManifest(sourceId, weekNumber)
+      const manifest = await readEntryManifest(sourceId, weekNumber, true)
       entries.push(
         ...manifest.entries.filter((entry) => {
           if (scope.sessionDate && entry.session_date !== scope.sessionDate) return false
