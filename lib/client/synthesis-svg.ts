@@ -24,17 +24,17 @@ function checkCancelled(signal?: AbortSignal) {
 // browser task so React, painting, input and cancellation can run between batches.
 async function yieldToBrowser(signal?: AbortSignal) {
   checkCancelled(signal)
-  await new Promise<void>((resolve) => window.setTimeout(resolve, 16))
+  await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
   checkCancelled(signal)
 }
 
 function copyStyle(source: CSSStyleDeclaration, target: CSSStyleDeclaration) {
+  const declarations: string[] = []
   for (const property of Array.from(source)) {
-    if (!property.startsWith("--")) target.setProperty(property, source.getPropertyValue(property))
+    if (!property.startsWith("--")) declarations.push(`${property}:${source.getPropertyValue(property)};`)
   }
-  target.setProperty("animation", "none")
-  target.setProperty("transition", "none")
-  target.setProperty("caret-color", "transparent")
+  // Parse one declaration instead of mutating hundreds of CSS properties.
+  target.cssText = `${declarations.join("")}animation:none;transition:none;caret-color:transparent;`
 }
 
 async function imageDataUrl(src: string): Promise<string> {
@@ -52,7 +52,7 @@ async function imageDataUrl(src: string): Promise<string> {
 
 // Shared tiled browser render. Consumers encode its pixels as PNG or legacy SVG.
 export async function renderSynthesisEditorTiles(source: HTMLElement, options: ExportOptions,
-  writeTile: (canvas: HTMLCanvasElement, region: { y: number; width: number; height: number; totalHeight: number }) => void): Promise<void> {
+  writeTile: (canvas: HTMLCanvasElement, region: { y: number; width: number; height: number; totalHeight: number }) => void | Promise<void>): Promise<void> {
   const { signal, onProgress } = options
   const background = options.background ?? "#fffdf8"
   const progress = (percent: number, label: string) => onProgress?.({ percent, label })
@@ -83,10 +83,17 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
   const sourceTop = source.getBoundingClientRect().top
   const fonts = document.createElementNS(SVG_NS, "svg")
   const usedFamilies = new Set<string>()
+  const measurements = new Map<Element, { bounds: DOMRect; display: string; inTable: boolean }>()
+  const computedStyles = new Map<Element, CSSStyleDeclaration>()
+  const styledNodes = new Map<Element, string>()
+  const pseudoStyles = new Map<Element, Array<{ pseudo: string; css: string }>>()
   let batchStarted = performance.now()
   for (const node of [source, ...Array.from(source.querySelectorAll("*"))]) {
     checkCancelled(signal)
-    usedFamilies.add(getComputedStyle(node).fontFamily)
+    const computed = getComputedStyle(node)
+    computedStyles.set(node, computed)
+    measurements.set(node, { bounds: node.getBoundingClientRect(), display: computed.display, inTable: !!node.closest("table") })
+    usedFamilies.add(computed.fontFamily)
     if (performance.now() - batchStarted >= 12) {
       await yieldToBrowser(signal)
       batchStarted = performance.now()
@@ -122,11 +129,10 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
           }
           if (!(child instanceof Element)) { copy.append(child.cloneNode()); continue }
           if (child.closest(EDITOR_CONTROLS)) continue
-          const bounds = child.getBoundingClientRect()
-          const display = getComputedStyle(child).display
+          const { bounds, display, inTable } = measurements.get(child)!
           // Tables and inline math retain their internal layout. Pruning occurs at
           // normal flow block boundaries with a margin for overflowing glyphs.
-          const outside = bounds.height > 0 && !child.closest("table") &&
+          const outside = bounds.height > 0 && !inTable &&
             /^(block|list-item|flex|grid|flow-root)$/.test(display) &&
             (bounds.bottom < sourceTop + y - 64 || bounds.top > sourceTop + y + tileHeight + 64)
           const childCopy = child.cloneNode(false) as Element
@@ -139,6 +145,19 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
       }
       await cloneChildren(source, clone)
       const pseudoRules: string[] = []
+      const sharedStyles = new Map<string, string>()
+
+      function shareStyle(copy: HTMLElement) {
+        if (!copy.style?.length) return
+        const css = copy.style.cssText
+        let name = sharedStyles.get(css)
+        if (!name) {
+          name = `export-style-${sharedStyles.size}`
+          sharedStyles.set(css, name)
+        }
+        copy.removeAttribute("style")
+        copy.setAttribute("class", name)
+      }
 
       for (let index = 0; index < originals.length; index++) {
         checkCancelled(signal)
@@ -152,14 +171,21 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
           copy.remove()
           continue
         }
-        const computed = getComputedStyle(original)
+        const computed = computedStyles.get(original)!
         const placeholder = placeholders.get(original)
         if (copy.style) {
           if (placeholder) {
             copy.removeAttribute("style")
             for (const property of LAYOUT_PROPERTIES) copy.style.setProperty(property, computed.getPropertyValue(property))
             Object.assign(copy.style, { boxSizing: "border-box", width: `${placeholder.width}px`, height: `${placeholder.height}px`, minHeight: "0", maxHeight: "none", visibility: "hidden" })
-          } else copyStyle(computed, copy.style)
+          } else {
+            let css = styledNodes.get(original)
+            if (css === undefined) {
+              copyStyle(computed, copy.style)
+              css = copy.style.cssText
+              styledNodes.set(original, css)
+            } else copy.style.cssText = css
+          }
           copy.style.outline = "none"
           if (original.classList.contains("selection") || original.classList.contains("ProseMirror-selectednode") || original.matches(".synthesis-local-image.is-selected img")) {
             copy.style.backgroundColor = "transparent"
@@ -173,15 +199,20 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
         }
         copy.removeAttribute("class")
         copy.setAttribute("data-svg-node", String(index))
-        if (placeholder) continue
-        for (const pseudo of ["::before", "::after"]) {
-          if (original.classList.contains("selectedCell")) continue
-          const style = getComputedStyle(original, pseudo)
-          if (style.content === "none" || style.content === "normal") continue
-          const declaration = document.createElement("span").style
-          copyStyle(style, declaration)
-          pseudoRules.push(`[data-svg-node="${index}"]${pseudo}{${declaration.cssText}}`)
+        if (placeholder) { shareStyle(copy); continue }
+        let pseudos = pseudoStyles.get(original)
+        if (!pseudos) {
+          pseudos = []
+          if (!original.classList.contains("selectedCell")) for (const pseudo of ["::before", "::after"]) {
+            const style = getComputedStyle(original, pseudo)
+            if (style.content === "none" || style.content === "normal") continue
+            const declaration = document.createElement("span").style
+            copyStyle(style, declaration)
+            pseudos.push({ pseudo, css: declaration.cssText })
+          }
+          pseudoStyles.set(original, pseudos)
         }
+        for (const { pseudo, css } of pseudos) pseudoRules.push(`[data-svg-node="${index}"]${pseudo}{${css}}`)
         if (original.matches('li[data-checked="true"] > label > span')) {
           // Replace the editor's external CSS mask with a native checkmark.
           const check = document.createElementNS(SVG_NS, "svg")
@@ -206,6 +237,7 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
           copy.removeAttribute("loading")
         }
         if (original.classList.contains("tableWrapper")) copy.style.overflow = "visible"
+        shareStyle(copy)
       }
 
       Object.assign(clone.style, {
@@ -213,9 +245,9 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
         height: `${height}px`, maxHeight: "none", margin: "0", position: "relative",
         top: "auto", left: "auto", transform: `translateY(${-y}px)`, overflow: "visible", backgroundColor: background,
       })
-      if (pseudoRules.length) {
+      if (sharedStyles.size || pseudoRules.length) {
         const style = document.createElement("style")
-        style.textContent = pseudoRules.join("\n")
+        style.textContent = [...Array.from(sharedStyles, ([css, name]) => `.${name}{${css}}`), ...pseudoRules].join("\n")
         clone.prepend(style)
       }
 
@@ -257,7 +289,7 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
         context.fillStyle = background
         context.fillRect(0, 0, canvas.width, canvas.height)
         context.drawImage(image, 0, 0, canvas.width, canvas.height)
-        writeTile(canvas, { y, width, height: tileHeight, totalHeight: height })
+        await writeTile(canvas, { y, width, height: tileHeight, totalHeight: height })
       } finally {
         // Release each decoded SVG document and raster surface before the next
         // strip; otherwise Chrome can retain all intermediate document images.

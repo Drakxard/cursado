@@ -4,6 +4,7 @@ import { build } from "esbuild"
 import { chromium } from "@playwright/test"
 import { readFile } from "node:fs/promises"
 import katex from "katex"
+import { inflateSync } from "node:zlib"
 
 async function setup() {
   const bundle = await build({ entryPoints: ["lib/client/synthesis-image.ts"], bundle: true, write: false, platform: "browser", format: "iife", globalName: "synthesisImage" })
@@ -79,9 +80,63 @@ test("without selection exports the complete image; cancellation removes tempora
       try {
         await synthesisImage.buildSynthesisEditorImage(source, { selection: range, signal: controller.signal, onProgress: () => controller.abort() })
       } catch (error) { cancelled = error.name }
-      return { type: blob.type, height, expectedHeight: source.offsetHeight * 2, cancelled, unchanged: source.outerHTML === original, copies: document.querySelectorAll(".tiptap").length }
+      const streamingController = new AbortController()
+      let cancelledStream
+      try {
+        await synthesisImage.buildSynthesisEditorImage(source, {
+          selection: null, signal: streamingController.signal,
+          onProgress: ({ percent }) => { if (percent > 20 && percent < 95) streamingController.abort() },
+        })
+      } catch (error) { cancelledStream = error.name }
+      return { type: blob.type, height, expectedHeight: source.offsetHeight * 2, cancelled, cancelledStream, unchanged: source.outerHTML === original, copies: document.querySelectorAll(".tiptap").length }
     })
     assert.equal(result.type, "image/png"); assert.equal(result.height, result.expectedHeight)
     assert.equal(result.cancelled, "AbortError"); assert.equal(result.unchanged, true); assert.equal(result.copies, 1)
+    assert.equal(result.cancelledStream, "AbortError", "cancellation closes a partially encoded PNG stream")
+  } finally { await browser.close() }
+})
+
+test("long PNG keeps fixed resolution across strips without a full-document canvas", async () => {
+  const { browser, page } = await setup()
+  try {
+    await page.setContent(`<style>body{margin:0}.tiptap{width:240px}p{margin:0;height:1000px;font:18px Arial}</style>
+      <div class="tiptap">${"<p>Texto legible al comienzo de cada franja</p>".repeat(34)}<div style="height:30px;background:blue"></div></div>`)
+    const result = await page.evaluate(async () => {
+      const source = document.querySelector(".tiptap"), before = source.outerHTML
+      let maxPixels = 0, maxHeight = 0
+      const getContext = HTMLCanvasElement.prototype.getContext
+      HTMLCanvasElement.prototype.getContext = function (...args) {
+        maxPixels = Math.max(maxPixels, this.width * this.height)
+        maxHeight = Math.max(maxHeight, this.height)
+        return getContext.apply(this, args)
+      }
+      try {
+        const blob = await synthesisImage.buildSynthesisEditorImage(source, { selection: null })
+        return { bytes: Array.from(new Uint8Array(await blob.arrayBuffer())), maxPixels, maxHeight, unchanged: before === source.outerHTML }
+      } finally { HTMLCanvasElement.prototype.getContext = getContext }
+    })
+    const png = Buffer.from(result.bytes), compressed = []
+    assert.equal(png.readUInt32BE(16), 480)
+    assert.equal(png.readUInt32BE(20), 68060, "height must retain scale 2 even beyond the canvas dimension limit")
+    for (let offset = 8; offset < png.length;) {
+      const length = png.readUInt32BE(offset), type = png.toString("ascii", offset + 4, offset + 8)
+      if (type === "IDAT") compressed.push(png.subarray(offset + 8, offset + 8 + length))
+      offset += length + 12
+    }
+    const raw = inflateSync(Buffer.concat(compressed)), stride = 480 * 3 + 1
+    assert.equal(raw.length, stride * 68060)
+    const row = Buffer.alloc(480 * 3)
+    const inkRows = new Set()
+    for (let y = 0; y < 68060; y++) {
+      const offset = y * stride
+      assert.equal(raw[offset], 1)
+      for (let x = 0; x < row.length; x++) row[x] = (raw[offset + 1 + x] + (x >= 3 ? row[x - 3] : 0)) & 255
+      if (y % 2000 < 60 && row.some(value => value < 100)) inkRows.add(Math.floor(y / 2000))
+    }
+    assert.equal(inkRows.size, 35, "text and the bottom blue block survive all strips")
+    assert.deepEqual(Array.from(row.subarray(120, 123)), [0, 0, 255])
+    assert.ok(result.maxPixels <= 4 * 1024 * 1024)
+    assert.ok(result.maxHeight <= 4096)
+    assert.equal(result.unchanged, true)
   } finally { await browser.close() }
 })

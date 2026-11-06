@@ -11,12 +11,19 @@ el documento ni la selección originales, y se elimina al terminar o cancelar.
 También reconoce un nodo o imagen seleccionado y omite el resaltado temporal de
 selección del editor, conservando los resaltados propios del apunte.
 
-El PNG se genera directamente desde las franjas renderizadas, sin envolver JPEGs
-en un SVG descargable. Usa escala 2 para fragmentos normales y reduce la escala
-para documentos grandes: limita el lienzo final a 16 millones de píxeles y 16384
-píxeles por dimensión. Los archivos se llaman `sintesis-seleccion.png` o `sintesis.png`.
-Las dos regresiones de PNG están en `tests/synthesis-image.browser.mjs`, disponibles
+El PNG se genera directamente desde las franjas renderizadas, con **escala 2 fija**
+para selecciones y documentos completos, independientemente de su longitud.
+`lib/client/tiled-png.ts` une las filas en un único PNG mediante compresión por
+stream y bloques IDAT, sin crear un lienzo del tamaño del documento ni reducir
+el texto para ajustarlo a un límite global de píxeles. Cada franja mantiene su
+presupuesto de memoria y se libera después de comprimirla. El archivo puede superar
+las dimensiones que algunos visores de imágenes admiten; esos visores pueden
+necesitar otro programa para abrirlo a resolución completa.
+Los archivos se llaman `sintesis-seleccion.png` o `sintesis.png`.
+Las regresiones de PNG están en `tests/synthesis-image.browser.mjs`, disponibles
 mediante `npm run test:synthesis-image` sin requerir una compilación completa.
+Incluyen la lectura y descompresión de un PNG de 68060 px de alto para comprobar
+su resolución, el contenido entre franjas y el final, sin un lienzo gigante.
 
 ## Render compartido y compatibilidad
 
@@ -40,6 +47,9 @@ El documento completo se divide en franjas de hasta 2048 px de alto, sin huecos
 entre ellas, con un máximo de 4 millones de píxeles por lienzo a escala 2.
 Cada franja prepara solo los bloques cercanos a su área visible; los demás
 conservan su espacio y márgenes sin copiar sus fórmulas y contenido interno.
+Las medidas y estilos se reutilizan entre franjas. Los estilos idénticos se
+agrupan en reglas CSS compartidas para reducir el SVG intermedio que debe
+serializar y decodificar el navegador, especialmente en apuntes con fórmulas.
 El `foreignObject` mide lo mismo que la franja, y la imagen intermedia y el
 lienzo se liberan antes de preparar la siguiente. Esto reduce la memoria
 usada por documentos largos con muchas fórmulas. PDF.js conserva la

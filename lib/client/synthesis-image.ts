@@ -1,4 +1,6 @@
 import { renderSynthesisEditorTiles, type SynthesisSvgProgress } from "./synthesis-svg"
+import { createTiledPng } from "./tiled-png"
+import { SVG_RENDER_SCALE } from "../../public/pdfjs/web/raster-svg.mjs"
 
 export type SynthesisImageProgress = SynthesisSvgProgress
 type ExportOptions = {
@@ -34,7 +36,7 @@ async function selectedContent(source: HTMLElement, range: Range, signal?: Abort
     checkCancelled(signal)
     if (!whole && !range.intersectsNode(node)) return null
     if (performance.now() - batchStarted >= 12) {
-      await new Promise<void>(resolve => window.setTimeout(resolve, 16))
+      await new Promise<void>(resolve => window.setTimeout(resolve, 0))
       checkCancelled(signal)
       batchStarted = performance.now()
     }
@@ -94,32 +96,20 @@ export async function buildSynthesisEditorImage(source: HTMLElement, options: Ex
     if (color !== "transparent" && !/^rgba\([^)]*,\s*0\)$/.test(color)) { background = color; break }
   }
   const fragment = range ? await selectedContent(source, range, options.signal) : null
-  const output = document.createElement("canvas")
-  let scale = 1, initialized = false
+  let output: ReturnType<typeof createTiledPng> | undefined
   try {
-    await renderSynthesisEditorTiles(fragment?.source ?? source, { ...options, background }, (tile, region) => {
+    await renderSynthesisEditorTiles(fragment?.source ?? source, { ...options, background }, async (tile, region) => {
       checkCancelled(options.signal)
-      if (!initialized) {
-        // One PNG, with a bounded surface even for a very long complete document.
-        scale = Math.min(2, 16384 / region.width, 16384 / region.totalHeight, Math.sqrt(16 * 1024 * 1024 / (region.width * region.totalHeight)))
-        output.width = Math.max(1, Math.ceil(region.width * scale))
-        output.height = Math.max(1, Math.ceil(region.totalHeight * scale))
-        initialized = true
-      }
-      const context = output.getContext("2d", { alpha: false })
-      if (!context) throw new Error("El navegador no pudo crear la imagen de exportación.")
-      const top = Math.round(region.y * scale), bottom = region.y + region.height === region.totalHeight ? output.height : Math.round((region.y + region.height) * scale)
-      context.drawImage(tile, 0, top, output.width, bottom - top)
+      output ??= createTiledPng(tile.width, region.totalHeight * SVG_RENDER_SCALE, options.signal)
+      await output.write(tile)
     })
     checkCancelled(options.signal)
     options.onProgress?.({ percent: 99, label: "Preparando imagen PNG…" })
-    const blob = await new Promise<Blob>((resolve, reject) => output.toBlob(result => result ? resolve(result) : reject(new Error("No se pudo generar la imagen PNG.")), "image/png"))
-    checkCancelled(options.signal)
-    return blob
+    if (!output) throw new Error("No se pudo generar la imagen PNG.")
+    return await output.finish()
   } finally {
     fragment?.remove()
-    output.width = 1
-    output.height = 1
+    output?.dispose()
   }
 }
 
