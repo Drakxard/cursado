@@ -1,8 +1,11 @@
 # Exportación de imágenes de Síntesis
 
-El botón ↓ descarga una imagen **PNG**. Si hay una selección dentro del editor,
-exporta solamente ese fragmento; sin selección, exporta todo el apunte. El botón
-conserva la selección al pulsarlo y la captura antes de abrir el diálogo de progreso.
+El botón ↓ descarga un **SVG con imágenes PNG incrustadas por franjas**, para
+importarlo en herramientas de diseño. Si hay una selección dentro del editor,
+exporta solamente ese fragmento; sin selección, exporta todo el apunte. Los archivos
+se llaman `sintesis-seleccion.svg` o `sintesis.svg`. No contienen referencias externas,
+HTML ni `foreignObject`; el texto queda rasterizado, no editable como vector.
+El botón conserva la selección al pulsarlo y la captura antes de abrir el diálogo.
 
 `lib/client/synthesis-image.ts` conserva texto parcial, listas, tablas, imágenes y
 estilos. Las fórmulas KaTeX se copian completas aunque el extremo de la selección
@@ -11,24 +14,20 @@ el documento ni la selección originales, y se elimina al terminar o cancelar.
 También reconoce un nodo o imagen seleccionado y omite el resaltado temporal de
 selección del editor, conservando los resaltados propios del apunte.
 
-El PNG se genera directamente desde las franjas renderizadas, con **escala 2 fija**
-para selecciones y documentos completos, independientemente de su longitud.
-`lib/client/tiled-png.ts` une las filas en un único PNG mediante compresión por
-stream y bloques IDAT, sin crear un lienzo del tamaño del documento ni reducir
-el texto para ajustarlo a un límite global de píxeles. Cada franja mantiene su
-presupuesto de memoria y se libera después de comprimirla. El archivo puede superar
-las dimensiones que algunos visores de imágenes admiten; esos visores pueden
-necesitar otro programa para abrirlo a resolución completa.
-Los archivos se llaman `sintesis-seleccion.png` o `sintesis.png`.
-Las regresiones de PNG están en `tests/synthesis-image.browser.mjs`, disponibles
-mediante `npm run test:synthesis-image` sin requerir una compilación completa.
-Incluyen la lectura y descompresión de un PNG de 68060 px de alto para comprobar
-su resolución, el contenido entre franjas y el final, sin un lienzo gigante.
+Cada franja conserva **escala 2 fija**, sin reducir la resolución por la longitud
+del documento y sin crear una imagen gigante que el importador deba reducir.
+Los PNG incrustados usan compresión sin pérdida para conservar los bordes del texto.
+El constructor PNG anterior permanece disponible para integraciones existentes;
+`lib/client/tiled-png.ts` permite unir sus filas sin un lienzo de tamaño completo.
+
+Las regresiones de selección, descarga y PNG están en `tests/synthesis-image.browser.mjs`.
+`tests/synthesis-export-performance.browser.mjs` reproduce el apunte completo de
+traslación con 142 fórmulas usando el editor real y verifica las franjas del SVG.
 
 ## Render compartido y compatibilidad
 
 Se conserva el constructor SVG anterior para integraciones existentes y sus pruebas;
-el botón del editor utiliza exclusivamente la descarga PNG. Los detalles siguientes
+el botón del editor usa el constructor con selección y franjas PNG sin pérdida. Los detalles siguientes
 describen ese constructor de compatibilidad y el render por franjas compartido.
 
 `lib/client/synthesis-svg.ts` copia el contenido y los estilos calculados del
@@ -77,3 +76,17 @@ y el editor Tiptap real con sus separadores de cursor. Una prueba con fórmulas
 en múltiples franjas verifica que no se incluyan las fórmulas fuera del área
 visible, que todas las franjas respeten el límite de píxeles y que el texto
 renderizado sobreviva a lo largo del documento.
+
+## Fórmulas y trabajo en segundo plano
+
+Cuando la hoja KaTeX está disponible, se reutilizan sus reglas y se copia cada
+fórmula completa en lugar de calcular el estilo de cada glifo, fracción y nodo
+MathML. Si no se puede acceder a esa hoja, se conserva el camino general de estilos
+calculados. Una comparación de píxeles comprueba ambos caminos con fracciones,
+radicales y matrices.
+
+Las pausas usan `scheduler.yield()` o `MessageChannel`, sin temporizadores anidados
+ni `requestAnimationFrame`. Una prueba bloquea ambos tipos de espera y comprueba
+que la exportación termina con el camino MessageChannel. Esto evita la dependencia
+de temporizadores ralentizados en pestañas ocultas; cerrar la pestaña sigue
+cancelando el trabajo.

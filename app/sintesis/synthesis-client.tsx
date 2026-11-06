@@ -523,7 +523,7 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
     <SimpleEditor key={editorSession.key} content={editorSession.document} editable={!isNativeReadOnly()} onChange={updateEditorDocument} onError={setMessage}
       relatedPdfHref={relatedPdfId ? `/practice/viewer?materialId=${encodeURIComponent(relatedPdfId)}` : undefined}
       onPendingChange={autosave.markDirty} onFlushReady={onEditorFlushReady}
-      toolbarAction={<button type="button" className={styles.exportImageButton} onMouseDown={event => event.preventDefault()} onClick={() => { void downloadImage() }} disabled={exportingImage} aria-busy={exportingImage} aria-label={exportingImage ? "Exportando imagen PNG…" : "Exportar selección o página como PNG"} title={exportingImage ? "Exportando imagen PNG…" : "Exportar selección o página como PNG"}>{exportingImage ? <LoaderCircle className={styles.spinner} aria-hidden="true" /> : <Download aria-hidden="true" />}</button>}
+      toolbarAction={<button type="button" className={styles.exportImageButton} onMouseDown={event => event.preventDefault()} onClick={() => { void downloadImage() }} disabled={exportingImage} aria-busy={exportingImage} aria-label={exportingImage ? "Exportando SVG…" : "Exportar selección o página como SVG"} title={exportingImage ? "Exportando SVG…" : "Exportar selección o página como SVG"}>{exportingImage ? <LoaderCircle className={styles.spinner} aria-hidden="true" /> : <Download aria-hidden="true" />}</button>}
       fontSize={workspace.editorFontSize} onFontSizeChange={(editorFontSize) => {
         if (isNativeReadOnly()) return
         void acceptWorkspace({ ...workspaceRef.current, editorFontSize }).catch(() => setMessage(SAVE_ERROR_MESSAGE))

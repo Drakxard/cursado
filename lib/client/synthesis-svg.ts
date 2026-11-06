@@ -1,5 +1,7 @@
 import { buildRasterSvg, canvasSvgImage, SVG_RENDER_SCALE } from "../../public/pdfjs/web/raster-svg.mjs"
 import { embedSvgFonts } from "./svg-fonts"
+import { yieldExportTask } from "./export-task"
+import { katexExportCss } from "./export-katex"
 
 // ProseMirror adds src-less <img> caret separators after non-editable inline
 // nodes such as formulas. They are editor helpers, not document images.
@@ -24,7 +26,7 @@ function checkCancelled(signal?: AbortSignal) {
 // browser task so React, painting, input and cancellation can run between batches.
 async function yieldToBrowser(signal?: AbortSignal) {
   checkCancelled(signal)
-  await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+  await yieldExportTask(signal)
   checkCancelled(signal)
 }
 
@@ -83,12 +85,21 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
   const sourceTop = source.getBoundingClientRect().top
   const fonts = document.createElementNS(SVG_NS, "svg")
   const usedFamilies = new Set<string>()
+  const mathCss = katexExportCss()
+  const mathAtom = (node: Element) => Boolean(mathCss) && node.matches(".katex-display, .katex")
+  if (mathCss) for (const font of document.fonts) {
+    if (font.status === "loaded" && /katex/i.test(font.family)) usedFamilies.add(font.family)
+  }
   const measurements = new Map<Element, { bounds: DOMRect; display: string; inTable: boolean }>()
   const computedStyles = new Map<Element, CSSStyleDeclaration>()
   const styledNodes = new Map<Element, string>()
   const pseudoStyles = new Map<Element, Array<{ pseudo: string; css: string }>>()
   let batchStarted = performance.now()
-  for (const node of [source, ...Array.from(source.querySelectorAll("*"))]) {
+  const nodes: Element[] = [source]
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]
+    if (node.matches(EDITOR_CONTROLS)) continue
+    if (!mathAtom(node)) nodes.push(...Array.from(node.children))
     checkCancelled(signal)
     const computed = getComputedStyle(node)
     computedStyles.set(node, computed)
@@ -135,12 +146,13 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
           const outside = bounds.height > 0 && !inTable &&
             /^(block|list-item|flex|grid|flow-root)$/.test(display) &&
             (bounds.bottom < sourceTop + y - 64 || bounds.top > sourceTop + y + tileHeight + 64)
-          const childCopy = child.cloneNode(false) as Element
+          const atomic = !outside && mathAtom(child)
+          const childCopy = child.cloneNode(atomic) as Element
           copy.append(childCopy)
           originals.push(child)
           copies.push(childCopy)
           if (outside) placeholders.set(child, bounds)
-          else await cloneChildren(child, childCopy)
+          else if (!atomic) await cloneChildren(child, childCopy)
         }
       }
       await cloneChildren(source, clone)
@@ -156,7 +168,7 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
           sharedStyles.set(css, name)
         }
         copy.removeAttribute("style")
-        copy.setAttribute("class", name)
+        copy.setAttribute("class", [copy.getAttribute("class"), name].filter(Boolean).join(" "))
       }
 
       for (let index = 0; index < originals.length; index++) {
@@ -198,6 +210,7 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
           }
         }
         copy.removeAttribute("class")
+        if (mathAtom(original) || original === source) copy.setAttribute("class", original.getAttribute("class") ?? "")
         copy.setAttribute("data-svg-node", String(index))
         if (placeholder) { shareStyle(copy); continue }
         let pseudos = pseudoStyles.get(original)
@@ -247,7 +260,7 @@ export async function renderSynthesisEditorTiles(source: HTMLElement, options: E
       })
       if (sharedStyles.size || pseudoRules.length) {
         const style = document.createElement("style")
-        style.textContent = [...Array.from(sharedStyles, ([css, name]) => `.${name}{${css}}`), ...pseudoRules].join("\n")
+        style.textContent = [mathCss, ...Array.from(sharedStyles, ([css, name]) => `.${name}{${css}}`), ...pseudoRules].join("\n")
         clone.prepend(style)
       }
 

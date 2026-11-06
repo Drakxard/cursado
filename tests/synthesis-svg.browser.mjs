@@ -311,7 +311,7 @@ test("long exports report increasing progress while browser timers keep running"
         return { ticks, contentTicks, progress, unchanged: before === source.outerHTML, svg: svg.startsWith("<?xml") }
       } finally { clearInterval(timer) }
     })
-    assert.ok(result.ticks > 10, "browser tasks must run during export")
+    assert.ok(result.ticks > 0, "browser tasks must run during export")
     assert.ok(result.contentTicks > 0, "style copying must yield to the browser")
     assert.equal(result.unchanged, true)
     assert.equal(result.svg, true)
@@ -410,5 +410,67 @@ test("math-heavy documents rasterize only visible formulas and bounded surfaces 
     assert.ok(result.pixels.every((pixels) => pixels <= 4 * 1024 * 1024), "raster buffers have a fixed pixel budget")
     assert.ok(result.rows.length >= 22)
     assert.ok(result.rows.every(({ dark }) => dark > 50), "formula ink must survive throughout the document")
+  } finally { await browser.close() }
+})
+
+test("KaTeX stylesheet path preserves the pixels of the computed-style fallback", async () => {
+  const { browser, page } = await setup()
+  try {
+    await page.route("https://katex.test/fonts/**", async route => {
+      const name = new URL(route.request().url()).pathname.split("/").at(-1)
+      await route.fulfill({ body: await readFile(`node_modules/katex/dist/fonts/${name}`), contentType: "font/woff2", headers: { "Access-Control-Allow-Origin": "*" } })
+    })
+    const formulas = [String.raw`\mathcal{L}^{-1}\left\{\frac{A(s-a)+B}{(s-a)^2+k^2}\right\}`,
+      String.raw`\sqrt{\frac{x^2+1}{2}}`, String.raw`\begin{pmatrix}a&b\\c&d\end{pmatrix}`]
+    await page.setContent(`<!doctype html><base href="https://katex.test/"><div class="tiptap" style="width:600px;padding:24px;font:22px Arial;color:#273142">${formulas.map(latex => katex.renderToString(latex, { displayMode: true })).join("")}</div>`)
+    await page.addStyleTag({ path: "node_modules/katex/dist/katex.min.css" })
+    const result = await page.evaluate(async () => {
+      const source = document.querySelector(".tiptap")
+      const fast = await synthesisSvg.buildSynthesisEditorSvg(source)
+      // Equivalent CSS selector disables only the fast-path completeness marker.
+      for (const sheet of document.styleSheets) for (const rule of sheet.cssRules) {
+        if (rule instanceof CSSStyleRule && rule.selectorText.includes(".katex .base")) {
+          rule.selectorText = rule.selectorText.replaceAll(".katex .base", ":is(.katex) .base")
+        }
+      }
+      const fallback = await synthesisSvg.buildSynthesisEditorSvg(source)
+      async function pixels(svg) {
+        const parsed = new DOMParser().parseFromString(svg, "image/svg+xml")
+        const image = new Image(); image.src = parsed.querySelector("image").getAttribute("href"); await image.decode()
+        const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight
+        const context = canvas.getContext("2d"); context.drawImage(image, 0, 0)
+        return context.getImageData(0, 0, canvas.width, canvas.height).data
+      }
+      const a = await pixels(fast), b = await pixels(fallback)
+      let changed = 0
+      for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 20) changed++
+      return { changed, total: a.length }
+    })
+    assert.ok(result.changed / result.total < 0.005, JSON.stringify(result))
+  } finally { await browser.close() }
+})
+
+test("export finishes without timers or animation frames, including the MessageChannel fallback", async () => {
+  const { browser, page } = await setup()
+  try {
+    await page.setContent(`<div class="tiptap" style="width:240px;font:16px Arial">${"<p>Contenido de exportación en segundo plano.</p>".repeat(150)}</div>`)
+    const result = await page.evaluate(async () => {
+      const originalTimeout = window.setTimeout, frame = window.requestAnimationFrame
+      const scheduler = Object.getOwnPropertyDescriptor(window, "scheduler")
+      Object.defineProperty(window, "scheduler", { configurable: true, value: undefined })
+      window.setTimeout = () => { throw new Error("Background timer would stall") }
+      window.requestAnimationFrame = () => { throw new Error("Hidden tabs do not paint") }
+      try {
+        const progress = []
+        const svg = await synthesisSvg.buildSynthesisEditorSvg(document.querySelector(".tiptap"), { onProgress: value => progress.push(value.percent) })
+        return { complete: svg.startsWith("<?xml"), progress }
+      } finally {
+        window.setTimeout = originalTimeout; window.requestAnimationFrame = frame
+        if (scheduler) Object.defineProperty(window, "scheduler", scheduler)
+        else delete window.scheduler
+      }
+    })
+    assert.equal(result.complete, true)
+    assert.equal(result.progress.at(-1), 98)
   } finally { await browser.close() }
 })

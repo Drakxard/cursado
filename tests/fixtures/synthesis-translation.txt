@@ -1,0 +1,675 @@
+Seccion7.3
+
+Te lo reenvío completo, con las fórmulas, los cuatro casos y los 20 ejercicios resueltos, manteniendo la estructura original para que puedas copiarlo.
+
+Primer Teorema de Traslación (traslación en el eje \(s\))
+
+El Primer Teorema de Traslación describe el efecto de multiplicar una función por una exponencial \(e^{at}\) en el dominio del tiempo. Esta multiplicación desplaza la variable \(s\) en el dominio de Laplace.
+
+Se divide en cuatro casos fundamentales (directas e inversas), acompañados de cinco ejercicios básicos para cada uno.
+
+Las 4 fórmulas del Primer Teorema
+
+
+
+
+
+
+
+#
+
+
+
+Tipo
+
+
+
+Fórmula
+
+
+
+Significado práctico
+
+
+
+
+
+1
+
+
+
+Directa básica
+
+
+
+\(\mathcal{L}\{e^{at}f(t)\}=F(s-a)\)
+
+
+
+Transformas \(f(t)\) normalmente y luego reemplazas \(s\) por \(s-a\).
+
+
+
+
+
+2
+
+
+
+Inversa básica
+
+
+
+\(\mathcal{L}^{-1}\{F(s-a)\}=e^{at}f(t)\)
+
+
+
+Reconoces el desplazamiento y multiplicas la inversa de la función base por \(e^{at}\).
+
+
+
+
+
+3
+
+
+
+Inversa completando cuadrados
+
+
+
+\(\mathcal{L}^{-1}\left\{\frac{A(s-a)+B}{(s-a)^2+k^2}\right\}=e^{at}\left(A\cos(kt)+\frac{B}{k}\sin(kt)\right)\)
+
+
+
+Completas cuadrados para obtener la estructura de seno y coseno desplazada.
+
+
+
+
+
+4
+
+
+
+Inversa con factores repetidos
+
+
+
+\(\mathcal{L}^{-1}\left\{\frac{1}{(s-a)^n}\right\}=\frac{t^{n-1}e^{at}}{(n-1)!}\)
+
+
+
+Reconoces una potencia de un binomio desplazado y aplicas la fórmula de potencias.
+
+1. Directa básica
+
+\[\boxed{\mathcal{L}\{e^{at}f(t)\}=F(s-a)}\]
+
+Calculas primero:
+
+\[\mathcal{L}\{f(t)\}=F(s)\]
+
+Después sustituyes \(s\) por \(s-a\).
+
+Ejercicio 1.1
+
+\[\mathcal{L}\{e^{3t}\cdot t\}\]
+
+
+
+
+
+Función base: \(f(t)=t\).
+
+
+
+Transformada base: \(F(s)=\frac{1}{s^2}\).
+
+
+
+Parámetro: \(a=3\).
+
+
+
+Sustitución: \(s\rightarrow s-3\).
+
+Resultado:
+
+\[\boxed{\frac{1}{(s-3)^2}}\]
+
+Ejercicio 1.2
+
+\[\mathcal{L}\{e^{-2t}\cdot t^2\}\]
+
+
+
+
+
+Función base: \(f(t)=t^2\).
+
+
+
+Transformada base: \(F(s)=\frac{2}{s^3}\).
+
+
+
+Parámetro: \(a=-2\).
+
+
+
+Sustitución: \(s\rightarrow s+2\).
+
+Resultado:
+
+\[\boxed{\frac{2}{(s+2)^3}}\]
+
+Ejercicio 1.3
+
+\[\mathcal{L}\{e^{5t}\cos(2t)\}\]
+
+
+
+
+
+Función base: \(f(t)=\cos(2t)\).
+
+
+
+Transformada base: \(F(s)=\frac{s}{s^2+4}\).
+
+
+
+Parámetro: \(a=5\).
+
+
+
+Sustitución: \(s\rightarrow s-5\).
+
+Resultado:
+
+\[\boxed{\frac{s-5}{(s-5)^2+4}}\]
+
+Ejercicio 1.4
+
+\[\mathcal{L}\{e^{-t}\sin(3t)\}\]
+
+
+
+
+
+Función base: \(f(t)=\sin(3t)\).
+
+
+
+Transformada base: \(F(s)=\frac{3}{s^2+9}\).
+
+
+
+Parámetro: \(a=-1\).
+
+
+
+Sustitución: \(s\rightarrow s+1\).
+
+Resultado:
+
+\[\boxed{\frac{3}{(s+1)^2+9}}\]
+
+Ejercicio 1.5
+
+\[\mathcal{L}\{e^{4t}\cdot 1\}\]
+
+
+
+
+
+Función base: \(f(t)=1\).
+
+
+
+Transformada base: \(F(s)=\frac{1}{s}\).
+
+
+
+Parámetro: \(a=4\).
+
+
+
+Sustitución: \(s\rightarrow s-4\).
+
+Resultado:
+
+\[\boxed{\frac{1}{s-4}}\]
+
+2. Inversa básica
+
+\[\boxed{\mathcal{L}^{-1}\{F(s-a)\}=e^{at}f(t)}\]
+
+Identificas el desplazamiento \(s-a\), extraes el factor exponencial \(e^{at}\) y calculas la inversa de la función sin desplazar.
+
+Ejercicio 2.1
+
+\[\mathcal{L}^{-1}\left\{\frac{1}{(s-2)^2}\right\}\]
+
+
+
+
+
+Desplazamiento: \(a=2\).
+
+
+
+Factor exponencial: \(e^{2t}\).
+
+
+
+Inversa base: \(\mathcal{L}^{-1}\{\frac{1}{s^2}\}=t\).
+
+Resultado:
+
+\[\boxed{te^{2t}}\]
+
+Ejercicio 2.2
+
+\[\mathcal{L}^{-1}\left\{\frac{1}{s+3}\right\}\]
+
+
+
+
+
+Desplazamiento: \(s+3=s-(-3)\).
+
+
+
+Parámetro: \(a=-3\).
+
+
+
+Factor exponencial: \(e^{-3t}\).
+
+
+
+Inversa base: \(\mathcal{L}^{-1}\{\frac{1}{s}\}=1\).
+
+Resultado:
+
+\[\boxed{e^{-3t}}\]
+
+Ejercicio 2.3
+
+\[\mathcal{L}^{-1}\left\{ \frac{s-1}{(s-1)^2+16} \right\}\]
+
+
+
+
+
+Desplazamiento: \(a=1\).
+
+
+
+Factor exponencial: \(e^t\).
+
+
+
+Inversa base: \(\mathcal{L}^{-1}\{\frac{s}{s^2+4^2}\}=\cos(4t)\).
+
+Resultado:
+
+\[\boxed{e^t\cos(4t)}\]
+
+Ejercicio 2.4
+
+\[\mathcal{L}^{-1}\left\{ \frac{5}{(s+4)^2+25} \right\}\]
+
+
+
+
+
+Desplazamiento: \(a=-4\).
+
+
+
+Factor exponencial: \(e^{-4t}\).
+
+
+
+Inversa base: \(\mathcal{L}^{-1}\{\frac{5}{s^2+5^2}\}=\sin(5t)\).
+
+Resultado:
+
+\[\boxed{e^{-4t}\sin(5t)}\]
+
+Ejercicio 2.5
+
+\[\mathcal{L}^{-1}\left\{ \frac{6}{(s-2)^4} \right\}\]
+
+
+
+
+
+Desplazamiento: \(a=2\).
+
+
+
+Factor exponencial: \(e^{2t}\).
+
+
+
+Inversa base: \(\mathcal{L}^{-1}\{\frac{3!}{s^4}\}=t^3\).
+
+Resultado:
+
+\[\boxed{t^3e^{2t}}\]
+
+3. Inversa completando cuadrados
+
+Cuando el denominador es un cuadrático irreducible:
+
+\[s^2+2bs+c\]
+
+Completamos cuadrados para obtener:
+
+\[(s+b)^2+k^2\]
+
+Esto permite reconocer las estructuras de seno y coseno y aplicar el primer teorema de traslación.
+
+Fórmulas de referencia:
+
+\[\mathcal{L}^{-1}\left\{ \frac{s-a}{(s-a)^2+k^2} \right\}=e^{at}\cos(kt)\]
+
+\[\mathcal{L}^{-1}\left\{ \frac{k}{(s-a)^2+k^2} \right\}=e^{at}\sin(kt)\]
+
+Ejercicio 3.1
+
+\[\mathcal{L}^{-1}\left\{ \frac{1}{s^2-4s+5} \right\}\]
+
+Completamos cuadrados:
+
+\[s^2-4s+5=(s-2)^2+1\]
+
+
+
+
+
+Desplazamiento: \(a=2\).
+
+
+
+Frecuencia: \(k=1\).
+
+
+
+Inversa base: \(\mathcal{L}^{-1}\{\frac{1}{s^2+1}\}=\sin(t)\).
+
+Resultado:
+
+\[\boxed{e^{2t}\sin(t)}\]
+
+Ejercicio 3.2
+
+\[\mathcal{L}^{-1}\left\{ \frac{s}{s^2-2s+5} \right\}\]
+
+Completamos el denominador:
+
+\[s^2-2s+5=(s-1)^2+4\]
+
+Ajustamos el numerador:
+
+\[s=(s-1)+1\]
+
+Separamos:
+
+\[\frac{s-1}{(s-1)^2+4} + \frac{1}{(s-1)^2+4}\]
+
+Aplicamos las fórmulas de coseno y seno:
+
+\[\boxed{ e^t\cos(2t)+\frac{1}{2}e^t\sin(2t) }\]
+
+Ejercicio 3.3
+
+\[\mathcal{L}^{-1}\left\{ \frac{1}{s^2+6s+10} \right\}\]
+
+Completamos cuadrados:
+
+\[s^2+6s+10=(s+3)^2+1\]
+
+
+
+
+
+Desplazamiento: \(a=-3\).
+
+
+
+Frecuencia: \(k=1\).
+
+Resultado:
+
+\[\boxed{e^{-3t}\sin(t)}\]
+
+Ejercicio 3.4
+
+\[\mathcal{L}^{-1}\left\{ \frac{s+2}{s^2+4s+13} \right\}\]
+
+Completamos cuadrados:
+
+\[s^2+4s+13=(s+2)^2+9\]
+
+
+
+
+
+Desplazamiento: \(a=-2\).
+
+
+
+Frecuencia: \(k=3\).
+
+
+
+El numerador ya coincide con \(s+2\).
+
+Resultado:
+
+\[\boxed{e^{-2t}\cos(3t)}\]
+
+Ejercicio 3.5
+
+\[\mathcal{L}^{-1}\left\{ \frac{2s+5}{s^2+2s+2} \right\}\]
+
+Completamos cuadrados:
+
+\[s^2+2s+2=(s+1)^2+1\]
+
+Ajustamos el numerador:
+
+\[2s+5=2(s+1)+3\]
+
+Separamos:
+
+\[2\frac{s+1}{(s+1)^2+1} + 3\frac{1}{(s+1)^2+1}\]
+
+Resultado:
+
+\[\boxed{e^{-t}(2\cos(t)+3\sin(t))}\]
+
+4. Inversa con factores lineales repetidos
+
+\[\boxed{ \mathcal{L}^{-1}\left\{ \frac{1}{(s-a)^n} \right\} = \frac{t^{n-1}e^{at}}{(n-1)!} }\]
+
+Este caso aparece frecuentemente en fracciones parciales cuando existen raíces repetidas.
+
+La fórmula se obtiene de la transformada conocida:
+
+\[\mathcal{L}\{t^{n-1}\} = \frac{(n-1)!}{s^n}\]
+
+Y luego se aplica el primer teorema de traslación.
+
+Ejercicio 4.1
+
+\[\mathcal{L}^{-1}\left\{ \frac{1}{(s-1)^3} \right\}\]
+
+El factorial necesario es \(2!=2\):
+
+\[\frac{1}{2} \mathcal{L}^{-1}\left\{ \frac{2}{(s-1)^3} \right\}\]
+
+Resultado:
+
+\[\boxed{\frac{1}{2}t^2e^t}\]
+
+Ejercicio 4.2
+
+\[\mathcal{L}^{-1}\left\{ \frac{1}{(s+2)^4} \right\}\]
+
+El factorial necesario es \(3!=6\).
+
+Resultado:
+
+\[\boxed{\frac{1}{6}t^3e^{-2t}}\]
+
+Ejercicio 4.3
+
+\[\mathcal{L}^{-1}\left\{ \frac{s}{(s-3)^2} \right\}\]
+
+Forzamos el binomio en el numerador:
+
+\[s=(s-3)+3\]
+
+Separamos:
+
+\[\frac{s-3}{(s-3)^2} + \frac{3}{(s-3)^2}\]
+
+Simplificamos:
+
+\[\frac{1}{s-3}+\frac{3}{(s-3)^2}\]
+
+Invertimos cada término:
+
+\[e^{3t}+3te^{3t}\]
+
+Resultado:
+
+\[\boxed{e^{3t}(1+3t)}\]
+
+Ejercicio 4.4
+
+\[\mathcal{L}^{-1}\left\{ \frac{1}{(s-4)^5} \right\}\]
+
+El factorial necesario es \(4!=24\).
+
+Resultado:
+
+\[\boxed{\frac{1}{24}t^4e^{4t}}\]
+
+Ejercicio 4.5
+
+\[\mathcal{L}^{-1}\left\{ \frac{s-2}{(s+1)^3} \right\}\]
+
+Forzamos el binomio \(s+1\) en el numerador:
+
+\[s-2=(s+1)-3\]
+
+Separamos:
+
+\[\frac{1}{(s+1)^2} - \frac{3}{(s+1)^3}\]
+
+Invertimos:
+
+\[te^{-t}-\frac{3}{2}t^2e^{-t}\]
+
+Resultado:
+
+\[\boxed{te^{-t}\left(1-\frac{3}{2}t\right)}\]
+
+Cuadro comparativo: Primer Teorema vs. Segundo Teorema
+
+
+
+
+
+
+
+Criterio
+
+
+
+Primer Teorema
+
+
+
+Segundo Teorema
+
+
+
+
+
+Eje donde ocurre el desplazamiento
+
+
+
+Eje \(s\) (frecuencia)
+
+
+
+Eje \(t\) (tiempo)
+
+
+
+
+
+Causa en el tiempo
+
+
+
+Multiplicar por una exponencial \(e^{at}f(t)\)
+
+
+
+Desplazar la función mediante un escalón unitario \(f(t-a)u(t-a)\)
+
+
+
+
+
+Efecto en el dominio \(s\)
+
+
+
+Desplazamiento algebraico \(F(s-a)\)
+
+
+
+Multiplicación por \(e^{-as}F(s)\)
+
+
+
+
+
+Uso típico
+
+
+
+Oscilaciones exponenciales y raíces repetidas
+
+
+
+Fuerzas externas intermitentes, señales por tramos y circuitos con interruptores
+
+Idea clave para reconocerlos
+
+Primer teorema: desplazamiento en \(s\)
+
+\[e^{at}f(t)\quad\longleftrightarrow\quad F(s-a)\]
+
+La exponencial en el tiempo modifica la expresión algebraica en \(s\).
+
+Segundo teorema: desplazamiento en \(t\)
+
+\[f(t-a)u(t-a)\quad\longleftrightarrow\quad e^{-as}F(s)\]
+
+El escalón unitario desplaza la función en el tiempo y genera un factor exponencial en \(s\).
+
+Una observación importante: los cuatro casos presentados no son cuatro teoremas independientes. Son distintas formas de reconocer y aplicar el mismo Primer Teorema de Traslación.
+
+El siguiente paso útil sería practicar ejercicios donde tengas que decidir primero cuál de los cuatro procedimientos conviene aplicar, sin que se indique el método.

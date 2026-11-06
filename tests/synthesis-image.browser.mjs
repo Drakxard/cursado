@@ -14,7 +14,7 @@ async function setup() {
   return { browser, page }
 }
 
-test("downloads only the selected partial text and complete KaTeX formula as PNG", async () => {
+test("downloads only the selected partial text and complete KaTeX formula as embedded-image SVG", async () => {
   const { browser, page } = await setup()
   try {
     await page.route("https://katex.test/fonts/**", async route => {
@@ -58,7 +58,7 @@ test("downloads only the selected partial text and complete KaTeX formula as PNG
           html: document.querySelector(".tiptap").outerHTML, selection: getSelection().toString(), copies: document.querySelectorAll(".tiptap").length }
       } finally { URL.revokeObjectURL(url) }
     })
-    assert.equal(result.type, "image/png"); assert.equal(result.name, "sintesis-seleccion.png")
+    assert.match(result.type, /^image\/svg\+xml/); assert.equal(result.name, "sintesis-seleccion.svg")
     assert.equal(result.red, 0); assert.ok(result.blue > 100); assert.equal(result.selected, 0)
     assert.ok(result.height < before.height * 2)
     assert.equal(result.html, before.html); assert.equal(result.selection, before.selection); assert.equal(result.copies, 1)

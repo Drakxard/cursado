@@ -1,6 +1,8 @@
 import { renderSynthesisEditorTiles, type SynthesisSvgProgress } from "./synthesis-svg"
 import { createTiledPng } from "./tiled-png"
-import { SVG_RENDER_SCALE } from "../../public/pdfjs/web/raster-svg.mjs"
+import { buildRasterSvg, SVG_RENDER_SCALE } from "../../public/pdfjs/web/raster-svg.mjs"
+import { yieldExportTask } from "./export-task"
+import { katexExportCss } from "./export-katex"
 
 export type SynthesisImageProgress = SynthesisSvgProgress
 type ExportOptions = {
@@ -32,11 +34,12 @@ export function synthesisExportSelection(source: HTMLElement): Range | null {
 // copying a fraction's visual subtree alone would lose its mathematical layout.
 async function selectedContent(source: HTMLElement, range: Range, signal?: AbortSignal) {
   let batchStarted = performance.now()
+  const fastMath = Boolean(katexExportCss())
   async function copy(node: Node, whole = false): Promise<Node | null> {
     checkCancelled(signal)
     if (!whole && !range.intersectsNode(node)) return null
     if (performance.now() - batchStarted >= 12) {
-      await new Promise<void>(resolve => window.setTimeout(resolve, 0))
+      await yieldExportTask(signal)
       checkCancelled(signal)
       batchStarted = performance.now()
     }
@@ -47,6 +50,7 @@ async function selectedContent(source: HTMLElement, range: Range, signal?: Abort
       return end > start ? document.createTextNode(text.slice(start, end)) : null
     }
     if (!(node instanceof Element) || node.matches(CONTROLS)) return null
+    if (fastMath && node.matches(".katex-display, .katex")) return node.cloneNode(true)
     const clone = node.cloneNode(false) as HTMLElement
     const style = getComputedStyle(node)
     if (clone.style) {
@@ -85,7 +89,8 @@ async function selectedContent(source: HTMLElement, range: Range, signal?: Abort
   return { source: clone, remove: () => host.remove() }
 }
 
-export async function buildSynthesisEditorImage(source: HTMLElement, options: ExportOptions = {}): Promise<Blob> {
+async function renderSelectionTiles(source: HTMLElement, options: ExportOptions,
+  writeTile: Parameters<typeof renderSynthesisEditorTiles>[2]) {
   // Snapshot before any yield or progress dialog can move browser focus.
   const range = options.selection === undefined ? synthesisExportSelection(source) : options.selection?.cloneRange()
   checkCancelled(options.signal)
@@ -96,9 +101,15 @@ export async function buildSynthesisEditorImage(source: HTMLElement, options: Ex
     if (color !== "transparent" && !/^rgba\([^)]*,\s*0\)$/.test(color)) { background = color; break }
   }
   const fragment = range ? await selectedContent(source, range, options.signal) : null
+  try {
+    await renderSynthesisEditorTiles(fragment?.source ?? source, { ...options, background }, writeTile)
+  } finally { fragment?.remove() }
+}
+
+export async function buildSynthesisEditorImage(source: HTMLElement, options: ExportOptions = {}): Promise<Blob> {
   let output: ReturnType<typeof createTiledPng> | undefined
   try {
-    await renderSynthesisEditorTiles(fragment?.source ?? source, { ...options, background }, async (tile, region) => {
+    await renderSelectionTiles(source, options, async (tile, region) => {
       checkCancelled(options.signal)
       output ??= createTiledPng(tile.width, region.totalHeight * SVG_RENDER_SCALE, options.signal)
       await output.write(tile)
@@ -108,22 +119,35 @@ export async function buildSynthesisEditorImage(source: HTMLElement, options: Ex
     if (!output) throw new Error("No se pudo generar la imagen PNG.")
     return await output.finish()
   } finally {
-    fragment?.remove()
     output?.dispose()
   }
+}
+
+export async function buildSynthesisEditorExportSvg(source: HTMLElement, options: ExportOptions = {}): Promise<Blob> {
+  const pages: Array<{ width: number; height: number; image: string }> = []
+  await renderSelectionTiles(source, options, (tile, region) => {
+    checkCancelled(options.signal)
+    // Lossless PNG per strip: no giant raster surface, JPEG artifacts or global
+    // reduction in resolution when imported into an SVG-aware design tool.
+    const image = tile.toDataURL("image/png")
+    if (!image.startsWith("data:image/png")) throw new Error("No se pudo generar una franja del SVG.")
+    pages.push({ width: region.width, height: region.height, image })
+  })
+  checkCancelled(options.signal)
+  return new Blob([buildRasterSvg(pages, 0)], { type: "image/svg+xml;charset=utf-8" })
 }
 
 export async function exportSynthesisEditorImage(options: ExportOptions = {}) {
   const source = document.querySelector<HTMLElement>(".simple-editor-wrapper .tiptap")
   if (!source) throw new Error("No se encontró el editor de Síntesis para exportar.")
   const selection = options.selection === undefined ? synthesisExportSelection(source) : options.selection
-  const blob = await buildSynthesisEditorImage(source, { ...options, selection })
+  const blob = await buildSynthesisEditorExportSvg(source, { ...options, selection })
   checkCancelled(options.signal)
   options.onProgress?.({ percent: 100, label: "Descargando imagen…" })
   const url = URL.createObjectURL(blob)
   const link = document.createElement("a")
   link.href = url
-  link.download = selection ? "sintesis-seleccion.png" : "sintesis.png"
+  link.download = selection ? "sintesis-seleccion.svg" : "sintesis.svg"
   document.body.append(link)
   try { link.click() } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000) }
 }
