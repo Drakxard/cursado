@@ -102,7 +102,10 @@ export async function rasterPlantumlLabels(texts:string[],pixelRatio=2,onProgres
     Object.assign(atlas.style,{width:`${width}px`,height:`${height}px`})
     document.body.append(atlas)
     onProgress?.(45,'Preparando texto y fórmulas…')
-    const fontCSS=atlas.querySelector('.katex')?await getFontEmbedCSS(atlas,{preferredFontFormat:'woff2'}):''
+    // html-to-image's preferredFontFormat filter shares a stateful regex across
+    // font faces and can drop their src. Missing regular faces fall back to bold
+    // fonts in the SVG, widening formulas after measurement and clipping them.
+    const fontCSS=atlas.querySelector('.katex')?await getFontEmbedCSS(atlas):''
     const ratio=Math.min(pixelRatio,8192/Math.max(width,height),Math.sqrt(16000000/(width*height)))
     onProgress?.(55,'Renderizando las etiquetas…')
     sheet=await labelCanvas(atlas,width,height,ratio,fontCSS)
