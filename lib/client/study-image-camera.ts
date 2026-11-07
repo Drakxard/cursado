@@ -1,36 +1,35 @@
-// A gesture changes one bounded texture's transform. No layout, image decode,
-// pixel reads or full-resolution draw runs in an input/animation callback.
+// Render the visible crop from the original at screen resolution on every frame.
+// Coalesce input bursts without substituting a reduced preview during gestures.
 export function createStudyImageCamera(host: HTMLElement, preview: HTMLCanvasElement, detail: HTMLCanvasElement, image: HTMLImageElement) {
   let width = 1, height = 1, scale = 1, x = 0, y = 0, fit = 1
-  let frame = 0, timer: ReturnType<typeof setTimeout> | undefined, disposed = false
+  let frame = 0, disposed = false
   const points = new Map<number, { x: number; y: number }>()
   const bounds = () => host.getBoundingClientRect()
-  const paintPreview = () => {
+  const paint = () => {
     frame = 0
     if (disposed) return
-    preview.style.transform = `matrix(${scale * image.naturalWidth / preview.width},0,0,${scale * image.naturalHeight / preview.height},${x},${y})`
-  }
-  const paintDetail = () => {
-    timer = undefined
-    if (disposed || points.size) return
-    const ratio = Math.min(2, window.devicePixelRatio || 1)
-    detail.width = Math.max(1, Math.ceil(width * ratio)); detail.height = Math.max(1, Math.ceil(height * ratio))
+    const ratio = window.devicePixelRatio || 1
+    const pixelWidth = Math.max(1, Math.ceil(width * ratio)), pixelHeight = Math.max(1, Math.ceil(height * ratio))
+    if (detail.width !== pixelWidth || detail.height !== pixelHeight) {
+      detail.width = pixelWidth; detail.height = pixelHeight
+    }
     const ctx = detail.getContext('2d')
     if (!ctx) return
-    // Draw only the visible source rectangle, never a zoom-sized backing canvas.
+    ctx.clearRect(0, 0, detail.width, detail.height)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    // Keep the backing canvas bounded by the viewport, including at high zoom.
     const sx = Math.max(0, -x / scale), sy = Math.max(0, -y / scale)
     const ex = Math.min(image.naturalWidth, (width - x) / scale), ey = Math.min(image.naturalHeight, (height - y) / scale)
     if (ex > sx && ey > sy) ctx.drawImage(image, sx, sy, ex - sx, ey - sy,
       (x + sx * scale) * ratio, (y + sy * scale) * ratio, (ex - sx) * scale * ratio, (ey - sy) * scale * ratio)
     detail.style.visibility = 'visible'; preview.style.visibility = 'hidden'
     host.dataset.renderMode = 'detail'
+    // Expose the displayed camera for navigation diagnostics.
+    detail.dataset.camera = JSON.stringify({ x, y, scale })
   }
-  const scheduleDetail = () => { clearTimeout(timer); timer = setTimeout(paintDetail, 180) }
   const present = () => {
-    detail.style.visibility = 'hidden'; preview.style.visibility = 'visible'
-    host.dataset.renderMode = 'preview'
-    if (!frame) frame = requestAnimationFrame(paintPreview)
-    scheduleDetail()
+    if (!frame) frame = requestAnimationFrame(paint)
   }
   const clamp = () => {
     const w = image.naturalWidth * scale, h = image.naturalHeight * scale
@@ -49,9 +48,13 @@ export function createStudyImageCamera(host: HTMLElement, preview: HTMLCanvasEle
   }
   const wheel = (event: WheelEvent) => {
     event.preventDefault(); event.stopPropagation()
-    const rect = bounds(), unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1
     const delta = event.deltaY * unit
-    if (Number.isFinite(delta) && delta) zoom(Math.exp(-Math.max(-100, Math.min(100, delta)) * .002), event.clientX - rect.left, event.clientY - rect.top)
+    if (!Number.isFinite(delta) || !delta) return
+    if (event.ctrlKey || event.metaKey) {
+      const rect = bounds()
+      zoom(Math.exp(-Math.max(-100, Math.min(100, delta)) * .002), event.clientX - rect.left, event.clientY - rect.top)
+    } else { y -= delta; clamp(); present() }
   }
   const down = (event: PointerEvent) => {
     if (event.button !== 0) return
@@ -74,15 +77,15 @@ export function createStudyImageCamera(host: HTMLElement, preview: HTMLCanvasEle
   const up = (event: PointerEvent) => {
     points.delete(event.pointerId)
     if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId)
-    scheduleDetail()
+    present()
   }
   const cancel = () => {
     for (const id of points.keys()) if (host.hasPointerCapture(id)) host.releasePointerCapture(id)
-    points.clear(); scheduleDetail()
+    points.clear(); present()
   }
   const key = (event: KeyboardEvent) => {
-    if (!['+', '=', '-', '0'].includes(event.key) || event.ctrlKey || event.metaKey) return
-    event.preventDefault()
+    if (event.isComposing || event.altKey || !['+', '=', '-', '0'].includes(event.key)) return
+    event.preventDefault(); event.stopImmediatePropagation()
     if (event.key === '0') reset(); else zoom(event.key === '-' ? 1 / 1.5 : 1.5)
   }
   const resize = new ResizeObserver(() => {
@@ -96,13 +99,13 @@ export function createStudyImageCamera(host: HTMLElement, preview: HTMLCanvasEle
   host.addEventListener('wheel', wheel, { passive: false })
   host.addEventListener('pointerdown', down); host.addEventListener('pointermove', move)
   host.addEventListener('pointerup', up); host.addEventListener('pointercancel', up); host.addEventListener('lostpointercapture', up)
-  window.addEventListener('blur', cancel); window.addEventListener('keydown', key)
+  window.addEventListener('blur', cancel); window.addEventListener('keydown', key, true)
   resize.observe(host)
   return () => {
-    disposed = true; clearTimeout(timer); cancelAnimationFrame(frame); resize.disconnect()
+    disposed = true; cancelAnimationFrame(frame); resize.disconnect()
     host.removeEventListener('wheel', wheel); host.removeEventListener('pointerdown', down); host.removeEventListener('pointermove', move)
     host.removeEventListener('pointerup', up); host.removeEventListener('pointercancel', up); host.removeEventListener('lostpointercapture', up)
-    window.removeEventListener('blur', cancel); window.removeEventListener('keydown', key)
+    window.removeEventListener('blur', cancel); window.removeEventListener('keydown', key, true)
     for (const id of points.keys()) if (host.hasPointerCapture(id)) host.releasePointerCapture(id)
     points.clear(); preview.width = preview.height = detail.width = detail.height = 0
   }
