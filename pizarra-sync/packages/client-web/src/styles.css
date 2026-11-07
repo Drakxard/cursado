@@ -773,14 +773,7 @@ body {
 }
 
 /* ---------- canvas ---------- */
-/* Infinite grid. ViewportController.syncGrid() feeds the level-of-detail (LOD) numbers in
-   as custom properties: --grid-fine / --grid-coarse (the two tier spacings), --grid-fade
-   (the fine tier's opacity), and --gx-/--gy- (per-tier background positions, offset by half
-   a tile so a line/dot lands on the world origin). The LOD keeps the on-screen spacing near
-   GRID_TARGET_PX so the grid never collapses to a solid fill when zoomed out; the fine tier
-   crossfades against the solid coarse tier so steps are seamless. Drawn in screen space
-   (constant line/dot size), matching how Figma (lines) / FigJam (dots) do it.
-   --grid-dot = dot radius, --grid-line = half line thickness. */
+/* The viewport paints the dot/line grid into its own canvas at screen resolution. */
 .canvas {
   position: relative;
   overflow: hidden;
@@ -792,96 +785,15 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
-/* Isolate the animated background from content style inheritance and painting. */
+/* Isolate the background from content layout and style inheritance. */
 .canvas > .canvas-grid {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   contain: strict;
-  will-change: transform;
-  /* ---- DOTS ---- */
-  /* Fallback (no relative-color syntax): single tier — still LOD-sized, just no crossfade. */
-  background-image: radial-gradient(
-    var(--grid) var(--grid-dot, 1.6px),
-    transparent var(--grid-dot, 1.6px)
-  );
-  background-size: var(--grid-fine, 24px) var(--grid-fine, 24px);
-  background-position: var(--gx-fine, 0px) var(--gy-fine, 0px);
-  /* Enhanced: fine (fading) + coarse (solid). */
-  background-image:
-    radial-gradient(
-      rgb(from var(--grid) r g b / var(--grid-fade, 1)) var(--grid-dot, 1.6px),
-      transparent var(--grid-dot, 1.6px)
-    ),
-    radial-gradient(var(--grid) var(--grid-dot, 1.6px), transparent var(--grid-dot, 1.6px));
-  background-size:
-    var(--grid-fine, 24px) var(--grid-fine, 24px),
-    var(--grid-coarse, 48px) var(--grid-coarse, 48px);
-  background-position:
-    var(--gx-fine, 0px) var(--gy-fine, 0px),
-    var(--gx-coarse, 0px) var(--gy-coarse, 0px);
-}
-
-/* ---- LINES (Figma-style) ---- two tiers of centered 1px lines (H + V) that crossfade. */
-.canvas[data-grid="lines"] > .canvas-grid {
-  /* Fallback (no relative-color syntax): single tier of crisp lines, no crossfade. */
-  background-image:
-    linear-gradient(
-      to bottom,
-      transparent calc(50% - var(--grid-line, 0.5px)),
-      var(--grid) calc(50% - var(--grid-line, 0.5px)) calc(50% + var(--grid-line, 0.5px)),
-      transparent calc(50% + var(--grid-line, 0.5px))
-    ),
-    linear-gradient(
-      to right,
-      transparent calc(50% - var(--grid-line, 0.5px)),
-      var(--grid) calc(50% - var(--grid-line, 0.5px)) calc(50% + var(--grid-line, 0.5px)),
-      transparent calc(50% + var(--grid-line, 0.5px))
-    );
-  background-size:
-    var(--grid-fine, 24px) var(--grid-fine, 24px),
-    var(--grid-fine, 24px) var(--grid-fine, 24px);
-  background-position:
-    0px var(--gy-fine, 0px),
-    var(--gx-fine, 0px) 0px;
-  /* Enhanced: fine H + fine V (fading) over coarse H + coarse V (solid). */
-  background-image:
-    linear-gradient(
-      to bottom,
-      transparent calc(50% - var(--grid-line, 0.5px)),
-      rgb(from var(--grid) r g b / var(--grid-fade, 1)) calc(50% - var(--grid-line, 0.5px))
-        calc(50% + var(--grid-line, 0.5px)),
-      transparent calc(50% + var(--grid-line, 0.5px))
-    ),
-    linear-gradient(
-      to right,
-      transparent calc(50% - var(--grid-line, 0.5px)),
-      rgb(from var(--grid) r g b / var(--grid-fade, 1)) calc(50% - var(--grid-line, 0.5px))
-        calc(50% + var(--grid-line, 0.5px)),
-      transparent calc(50% + var(--grid-line, 0.5px))
-    ),
-    linear-gradient(
-      to bottom,
-      transparent calc(50% - var(--grid-line, 0.5px)),
-      var(--grid) calc(50% - var(--grid-line, 0.5px)) calc(50% + var(--grid-line, 0.5px)),
-      transparent calc(50% + var(--grid-line, 0.5px))
-    ),
-    linear-gradient(
-      to right,
-      transparent calc(50% - var(--grid-line, 0.5px)),
-      var(--grid) calc(50% - var(--grid-line, 0.5px)) calc(50% + var(--grid-line, 0.5px)),
-      transparent calc(50% + var(--grid-line, 0.5px))
-    );
-  background-size:
-    var(--grid-fine, 24px) var(--grid-fine, 24px),
-    var(--grid-fine, 24px) var(--grid-fine, 24px),
-    var(--grid-coarse, 48px) var(--grid-coarse, 48px),
-    var(--grid-coarse, 48px) var(--grid-coarse, 48px);
-  background-position:
-    0px var(--gy-fine, 0px),
-    var(--gx-fine, 0px) 0px,
-    0px var(--gy-coarse, 0px),
-    var(--gx-coarse, 0px) 0px;
+  color: var(--grid);
 }
 
 /* settings dialog rows (gear → Settings) */

@@ -165,7 +165,7 @@ test("zoom crossing the cached viewport waits for rest before mounting new conte
       let culls = 0;
       layer.recull = function () { culls++; return original.call(this); };
       try {
-        const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
+        const el = document.querySelector<HTMLCanvasElement>("#board .konvajs-content canvas")!;
         const r = el.getBoundingClientRect();
         for (let i = 0; i < 16; i++) {
           el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true,
@@ -201,7 +201,7 @@ test("document updates during zoom wait for settlement and retain the latest con
       let culls = 0;
       layer.recull = function () { culls++; return original.call(this); };
       try {
-        const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
+        const el = document.querySelector<HTMLCanvasElement>("#board .konvajs-content canvas")!;
         const r = el.getBoundingClientRect();
         for (let i = 0; i < 12; i++) {
           el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true,
@@ -224,7 +224,7 @@ test("plain wheel scrolls vertically without zoom and Ctrl+wheel switches back t
     const result = await page.evaluate(async () => {
       const { stage, viewport } = (window as CameraWindow).__komuboard.canvas;
       viewport.zoomTo(2); // scrolling stays in screen pixels at any zoom
-      const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
+      const el = document.querySelector<HTMLCanvasElement>("#board .konvajs-content canvas")!;
       const r = el.getBoundingClientRect();
       const read = () => ({ x: stage.x(), y: stage.y(), scale: stage.scaleX() });
       const send = (deltaY: number, deltaMode = 0, ctrlKey = false) => {
@@ -272,7 +272,7 @@ test("zoom uses normalized deltas, keeps its anchor and buttons have no animatio
   try {
     const results = await page.evaluate(() => {
       const { stage, viewport } = (window as CameraWindow).__komuboard.canvas;
-      const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
+      const el = document.querySelector<HTMLCanvasElement>("#board .konvajs-content canvas")!;
       const r = el.getBoundingClientRect(), px = 300, py = 250;
       const wheel = (deltaY: number, deltaMode = 0) => el.dispatchEvent(new WheelEvent("wheel", {
         bubbles: true, cancelable: true, ctrlKey: true, clientX: r.left + px, clientY: r.top + py, deltaY, deltaMode,
@@ -310,7 +310,7 @@ test("pinch applies its first movement and anchors the moving centre", async ({ 
   try {
     const result = await page.evaluate(() => {
       const s = (window as CameraWindow).__komuboard.canvas.stage;
-      const el = document.querySelector<HTMLCanvasElement>("#board canvas")!;
+      const el = document.querySelector<HTMLCanvasElement>("#board .konvajs-content canvas")!;
       const r = el.getBoundingClientRect();
       const send = (type: string, points: number[][]) => {
         const touches = points.map(([x, y], identifier) => new Touch({ identifier, target: el,
@@ -337,7 +337,7 @@ test("camera bursts schedule one presentation frame and draw inside it", async (
       const modulePath = "/src/viewport.ts";
       const { ViewportController } = await import(/* @vite-ignore */ modulePath);
       const calls: string[] = [], pending: FrameRequestCallback[] = [];
-      const stage = { on() {}, scaleX: () => 1, x: () => 0, y: () => 0,
+      const stage = { on() {}, scaleX: () => 1, x: () => 0, y: () => 0, width: () => 800, height: () => 600,
         draw: () => calls.push("draw"), batchDraw: () => calls.push("deferred-draw") };
       const viewport = new ViewportController(stage, document.createElement("div"), () => calls.push("transform"));
       const original = window.requestAnimationFrame;

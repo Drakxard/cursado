@@ -22,39 +22,25 @@ test("grid follows zoom and pan without inheriting camera variables into content
   try {
     const checkGrid = async () => {
       const result = await page.evaluate(() => {
-        const canvas = (
-          window as unknown as {
-            __komuboard: {
-              canvas: {
-                stage: { x(): number; y(): number; scaleX(): number };
-              };
-            };
-          }
-        ).__komuboard.canvas;
-        const board = document.querySelector<HTMLElement>("#board")!;
-        const grid = board.querySelector<HTMLElement>(":scope > .canvas-grid")!;
-        const css = getComputedStyle(grid),
-          s = canvas.stage.scaleX();
-        const fine = 24 * s * 2 ** Math.floor(Math.log2(1 / s));
-        const child = getComputedStyle(board.querySelector(".text-layer")!);
-        return {
-          fine: parseFloat(css.getPropertyValue("--grid-fine")),
-          expectedFine: fine,
-          x: parseFloat(css.getPropertyValue("--gx-fine")),
-          expectedX: canvas.stage.x() - fine / 2,
-          y: parseFloat(css.getPropertyValue("--gy-fine")),
-          expectedY: canvas.stage.y() - fine / 2,
-          inherited: child.getPropertyValue("--grid-fine"),
-          image: css.backgroundImage,
-        };
+        const stage = (window as unknown as { __komuboard: { canvas: { stage: {
+          x(): number; y(): number; width(): number; height(): number; scaleX(): number;
+        } } } }).__komuboard.canvas.stage;
+        const grid = document.querySelector<HTMLCanvasElement>('#board > .canvas-grid')!;
+        const coarse = 48 * stage.scaleX() * 2 ** Math.floor(Math.log2(1 / stage.scaleX()));
+        const x = ((stage.x() % coarse) + coarse) % coarse;
+        const y = ((stage.y() % coarse) + coarse) % coarse;
+        const ratio = devicePixelRatio || 1, ctx = grid.getContext('2d')!;
+        const alpha = (px: number, py: number) => ctx.getImageData(Math.floor(px * ratio), Math.floor(py * ratio), 1, 1).data[3];
+        return { dot: alpha(x + coarse, y + coarse), between: alpha(x + coarse * 1.25, y + coarse),
+          width: grid.width, expectedWidth: Math.ceil(stage.width() * ratio),
+          inherited: getComputedStyle(document.querySelector('.text-layer')!).getPropertyValue('--grid-fine') };
       });
-      expect(result.fine).toBeCloseTo(result.expectedFine, 3);
-      expect(result.x).toBeCloseTo(result.expectedX, 3);
-      expect(result.y).toBeCloseTo(result.expectedY, 3);
-      expect(result.inherited).toBe("");
-      return result.image;
+      expect(result.dot).toBeGreaterThan(0);
+      expect(result.width).toBe(result.expectedWidth);
+      expect(result.inherited).toBe('');
+      return result.between;
     };
-    expect(await checkGrid()).toContain("radial-gradient");
+    expect(await checkGrid()).toBe(0);
     await page.mouse.move(500, 350);
     await page.keyboard.down("Control");
     await page.mouse.wheel(0, -80);
@@ -70,7 +56,7 @@ test("grid follows zoom and pan without inheriting camera variables into content
     await page.locator("#board").evaluate((el) => {
       (el as HTMLElement).dataset.grid = "lines";
     });
-    expect(await checkGrid()).toContain("linear-gradient");
+    expect(await checkGrid()).toBeGreaterThan(0);
   } finally {
     await close();
   }

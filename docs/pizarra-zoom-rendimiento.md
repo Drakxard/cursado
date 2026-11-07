@@ -114,3 +114,46 @@ Estos tiempos corresponden a ese escenario y equipo. El navegador automatizado
 también mostró cuadros lentos con la pizarra vacía. Hace falta verificar la
 sensación visual en el navegador y equipo habituales; los resultados locales no
 permiten prometer fluidez absoluta para cualquier tablero o dispositivo.
+
+## Cuadr?cula y navegaci?n con pocos elementos (7 de noviembre de 2026)
+
+La cuadr?cula CSS de dos gradientes radiales se volv?a a rasterizar al cambiar
+su tama?o, posici?n y transparencia en cada cuadro. El costo exist?a incluso
+sin objetos. En Chrome headless local, un barrido alternado de 40 cuadros dio
+medianas de 69?84 ms con la cuadr?cula anterior y aproximadamente 17 ms al
+ocultarla. Es una comparaci?n exploratoria de esta m?quina, no una medici?n
+del equipo del usuario.
+
+`viewport-grid.ts` sustituye esos gradientes por un canvas del tama?o de la
+pantalla. Los puntos se dibujan una sola vez en una peque?a baldosa y se repiten
+con `CanvasPattern`; las l?neas usan dos trazados. Conserva las dos escalas,
+la transici?n de densidad, el anclaje al mundo, el tema y el DPR. No transforma
+ni reduce las im?genes del documento. La c?mara y el fondo se presentan en el
+mismo cuadro; el porcentaje de zoom se notifica solo cuando cambia.
+
+La prueba `e2e/camera-grid.spec.ts` compara la cuadr?cula visible y oculta con
+0 y 8 notas, en la misma sesi?n. En la corrida local ambas medianas quedaron
+en 16,7?16,8 ms; el P95 con cuadr?cula fue 18,2 ms sin objetos y 21,9 ms con
+8 notas. El reporte `grid-frame-times.json` se adjunta a Playwright. La prueba
+usa un umbral relativo para detectar regresiones, no para garantizar 60 FPS
+en cualquier dispositivo. El perfil de 3.000 objetos con un editor remoto
+registr? P50 22,8 ms y P95 50,9 ms, sin llamadas a `recull`, `layout`,
+`paintStroke` ni `paintConnector` durante los 60 cuadros del gesto.
+
+Validaciones adicionales: arrastre desde el primer p?xel, reversi?n y cancelaci?n,
+zoom anclado al puntero, pellizco, selecci?n, cambios de documento durante el
+zoom, puntos/l?neas y cambio de tema en DPR 1 y 2, TypeScript y build de Vite.
+Los tests sint?ticos apuntan al canvas de Konva expl?citamente, para no enviar
+los eventos al nuevo canvas de fondo.
+
+Referencias consultadas: [motor de Figma con WebGPU](https://www.figma.com/blog/figma-rendering-powered-by-webgpu/)
+y [c?mara de tldraw](https://tldraw.dev/sdk-features/camera). Figma usa un motor
+gr?fico propio; en esta aplicaci?n el costo aislado se resolvi? en el fondo,
+sin sustituir el motor ni agregar animaciones a la navegaci?n.
+
+```powershell
+node --test tests/viewport-grid.browser.mjs tests/night-readability.browser.mjs
+cd pizarra-sync
+pnpm.cmd exec playwright test e2e/camera-direct.spec.ts e2e/viewport.spec.ts e2e/camera-grid.spec.ts --workers=1
+pnpm.cmd exec playwright test e2e/perf.spec.ts --grep "zoom profile" --workers=1
+```

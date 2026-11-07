@@ -77,7 +77,7 @@ for (const theme of ['light', 'dark']) test(`production navigation: links, edits
       mutations.disconnect();
 
       // Separate continuous input from the final settle: both matter to perceived response.
-      const el = document.querySelector('#board canvas')!, rect = el.getBoundingClientRect();
+      const el = document.querySelector('#board .konvajs-content canvas')!, rect = el.getBoundingClientRect();
       const sync = layer.syncTransform;
       const handlerMs: number[] = [], presentationMs: number[] = [];
       let inputAt = 0;
@@ -217,7 +217,7 @@ test('large scanned pages keep decoded images during night-mode navigation', asy
     await page.waitForTimeout(300);
     const report = await page.evaluate(async () => {
       const { canvas } = (window as any).__komuboard, originals = [...document.querySelectorAll('.komu-image img')];
-      const target = document.querySelector('#board canvas')!, bounds = target.getBoundingClientRect();
+      const target = document.querySelector('#board .konvajs-content canvas')!, bounds = target.getBoundingClientRect();
       const frames = []; let previous = performance.now();
       for (let i = 0; i < 30; i++) {
         target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: i % 2 ? 3 : -3, clientX: bounds.x + bounds.width / 2, clientY: bounds.y + bounds.height / 2 }));

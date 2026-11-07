@@ -346,7 +346,7 @@ test("zoom profile: dense board with a collaborating text editor", async ({ brow
           }
         };
       }
-      const el = document.querySelector("#board canvas")!;
+      const el = document.querySelector("#board .konvajs-content canvas")!;
       const rect = el.getBoundingClientRect();
       const intervals: number[] = [];
       let previous = performance.now();

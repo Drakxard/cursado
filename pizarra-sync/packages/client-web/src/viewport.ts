@@ -1,9 +1,8 @@
 import Konva from "konva";
+import { ViewportGrid } from "./viewport-grid";
 
 const MIN_ZOOM = 0.01; // 1% — the first ZOOM_STOPS rung
 const MAX_ZOOM = 5; // 500% — the last ZOOM_STOPS rung
-const GRID = 24; // world units between the finest dots at 100% zoom
-const GRID_TARGET_PX = 24; // ideal on-screen dot spacing; the LOD steps keep the grid near this
 // Discrete zoom rungs (percent) the +/- buttons snap through.
 const ZOOM_STOPS = [1, 5, 10, 15, 20, 33, 50, 75, 100, 125, 150, 200, 250, 300, 350, 400, 450, 500];
 
@@ -19,18 +18,15 @@ const ZOOM_STOPS = [1, 5, 10, 15, 20, 33, 50, 75, 100, 125, 150, 200, 250, 300, 
  * `screenPx()`, replacing the `1 / stage.scaleX()` idiom that used to be scattered around.
  */
 export class ViewportController {
-  private readonly grid: HTMLDivElement;
+  private readonly grid: ViewportGrid;
+  private notifiedZoom: number | undefined;
   private zoomListener: ((pct: number) => void) | null = null;
-  // Last-applied dot-grid LOD values, so a pan (position-only change) skips the
-  // gradient-size/opacity writes and only nudges background-position.
-  private gridFine = -1;
-  private gridFade = -1;
   // Coalesces the downstream camera sync (chrome + text relayout + grid + Konva draw) to once per
   // animation frame. Wheel/pointer events fire far faster than frames (hundreds/s on a trackpad),
   // and the sync work is O(mounted objects) — running it per EVENT multiplied frame cost by the
   // event rate and froze dense boards. The stage transform itself stays synchronous per event (so
   // gesture math always reads fresh values); only the visual re-sync is deferred, and everything
-  // it drives (Konva draw, CSS grid, DOM boxes) updates atomically in the same frame.
+  // it drives (Konva draw, grid, DOM boxes) updates atomically in the same frame.
   private syncScheduled = false;
   private syncFrame = 0;
   private interactiveSync = false;
@@ -47,12 +43,7 @@ export class ViewportController {
     /** localStorage key to persist this board's camera across reloads; omitted = no persistence. */
     private readonly storageKey?: string,
   ) {
-    // Keep per-frame grid variables off the ancestor of every board object.
-    // Otherwise inherited custom properties invalidate the entire text/SVG tree.
-    this.grid = document.createElement("div");
-    this.grid.className = "canvas-grid";
-    this.grid.setAttribute("aria-hidden", "true");
-    container.prepend(this.grid);
+    this.grid = new ViewportGrid(container);
     this.bindWheel();
     this.stage.on("dragmove", () => {
       this.scheduleSync(true); // hand-pan: composite the existing layer during the gesture
@@ -102,6 +93,7 @@ export class ViewportController {
   }
   setZoomListener(cb: (pct: number) => void): void {
     this.zoomListener = cb;
+    this.notifiedZoom = undefined;
     this.notifyZoom();
   }
   /** Clamp a raw scale into the supported zoom range. */
@@ -172,53 +164,19 @@ export class ViewportController {
   /** Resize the stage to the container (called from BoardCanvas's ResizeObserver). */
   resize(): void {
     this.stage.size({ width: this.container.clientWidth, height: this.container.clientHeight });
+    this.scheduleSync();
   }
 
-  /**
-   * Keep the CSS grid locked to the camera. A level-of-detail (LOD) scheme keeps the
-   * on-screen spacing near GRID_TARGET_PX: zoomed out it draws every 2ⁿᵗʰ line/dot (and
-   * subdivides when zoomed in), so the grid never crowds into a solid fill. A fine +
-   * coarse tier crossfade — the coarse tier is solid, the fine tier's opacity
-   * (--grid-fade) drops to 0 exactly as its in-between lines/dots would be dropped — so
-   * the LOD steps are seamless rather than popping.
-   *
-   * This only computes the LOD numbers and feeds them to CSS custom properties; styles.css
-   * `.canvas-grid` turns them into dots or lines (the board's [data-grid="lines"] mode).
-   * Positions are emitted as --gx/--gy props (not background-position) so the dot mode
-   * (2 layers) and line mode (4 layers) can each compose their own background-position.
-   */
+  /** Paint the background at screen resolution in the same frame as the content. */
   syncGrid(): void {
-    const scale = this.stage.scaleX();
-    const lod = Math.log2(GRID_TARGET_PX / (GRID * scale)); // continuous level; > 0 when zoomed out
-    const step = Math.floor(lod);
-    const fine = GRID * scale * 2 ** step; // fine spacing on screen, always in (GRID_TARGET_PX/2, GRID_TARGET_PX]
-    const coarse = fine * 2;
-    const fade = 1 - (lod - step); // 1 at the start of an octave → 0 as it steps to the next
-
-    const s = this.grid.style;
-    // Spacing + fade only change with zoom; guard the writes so a pan touches positions alone.
-    if (fine !== this.gridFine) {
-      this.gridFine = fine;
-      s.setProperty("--grid-fine", `${fine}px`);
-      s.setProperty("--grid-coarse", `${coarse}px`);
-    }
-    if (fade !== this.gridFade) {
-      this.gridFade = fade;
-      s.setProperty("--grid-fade", fade.toFixed(3));
-    }
-    // Offset each tier by half its own tile so a line/dot lands on the world origin — this
-    // keeps the fine + coarse tiers aligned and glues the grid to world coordinates (no
-    // drift while zooming within an octave).
-    const x = this.stage.x();
-    const y = this.stage.y();
-    s.setProperty("--gx-fine", `${x - fine / 2}px`);
-    s.setProperty("--gy-fine", `${y - fine / 2}px`);
-    s.setProperty("--gx-coarse", `${x - coarse / 2}px`);
-    s.setProperty("--gy-coarse", `${y - coarse / 2}px`);
+    this.grid.draw({ scale: this.scale(), x: this.stage.x(), y: this.stage.y(), width: this.stage.width(), height: this.stage.height() });
   }
 
   private notifyZoom(): void {
-    this.zoomListener?.(this.getZoomPercent());
+    const pct = this.getZoomPercent();
+    if (pct === this.notifiedZoom) return;
+    this.notifiedZoom = pct;
+    this.zoomListener?.(pct);
   }
 
   private afterTransform(interactive = false): void {
@@ -317,7 +275,7 @@ export class ViewportController {
   }
 
   destroy(): void {
-    this.grid.remove();
+    this.grid.destroy();
     this.stopZoomAnim();
     cancelAnimationFrame(this.syncFrame);
     if (this.saveTimer !== null) {
