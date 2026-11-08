@@ -1,107 +1,35 @@
-import assert from 'node:assert/strict'
+﻿import assert from 'node:assert/strict'
 import test from 'node:test'
 import { build } from 'esbuild'
-import { authRuntime } from './cloudflare-runtime.mjs'
-import { memoryWorkspace } from './helpers/cooperation-filesystem.mjs'
 
-test('background sync is idle without events, batches saves, discovers invitations on push and reconnects on demand', async t => {
-  const bundled = await build({ entryPoints: ['lib/client/cooperation.ts'], bundle: true, write: false, platform: 'browser', format: 'esm', plugins: [{ name: 'workspace', setup(builder) {
-    builder.onResolve({ filter: /local-workspace-client\.ts$/ }, () => ({ path: 'root', namespace: 'fixture' }))
-    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const getReadyWorkspaceHandle=()=>globalThis.__backgroundRoot;export const loadWorkspaceHandle=async()=>globalThis.__backgroundRoot;export const queryWorkspacePermission=async()=>"granted";export const getReadyInscreenConfigToken=()=>"";export const loadServicesFile=async()=>null' }))
-  } }] })
-  const backend = authRuntime(), fs = memoryWorkspace()
-  const original = { fetch: globalThis.fetch, window: globalThis.window, storage: globalThis.localStorage, socket: globalThis.WebSocket, channel: globalThis.BroadcastChannel, document: globalThis.document }
+test('file cooperation stays stopped through saves, reconnects, focus and visibility changes', async t => {
+  const bundled = await build({ entryPoints: ['lib/client/cooperation.ts'], bundle: true, write: false, platform: 'browser', format: 'esm' })
+  const globals = globalThis as any
+  const original = { fetch: globals.fetch, window: globals.window, localStorage: globals.localStorage, WebSocket: globals.WebSocket, BroadcastChannel: globals.BroadcastChannel, document: globals.document }
   const visibility = Object.assign(new EventTarget(), { hidden: false, visibilityState: 'visible' })
-  globalThis.document = visibility as any
-  globalThis.window = new EventTarget() as any
-  globalThis.localStorage = { getItem: () => null, setItem: () => {} } as any
-  ;(globalThis as any).__backgroundRoot = fs.root
-  Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
-  const sockets: any[] = [], requests: string[] = []
-  globalThis.WebSocket = class { onmessage; onclose; onopen; onerror; url: string; constructor(url: string) { this.url = url; sockets.push(this) } close() { this.onclose?.() } } as any
-  globalThis.BroadcastChannel = class { onmessage; close() {} } as any
-  t.after(() => { backend.close(); globalThis.fetch = original.fetch; globalThis.window = original.window; globalThis.localStorage = original.storage; globalThis.WebSocket = original.socket; globalThis.BroadcastChannel = original.channel; globalThis.document = original.document; delete (globalThis as any).__backgroundRoot })
-  const response = await backend.request('/api/auth/guest', { body: { name: 'Demand', password: 'test-only' } })
-  const cookie = response.headers.get('set-cookie')!.split(';')[0]
-  globalThis.fetch = (async (url, options = {}) => {
-    requests.push(String(url))
-    return backend.fetch(new Request(`https://backend.test${String(url).replace(/^\/pizarra/, '')}`, { ...options, headers: { ...options.headers as any, Cookie: cookie, Origin: backend.env.CURSADO_ORIGIN } }))
-  }) as typeof fetch
+  const events = new EventTarget(), work: string[] = []
+  globals.window = events
+  globals.document = visibility
+  globals.localStorage = { getItem: () => { work.push('storage read'); return 'previously-pending' }, setItem: () => { work.push('storage write') } }
+  globals.fetch = async () => { work.push('fetch'); throw new Error('File services must remain stopped') }
+  globals.WebSocket = class { constructor() { work.push('socket') } }
+  globals.BroadcastChannel = class { constructor() { work.push('channel') } }
+  t.after(() => { Object.assign(globals, original) })
   const client = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`)
-  const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)) }
-  const waitFor = async (predicate: () => boolean) => { for (let i = 0; i < 500 && !predicate(); i++) await settle(); assert.ok(predicate()) }
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
-  const stop = client.startCooperationBackground(), stopSecond = client.startCooperationBackground()
-  t.after(stop); t.after(stopSecond)
-  await waitFor(() => sockets.length === 1)
-  await client.synchronizeCooperation(); await settle()
-  const idle = requests.length
-  t.mock.timers.tick(60_000); await settle()
-  assert.equal(requests.length, idle)
-  sockets[0].onmessage({ data: JSON.stringify({ type: 'directory_changed', seq: 1 }) })
-  await waitFor(() => requests.length > idle)
-  await client.synchronizeCooperation(); await settle()
-  const afterPush = requests.length
-  window.dispatchEvent(new Event('cursado-workspace-saved'))
-  window.dispatchEvent(new Event('cursado-workspace-saved'))
-  t.mock.timers.tick(250); await settle()
-  assert.equal(requests.length, afterPush) // No sphere needs syncing; saves do not poll the directory.
-  stop()
-  sockets[0].onclose()
-  t.mock.timers.tick(1000)
-  await waitFor(() => sockets.length === 2)
-  await client.synchronizeCooperation(); await settle()
-  stopSecond()
-  const stopped = requests.length
-  t.mock.timers.tick(60_000); window.dispatchEvent(new Event('focus')); await settle()
-  assert.equal(requests.length, stopped)
-
-  // Exercise the real mirror wiring: a connection greeting must not bypass
-  // idle scheduling, whereas a collaborator joining must flush pending saves.
-  await backend.request('/api/auth/guest', { body: { name: 'IdlePeer', password: 'test-only' } })
-  await fs.put('manifests/subject-catalog.json', { version: 2, subjects: { math: { id: 'math', name: 'Math', storageKey: 'Math' } } })
-  const group = await client.createCooperationGroup('IdlePeer')
-  const binding = await client.shareCooperationSphere(group, { id: 'math', name: 'Math', color: '#123456' })
-  await waitFor(() => sockets.some(socket => socket.url.includes(`/socket/${binding.id}`)))
-  t.mock.timers.reset()
-  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: Date.now() })
-  const stopThird = client.startCooperationBackground()
-  t.after(stopThird)
-  await waitFor(() => sockets.length === 4)
-  await settle()
-  const sphereSocket = sockets.find(socket => socket.url.includes(`/socket/${binding.id}`))
-  assert.ok(sphereSocket)
-  const snapshotCount = () => requests.filter(url => url.includes('/snapshot')).length
-  const initialSnapshots = snapshotCount()
-  sphereSocket.onmessage({ data: JSON.stringify({ type: 'changed', seq: client.cooperationState().mirrors[binding.id].baseline.seq }) })
-  window.dispatchEvent(new Event('cursado-workspace-saved'))
-  t.mock.timers.tick(3_599_999); await settle()
-  assert.equal(snapshotCount(), initialSnapshots)
-  t.mock.timers.tick(1)
-  await waitFor(() => snapshotCount() > initialSnapshots)
-  await client.synchronizeCooperation(); await settle()
-  const soloSnapshots = snapshotCount()
-  window.dispatchEvent(new Event('cursado-workspace-saved'))
-  sphereSocket.onmessage({ data: JSON.stringify({ type: 'presence', users: [{ id: client.cooperationState().userId }, { id: 'peer' }], you: client.cooperationState().userId }) })
-  t.mock.timers.tick(250)
-  await waitFor(() => snapshotCount() > soloSnapshots)
-  await client.synchronizeCooperation()
-  stopThird()
-  // Restart with current presence and verify both socket pushes and pending saves
-  // sleep while hidden, then catch up when the page returns.
-  const stopFourth = client.startCooperationBackground()
-  t.after(stopFourth)
-  await settle()
-  visibility.hidden = true; visibility.visibilityState = 'hidden'; visibility.dispatchEvent(new Event('visibilitychange'))
-  const hiddenSnapshots = snapshotCount()
-  const currentSocket = sockets.filter(socket => socket.url.includes(`/socket/${binding.id}`)).at(-1)
-  currentSocket.onmessage({ data: JSON.stringify({ type: 'changed', seq: client.cooperationState().mirrors[binding.id].baseline.seq + 1 }) })
-  window.dispatchEvent(new Event('cursado-workspace-saved'))
-  t.mock.timers.tick(3_600_000); await settle()
-  assert.equal(snapshotCount(), hiddenSnapshots, 'hidden pushes and pending saves do not scan the workspace')
-  visibility.hidden = false; visibility.visibilityState = 'visible'; visibility.dispatchEvent(new Event('visibilitychange'))
-  t.mock.timers.tick(250)
-  await waitFor(() => snapshotCount() > hiddenSnapshots)
-  await client.synchronizeCooperation()
-  stopFourth()
+  const stops = [client.startCooperationBackground(), client.startCooperationBackground()]
+  for (const name of ['cursado-workspace-saved', 'online', 'focus', 'cursado-services-changed', 'cursado-cooperation-changed']) {
+    events.dispatchEvent(new Event(name))
+    t.mock.timers.tick(3_600_000)
+    await new Promise(resolve => setImmediate(resolve))
+  }
+  visibility.hidden = true; visibility.visibilityState = 'hidden'
+  visibility.dispatchEvent(new Event('visibilitychange'))
+  visibility.hidden = false; visibility.visibilityState = 'visible'
+  visibility.dispatchEvent(new Event('visibilitychange'))
+  stops.forEach(stop => { stop(); stop() })
+  client.startCooperationBackground()()
+  t.mock.timers.tick(3_600_000)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(work, [], 'no scheduler, discovery, storage scan or file connection may restart')
 })
