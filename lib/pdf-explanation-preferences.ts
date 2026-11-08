@@ -14,6 +14,6 @@ export function explanationSpecialtyInstructions(specialty: ExplanationSpecialty
       : orientation === 'horizontal'
         ? 'ORIENTACIÓN HORIZONTAL: el flujo principal avanza de izquierda a derecha: aumentá columna y conservá fila cuando no haya ramificaciones.'
         : 'ORIENTACIÓN AUTOMÁTICA: elegí arriba-abajo para jerarquías y izquierda-derecha para operaciones o procesos; conservá una dirección coherente.',
-    'SECUENCIA: cada paso cambia una sola idea visible. Incluí uno o dos comentarios breves anclados que expliquen qué cambia y por qué; el mapa debe entenderse sin encabezados externos. Resaltá el nodo y la relación activos y atenuá los pasos futuros. Cerrá verificando el resultado con los datos originales.',
+    'SECUENCIA: cada paso cambia una sola idea visible. Los comentarios son opcionales: usá comentarios:[] cuando etiquetas, datos y relaciones ya expliquen el paso. Agregá como máximo dos comentarios breves solo si aportan información nueva; nunca repitas el contenido del nodo. Resaltá el nodo y la relación activos y atenuá los pasos futuros. Si recibís contexto de un mapa anterior, conservá sus IDs, datos, relaciones y nodos activados al recrearlo o continuarlo. Cerrá verificando el resultado con los datos originales.',
   ].join('\n\n')
 }

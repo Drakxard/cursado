@@ -76,7 +76,14 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     event.preventDefault(); event.stopImmediatePropagation()
     readImage(id)
   }, true)
-  const checkpoint = () => { send('checkpoint', { draft: encode(Y.encodeStateAsUpdate(doc)), report, imported: !!doc.getMap('study-migration').get('complete') }); checkpointTimer = undefined }
+  let revision = 0, savedRevision = 0
+  const checkpoint = () => { if (checkpointTimer) clearTimeout(checkpointTimer); checkpointTimer = undefined; send('checkpoint', { draft: encode(Y.encodeStateAsUpdate(doc)), report, revision, imported: !!doc.getMap('study-migration').get('complete') }) }
+  onWindow('beforeunload', event => {
+    if (!initialized) return
+    canvas.finishStudyEdits(); checkpoint()
+    if (busy || revision > savedRevision) { event.preventDefault(); (event as BeforeUnloadEvent).returnValue = '' }
+  })
+  onDocument('visibilitychange', () => { if (initialized && document.visibilityState === 'hidden') { canvas.finishStudyEdits(); checkpoint() } })
   const atCenter = () => { const view = canvas.worldViewport(); return { x: view.x + view.width / 2, y: view.y + view.height / 2 } }
   const insert = (object: StudyObject) => {
     if (objectsMap(doc).has(object.id)) return
@@ -199,6 +206,8 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   onWindow('message', event => {
     if (event.origin !== location.origin || event.source !== parent || event.data?.session !== session || event.data?.boardId !== boardId) return
     const data = event.data
+    if (data.type === 'study-board:checkpoint' && initialized) { canvas.finishStudyEdits(); checkpoint() }
+    if (data.type === 'study-board:saved' && Number.isInteger(data.revision)) savedRevision = Math.max(savedRevision, Math.min(revision, data.revision))
     if (data.type === 'study-board:night-images' && ['auto', 'original', 'invert'].includes(data.mode)) { document.documentElement.dataset.nightImages = data.mode; localStorage.setItem('study-night-images', data.mode) }
     if (data.type === 'study-board:toggle-theme') document.querySelector<HTMLElement>('[data-theme-toggle]')?.click()
     if(data.type === 'study-board:pdf-published') {
@@ -270,7 +279,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (!initialized || lifetime.signal.aborted) return
     if (checkpointTimer) clearTimeout(checkpointTimer)
     checkpointTimer = setTimeout(checkpoint, 500)
-    emitPins(); send('changed')
+    revision++; emitPins(); send('changed', { revision })
   }
   doc.on('update', onUpdate)
   cleanups.push(() => doc.off('update', onUpdate))

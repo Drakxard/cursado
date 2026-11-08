@@ -21,6 +21,13 @@ await build({
   legalComments: "eof",
 })
 
+await build({
+  entryPoints: ['lib/client/pdf-explanation-tailwind.ts'],
+  outfile: 'public/pdfjs/web/viewer-explanation-tailwind.js',
+  bundle: true, platform: 'browser', format: 'esm', target: 'es2022',
+  loader: { '.css': 'text' }, minify: true,
+})
+
 // Load the compiler only when opening/importing a CDN-based presentation.
 await build({
   entryPoints: ["lib/client/pdf-explanation-import.ts"],
@@ -30,6 +37,7 @@ await build({
   format: "esm",
   target: "es2022",
   loader: { ".css": "text" },
+  external: ['./viewer-explanation-tailwind.js'],
   minify: true,
   legalComments: "eof",
 })

@@ -76,8 +76,8 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     if (loading) return loading;
     const pdf = app.pdfDocument;
     loading = (async () => {
-      const bytes = await pdf.getData();
-      const sourceHash = await hash(bytes);
+      // Stable material IDs let us restore notes without copying the entire PDF.
+      const sourceHash = query.workspaceFileId || query.key || query.materialId ? null : await hash(await pdf.getData());
       const identity = query.workspaceFileId || query.key || `${query.resourceType}:${query.materialId || sourceHash}`;
       const key = await hash(new TextEncoder().encode(identity));
       const root = query.localWorkspace ? await ensureWorkspaceRootHandle() : null;
@@ -121,7 +121,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       const extractionHash = data.fingerprint === fingerprint ? data.extractionHash || sourceHash : sourceHash;
       data.fingerprint = fingerprint;
       data.extractionHash = extractionHash;
-      documentState = { pdf, bytes, sourceHash: extractionHash, fingerprint, key, root, path, data };
+      documentState = { pdf, sourceHash: extractionHash, fingerprint, key, root, path, data };
       if (imported) {
         await persist(documentState);
       }
@@ -191,6 +191,10 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   async function transcription(state, page) {
     const key = `${state.fingerprint}:${page}`;
     if (state.data.transcriptions[key]) return state.data.transcriptions[key];
+    if (!state.sourceHash) {
+      state.sourceHash = await hash(await state.pdf.getData());
+      state.data.extractionHash = state.sourceHash;
+    }
     // Conjuntos stores Datalab blocks with original (one-based) page numbers.
     if (state.root) {
       const extraction = await read(state.root, `manifests/subject-voice/pdf/datalab-balanced-json-v1/${state.sourceHash}/extraction.json`);
@@ -205,7 +209,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         return text;
       }
     }
-    const source = await window.PDFLib.PDFDocument.load(state.bytes);
+    const source = await window.PDFLib.PDFDocument.load(await state.pdf.getData());
     const single = await window.PDFLib.PDFDocument.create();
     const [copied] = await single.copyPages(source, [page - 1]);
     single.addPage(copied);
@@ -282,6 +286,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     if (!modal) return;
     const previousFocus = modal.previousFocus;
     modal.cleanup?.();
+    for (const frame of modal.node.querySelectorAll('iframe')) {
+      frame.removeAttribute('srcdoc'); frame.src = 'about:blank'; frame.remove();
+    }
     modal.node.remove();
     modal = null;
     previousFocus?.focus();
@@ -323,6 +330,26 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     view.node.classList.add("pdf-explanation-fullpage");
     view.panel.classList.add("pdf-explanation-result");
     const iframe = document.createElement("iframe");
+    let graphContext = null;
+    const withGraphState = html => {
+      if (!entry.graphState) return html;
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      doc.getElementById('graph-state')?.remove();
+      const script = doc.createElement('script'); script.id = 'graph-state'; script.type = 'application/json';
+      script.textContent = JSON.stringify(entry.graphState).replace(/</g, '\\u003c'); doc.body.prepend(script);
+      return '<!doctype html>' + doc.documentElement.outerHTML;
+    };
+    const graphMessage = event => {
+      if (event.source !== iframe.contentWindow || modal !== view || event.data?.type !== 'pdf-explanation-graph-state') return;
+      const state = event.data.state;
+      if (!state || !Number.isInteger(state.step) || state.step < 0 || state.step > 100 || JSON.stringify(state).length > 20000) return;
+      graphContext = event.data.context;
+      if (JSON.stringify(entry.graphState) === JSON.stringify(state)) return;
+      entry.graphState = state;
+      persist(documentState).catch(report);
+    };
+    window.addEventListener('message', graphMessage);
+    view.cleanup = () => { window.removeEventListener('message', graphMessage); displayedHtml = ''; };
     iframe.title = entry.question;
     iframe.setAttribute("sandbox", "allow-scripts");
     iframe.setAttribute("referrerpolicy", "no-referrer");
@@ -349,7 +376,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         const { preparePdfExplanationHtml } = await import("./viewer-explanation-import.js");
         html = await preparePdfExplanationHtml(html);
       }
-      if (modal === view) { displayedHtml = html; iframe.srcdoc = csp + escapeBridge + html; }
+      if (modal === view) { displayedHtml = html; iframe.srcdoc = csp + escapeBridge + withGraphState(html); }
     };
     let currentLoad = loadHtml();
     currentLoad.catch(report);
@@ -374,12 +401,14 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         if (documentState !== state || modal !== view) return;
         const previous = entry.html;
         const previousReference = entry.htmlReference;
+        const previousGraphState = entry.graphState;
         entry.html = html;
+        delete entry.graphState;
         delete entry.htmlReference;
         try {
           if (state.root) await write(state.root, `manifests/pdf-explanations/${state.key}/${entry.id}.html`, html);
           await persist(state);
-        } catch (error) { entry.html = previous; if (previousReference) entry.htmlReference = previousReference; throw error; }
+        } catch (error) { entry.html = previous; entry.graphState = previousGraphState; if (previousReference) entry.htmlReference = previousReference; throw error; }
         openHtml(entry);
       } catch (error) { report(error); }
       finally { picker.value = ""; }
@@ -388,13 +417,17 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     const upload = icon("\u2193", "Importar HTML", () => picker.click());
     const download = icon("\u2191", "Exportar HTML", async () => {
       try { await currentLoad; } catch (error) { report(error); return; }
-      const url = URL.createObjectURL(new Blob([displayedHtml], { type: "text/html;charset=utf-8" }));
+      const url = URL.createObjectURL(new Blob([withGraphState(displayedHtml)], { type: "text/html;charset=utf-8" }));
       const link = document.createElement("a");
       link.href = url; link.download = `verlo-pagina-${entry.annotation.pageIndex + 1}.html`;
       document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     });
-    header.prepend(reload, download, upload);
+    const continueMap = icon('+', 'Continuar desde los nodos activos', () => {
+      if (!graphContext) { showToast('Esperá a que termine de cargar el mapa.', 'info', 3000); return; }
+      void ask(JSON.stringify(graphContext)).catch(report);
+    });
+    header.prepend(reload, download, upload, continueMap);
     view.panel.append(picker);
     iframe.focus();
   }
@@ -571,7 +604,13 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       if (restore.pending) { restore.pending = false; void restore(); }
     }
   }
-  async function ask() {
+  async function ask(context = '') {
+    // Capture before overlay() moves focus and the toolbar clears the selection.
+    const selection = window.getSelection();
+    const selectedText = selection && [...Array(selection.rangeCount)].some((_, i) => {
+      const range = selection.getRangeAt(i);
+      return range.startContainer.parentElement?.closest('.textLayer') && range.endContainer.parentElement?.closest('.textLayer');
+    }) ? selection.toString().trim() : '';
     menu.hidden = true;
     star.setAttribute("aria-expanded", "false");
     const page = app.pdfViewer.currentPageNumber;
@@ -802,8 +841,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       cleanupView?.();
     };
     modelSelect.addEventListener("change", () => { try { localStorage.setItem("pdf-explanation-model", modelSelect.value); } catch {} });
-    status.textContent = "Preparando la transcripción de la página…";
-    preparePage(pdf, page).then(() => {
+    const prepared = selectedText ? load().then(state => ({ state, text: selectedText })) : preparePage(pdf, page);
+    status.textContent = selectedText ? 'Texto seleccionado listo · Enter para explicar' : "Preparando la transcripción de la página…";
+    prepared.then(() => {
       if (modal === view && !generating) status.textContent = "Página lista · Enter para explicar";
     }, error => {
       if (modal === view && !generating) status.textContent = error.message;
@@ -836,7 +876,8 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         if (!selectedModel) throw new Error("Esperá a que se cargue el modelo antes de generar.");
         debug.model = selectedModel;
         status.textContent = "Preparando la transcripción de la página…";
-        const { state, text } = await preparePage(pdf, page);
+        const { state, text: sourceText } = await prepared;
+        const text = sourceText + (typeof context === 'string' && context ? '\n\nContexto del mapa que se desea continuar:\n' + context : '');
         status.textContent = "Generando la explicación visual…";
         debug.transcription = text;
         const image = await captureRegion();
@@ -871,6 +912,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       }
     });
   }
+  star.addEventListener('pointerdown', event => event.preventDefault());
   star.addEventListener("click", () => {
     if (modal?.node.classList.contains("pdf-explanation-composer")) close();
     else ask().catch(report);

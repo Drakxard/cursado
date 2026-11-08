@@ -37,7 +37,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
       assert.equal(body.model, "gpt-5-mini")
       assert.equal(body.specialty, 'prog')
       assert.equal(body.orientation, 'auto')
-      assert.equal(body.transcription, "Una derivada mide el cambio de la función.")
+      assert.equal(body.transcription, generations === 0 ? "Una derivada mide el cambio de la función." : 'Solo este fragmento seleccionado')
       assert.equal(body.question, generations === 0 ? question : "Explicalo")
       if (generations === 0) assert.match(body.image, /^data:image\/jpeg;base64,/)
       else assert.equal(body.image, undefined)
@@ -243,6 +243,12 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.evaluate(async () => {
       const manifests = await (await navigator.storage.getDirectory()).getDirectoryHandle("manifests")
       await manifests.removeEntry("subject-voice", { recursive: true })
+    })
+    await page.evaluate(() => {
+      const layer = document.querySelector('.page .textLayer')
+      const span = document.createElement('span'); span.textContent = 'Solo este fragmento seleccionado'; layer.append(span)
+      const range = document.createRange(); range.selectNodeContents(span)
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
     })
     await page.locator("#pdfExplanationButton").click()
     await page.locator("#pdf-explanation-question").press("Enter")

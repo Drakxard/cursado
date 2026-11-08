@@ -11,6 +11,32 @@ import { generalGraphFixture } from './helpers/explanation-general-graphs-fixtur
 import { avlTeachingFixture } from './helpers/explanation-avl-teaching-fixture.mts'
 import { mathGraphFixture } from './helpers/explanation-math-fixture.mts'
 
+test('holding a muted node persists activation per step in exported HTML and publishes continuation context', async () => {
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ reducedMotion: 'reduce' })
+  try {
+    const original = structuredLessonHtml(graphFixture)
+    await page.setContent(original)
+    await page.evaluate(() => { window.addEventListener('message', event => { (window as any).graphContext = event.data }) })
+    const node = page.locator('[data-node-id="E"]')
+    assert.equal(await node.getAttribute('data-state'), 'atenuado')
+    await node.hover(); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up()
+    assert.equal(await node.getAttribute('data-state'), 'destacado')
+    await page.waitForFunction(() => (window as any).graphContext?.context?.elementos.some((e: any) => e.id === 'E' && e.estado === 'destacado'))
+    await page.getByRole('button', { name: 'Siguiente', exact: true }).click()
+    assert.equal(await node.getAttribute('data-state'), 'normal')
+    await page.getByRole('button', { name: 'Anterior', exact: true }).click()
+    assert.equal(await node.getAttribute('data-state'), 'destacado')
+    // Export places saved state before the runtime so it is available at startup.
+    const state = await page.locator('#graph-state').textContent()
+    const exported = original.replace('<script id="graph-data"', `<script id="graph-state" type="application/json">${state}</script><script id="graph-data"`)
+    await page.setContent(exported)
+    assert.equal(await node.getAttribute('data-state'), 'destacado')
+    await node.focus(); await page.keyboard.press('Enter')
+    assert.equal(await node.getAttribute('data-state'), 'atenuado')
+  } finally { await browser.close() }
+})
+
 test('math maps render fractions, matrices, edge labels and callouts offline in both directions', async () => {
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage({ viewport: { width: 1366, height: 768 }, reducedMotion: 'reduce' })

@@ -1,0 +1,59 @@
+name: Memoria en reposo y correcciones del documento
+
+on:
+  push:
+    branches: ['codex/documento-resource-fixes']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resource-usage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+        working-directory: pizarraproyecto-main
+      - run: pnpm install --frozen-lockfile
+        working-directory: pizarra-sync
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:pdf-explanation-ui
+      - run: npm run typecheck
+      - run: pnpm --filter @komuboard/client-web typecheck
+        working-directory: pizarra-sync
+      - name: Estrella, selección, HTML, nodos activados y comentarios
+        run: npm run test:explanations
+      - name: Compilar la aplicación de producción
+        run: npm run build
+      - name: Medir Inicio y Materia durante dos minutos cada uno
+        shell: bash
+        run: |
+          node node_modules/next/dist/bin/next start > "$RUNNER_TEMP/cursado-memory.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl --silent --fail http://localhost:3000/ > /dev/null; then break; fi
+            sleep 1
+          done
+          node --test tests/idle-memory.browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: memoria-y-explicaciones
+          path: |
+            test-results/
+            ${{ runner.temp }}/cursado-memory.log
