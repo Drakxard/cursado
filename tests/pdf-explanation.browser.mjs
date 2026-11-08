@@ -361,12 +361,15 @@ test("star starts Datalab before confirmation; Enter waits for that job and retr
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
   let transcriptions = 0, generations = 0
+  let transcriptionStarted
+  const transcriptionObserved = new Promise(resolve => { transcriptionStarted = resolve })
   let release
   const pending = new Promise(resolve => { release = resolve })
   await page.route("https://prepare.test/**", async route => {
     const url = new URL(route.request().url())
     if (url.pathname === "/api/inscreen/datalab-transcribe") {
       transcriptions++
+      transcriptionStarted()
       await pending
       return route.fulfill({ json: { markdown: "Transcripción de la página actual." } })
     }
@@ -401,9 +404,8 @@ test("star starts Datalab before confirmation; Enter waits for that job and retr
     await page.goto("https://prepare.test/pdfjs/web/viewer.html?file=%2Fsample.pdf")
     await page.waitForFunction(() => window.PDFViewerApplication?.pdfViewer?.getPageView(0)?.annotationEditorLayer?.annotationEditorLayer, null, { timeout: 20_000 })
     await page.evaluate(() => window.initPdfExplanations({ app: window.PDFViewerApplication, query: {}, ensureWorkspaceRootHandle: async () => null, inscreenApiFetch: fetch, showToast: () => {} }))
-    const transcriptionRequest = page.waitForRequest("**/api/inscreen/datalab-transcribe")
     await page.locator("#pdfExplanationButton").click()
-    await transcriptionRequest
+    await transcriptionObserved
     assert.equal(transcriptions, 1)
     assert.equal(generations, 0)
     await page.locator("#pdf-explanation-question").press("Enter")

@@ -38,8 +38,10 @@ jobs:
       - name: Estrella, selección, HTML, nodos activados y comentarios
         run: npm run test:explanations
       - name: Compilar la aplicación de producción
+        if: ${{ !cancelled() }}
         run: npm run build
       - name: Medir Inicio y Materia durante dos minutos cada uno
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           node node_modules/next/dist/bin/next start > "$RUNNER_TEMP/cursado-memory.log" 2>&1 &
