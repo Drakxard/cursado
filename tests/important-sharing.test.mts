@@ -41,7 +41,7 @@ test('real cooperative rooms deliver repeated rows, accept additions from recipi
   await request(b, `groups/${groupId}/accept`, {})
   const refresh = async actor => { const result = await (await request(actor, 'groups')).json(); actor.state.userId = result.user.id; actor.state.groups = result.groups }
   await refresh(a); await refresh(b)
-  const bundled = await build({ entryPoints: ['lib/client/important-cooperation.ts'], bundle: true, write: false, platform: 'node', format: 'esm', plugins: [{ name: 'context', setup(builder) {
+  const bundled = await build({ entryPoints: ['lib/client/important-cooperation.ts'], bundle: true, write: false, platform: 'browser', format: 'esm', plugins: [{ name: 'context', setup(builder) {
     builder.onResolve({ filter: /\/(cooperation|cooperation-upload|local-workspace-client)(?:\.ts)?$/ }, args => ({ path: args.path.split('/').at(-1)!.replace('.ts',''), namespace: 'fixture' }))
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path==='cooperation' ? 'export const cooperationState=()=>globalThis.__importantContext.state;export const cooperationApi=(...args)=>globalThis.__importantContext.api(...args);export const refreshCooperation=()=>globalThis.__importantContext.refresh();' : path==='cooperation-upload' ? 'export const uploadCooperationFile=(...args)=>globalThis.__importantContext.upload(...args)' : 'export const getReadyWorkspaceHandle=()=>globalThis.__importantContext.fs.root;export const getReadyInscreenConfigToken=()=>"";' }))
   } }] })
