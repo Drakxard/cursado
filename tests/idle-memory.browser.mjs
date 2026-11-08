@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { chromium } from '@playwright/test'
 
 const origin = process.env.CURSADO_TEST_URL || 'http://localhost:3000'
@@ -51,12 +51,19 @@ test('production Study and the material list stay bounded while idle', { timeout
   const subject = page.getByRole('button', { name: /Numérico/ }).first()
   await subject.waitFor({ timeout: 30_000 })
   const client = await page.context().newCDPSession(page)
+  const browserClient = await browser.newBrowserCDPSession()
   await client.send('Performance.enable')
   const measure = async (screen, elapsed) => {
     const metrics = Object.fromEntries((await client.send('Performance.getMetrics')).metrics.map(item => [item.name, item.value]))
     const dom = await client.send('Memory.getDOMCounters')
-    samples.push({ screen, elapsed, ...metrics, ...dom })
-    console.log(JSON.stringify({ screen, elapsed, heapMB: metrics.JSHeapUsedSize / 1048576, nodes: dom.nodes, listeners: dom.jsEventListeners, taskSeconds: metrics.TaskDuration }))
+    // Tab memory also includes native allocations, decoded resources and code.
+    const renderers = (await browserClient.send('SystemInfo.getProcessInfo')).processInfo.filter(process => process.type === 'renderer')
+    const rendererRssBytes = process.platform === 'linux' ? (await Promise.all(renderers.map(async process => {
+      const status = await readFile(`/proc/${process.id}/status`, 'utf8').catch(() => '')
+      return Number(status.match(/^VmRSS:\s+(\d+)/m)?.[1] || 0) * 1024
+    }))).reduce((a, b) => a + b, 0) : null
+    samples.push({ screen, elapsed, rendererRssBytes, ...metrics, ...dom })
+    console.log(JSON.stringify({ screen, elapsed, heapMB: metrics.JSHeapUsedSize / 1048576, rendererRssMB: rendererRssBytes / 1048576, nodes: dom.nodes, listeners: dom.jsEventListeners, taskSeconds: metrics.TaskDuration }))
   }
   try {
     for (const screen of ['inicio', 'materia']) {
