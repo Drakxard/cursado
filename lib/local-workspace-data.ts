@@ -1,6 +1,7 @@
 "use client"
 
 import { isNativeReadOnly, nativeFileUrl, readOnlyError } from './native-workspace.ts'
+import { FILE_CLOUD_SYNC_ENABLED } from './file-sync-policy.ts'
 import { COOPERATIVE_TAB_ID } from './cooperation-model.ts'
 import { readWorkspaceJson, writeWorkspaceJson } from './workspace-json.ts'
 import { withWorkspaceFileLock } from './workspace-file-lock.ts'
@@ -335,6 +336,7 @@ async function repairLocalWidgetTargetSyncManifest(manifest: WidgetTargetSyncMan
 }
 
 export async function enqueueLocalWidgetCatalog(subjects: WidgetCatalogSubject[]) {
+  if (!FILE_CLOUD_SYNC_ENABLED) return
   await withWidgetTargetSyncLock(async () => {
     const manifest = await readWidgetTargetSyncManifest()
     const normalized = normalizeWidgetCatalogSubjects(subjects)
@@ -348,6 +350,7 @@ export async function enqueueLocalWidgetCatalog(subjects: WidgetCatalogSubject[]
 }
 
 export async function enqueueLocalWidgetTarget(target: WidgetTargetPatch) {
+  if (!FILE_CLOUD_SYNC_ENABLED) return
   await withWidgetTargetSyncLock(async () => {
     const manifest = await readWidgetTargetSyncManifest()
     const subjectId = await resolveLocalLogicalSubjectId(target.subjectId)
@@ -367,6 +370,7 @@ export async function enqueueLocalWidgetTarget(target: WidgetTargetPatch) {
 }
 
 export async function enqueueLocalNotebookWidgetTargets(subjectIds: string[]) {
+  if (!FILE_CLOUD_SYNC_ENABLED) return
   for (const subjectId of subjectIds) {
     const target = getNotebookLmShortcutTarget(await getLocalSubjectShortcuts(subjectId))
     await enqueueLocalWidgetTarget({
@@ -471,6 +475,7 @@ async function runLocalWidgetTargetSyncQueue() {
 }
 
 export function processLocalWidgetTargetSyncQueue(): Promise<Awaited<ReturnType<typeof getLocalWidgetTargetSyncSummary>>> {
+  if (!FILE_CLOUD_SYNC_ENABLED) return Promise.resolve({ pending: 0, failed: 0, errors: [], revision: 0, lastPublishedAt: '' })
   if (widgetTargetSyncRun) {
     widgetTargetSyncRequested = true
     return widgetTargetSyncRun.then(() => {
@@ -535,6 +540,7 @@ async function getDriveLocation(material: SubjectDayMaterial, preferredSubjectNa
 }
 
 export async function enqueueLocalMaterialDriveUpload(material: SubjectDayMaterial, preferredSubjectName = "", force = false) {
+  if (!FILE_CLOUD_SYNC_ENABLED) return
   const manifest = await readDriveSyncManifest()
   const location = await getDriveLocation(material, preferredSubjectName)
   const previous = manifest.items.find((item) => item.materialId === material.id)
@@ -556,6 +562,7 @@ export async function enqueueLocalMaterialDriveUpload(material: SubjectDayMateri
 }
 
 async function enqueueLocalMaterialDriveDelete(materialId: number) {
+  if (!FILE_CLOUD_SYNC_ENABLED) return
   const manifest = await readDriveSyncManifest()
   const current = manifest.items.find((item) => item.materialId === materialId)
   if (!current) return
@@ -656,6 +663,7 @@ async function runLocalDriveSyncQueue() {
 }
 
 export async function processLocalDriveSyncQueue(): Promise<Awaited<ReturnType<typeof getLocalDriveSyncSummary>>> {
+  if (!FILE_CLOUD_SYNC_ENABLED) return { synced: 0, pending: 0, failed: 0, errors: [] }
   const { getAzureSyncStatus, syncLocalWorkspaceToAzure } = await import("./client/azure-workspace-sync")
   if ((await getAzureSyncStatus()).configured) {
     const root = getReadyWorkspaceHandle()

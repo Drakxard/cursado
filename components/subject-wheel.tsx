@@ -16,6 +16,8 @@ import type { SphereBinding } from '@/lib/client/cooperation-files'
 import type { BoardPdfReference } from "@/lib/board-library-contract"
 
 import { isNativeReadOnly } from '@/lib/native-workspace'
+import { FILE_CLOUD_SYNC_ENABLED } from '@/lib/file-sync-policy'
+import { restoreLocalCooperationBoards } from '@/lib/client/cooperation'
 
 import { SubjectHomeCard } from '@/components/subject-home-card'
 
@@ -1412,7 +1414,11 @@ export function SubjectWheel({
   },[])
 
   useEffect(() => {
-    if (isNativeReadOnly() || !LOCAL_STORAGE_MODE || !localWorkspaceReady) return
+    if (localWorkspaceReady) void restoreLocalCooperationBoards().catch(reportCooperationError)
+  }, [localWorkspaceReady])
+
+  useEffect(() => {
+    if (!FILE_CLOUD_SYNC_ENABLED || isNativeReadOnly() || !LOCAL_STORAGE_MODE || !localWorkspaceReady) return
     const subjects = Object.values(customSubjects).map(({ id, name, color }) => ({ id, name, color }))
     void enqueueLocalWidgetCatalog(subjects)
       .then(() => enqueueLocalNotebookWidgetTargets(subjects.map((subject) => subject.id)))
@@ -2201,10 +2207,6 @@ export function SubjectWheel({
 
     void syncSession()
 
-    const intervalId = window.setInterval(() => {
-      void syncSession()
-    }, 30000)
-
     const handleFocus = () => {
       if (document.visibilityState === "hidden") return
       void syncSession()
@@ -2216,7 +2218,6 @@ export function SubjectWheel({
     return () => {
       isCancelled = true
       controller.abort()
-      window.clearInterval(intervalId)
       window.removeEventListener("focus", handleFocus)
       document.removeEventListener("visibilitychange", handleFocus)
     }
@@ -2671,12 +2672,9 @@ export function SubjectWheel({
       const next = new Date()
       return getCurrentWeekNumber(current) === getCurrentWeekNumber(next) ? current : next
     })
-    const intervalId = window.setInterval(() => {
-      updateWeek()
-    }, 60_000)
     window.addEventListener("focus", updateWeek)
 
-    return () => { window.clearInterval(intervalId); window.removeEventListener("focus", updateWeek) }
+    return () => { window.removeEventListener("focus", updateWeek) }
   }, [])
 
   useEffect(() => {
@@ -8067,7 +8065,7 @@ export function SubjectWheel({
               <Button type="button" variant="outline" disabled={isPermanentlyDeleting}>Cancelar</Button>
             </DialogClose>
             {deleteConfirmationTarget?.type === 'tab' ? <Button type="button" variant="destructive" onClick={removeWorkspaceTab}>Eliminar pestaña</Button> : <>
-            <DropdownMenu onOpenChange={open=>{if(open)void refreshCooperation().catch(error=>setWorkspaceNoticeMessage(error instanceof Error?error.message:String(error)))}}>
+            <DropdownMenu onOpenChange={open=>{if(open && FILE_CLOUD_SYNC_ENABLED)void refreshCooperation().catch(error=>setWorkspaceNoticeMessage(error instanceof Error?error.message:String(error)))}}>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.length === 0 || isPermanentlyDeleting}>
                   Mover
@@ -8084,7 +8082,7 @@ export function SubjectWheel({
                 {cooperative.groups.map(group => <DropdownMenuItem key={group.id} onClick={() => void cooperateDeleteTarget(group.id, true)}>Cooperar · {group.members.map(m => m.display_name).join(', ')}{!group.accepted?' · Aceptar grupo':''}</DropdownMenuItem>)}
               </DropdownMenuContent>
             </DropdownMenu>
-            <DropdownMenu onOpenChange={open=>{if(open)void refreshCooperation().catch(error=>setWorkspaceNoticeMessage(error instanceof Error?error.message:String(error)))}}>
+            <DropdownMenu onOpenChange={open=>{if(open && FILE_CLOUD_SYNC_ENABLED)void refreshCooperation().catch(error=>setWorkspaceNoticeMessage(error instanceof Error?error.message:String(error)))}}>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" disabled={deleteMoveDestinationTabs.length + cooperative.groups.length === 0 || isPermanentlyDeleting}>
                   <Link2 className="h-4 w-4" />

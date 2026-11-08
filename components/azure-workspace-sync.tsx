@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createIdleSync } from "@/lib/client/idle-sync"
+import { FILE_CLOUD_SYNC_ENABLED, LOCAL_FILES_MESSAGE } from '@/lib/file-sync-policy'
 import { getAzureSyncStatus, getAzureWorkspaceCode, restoreMissingAzureFiles, setAzureWorkspaceCode, syncLocalWorkspaceToAzure,
   type AzureSyncStatus, type AzureSyncSummary } from "@/lib/client/azure-workspace-sync"
 
@@ -14,7 +15,7 @@ export function useAzureWorkspaceSync(root: FileSystemDirectoryHandle | null, en
   const [message, setMessage] = useState("")
 
   useEffect(() => {
-    if (!enabled || !root) return
+    if (!FILE_CLOUD_SYNC_ENABLED || !enabled || !root) return
     let cancelled = false
     const run = async (synchronize = false) => {
       try {
@@ -56,6 +57,7 @@ export function useAzureWorkspaceSync(root: FileSystemDirectoryHandle | null, en
   }, [root, enabled, auto])
 
   const sync = async () => {
+    if (!FILE_CLOUD_SYNC_ENABLED) { setMessage(LOCAL_FILES_MESSAGE); return }
     if (!root) return
     setBusy(true); setError(""); setMessage("")
     try {
@@ -67,6 +69,7 @@ export function useAzureWorkspaceSync(root: FileSystemDirectoryHandle | null, en
     finally { setBusy(false) }
   }
   const recover = async (sourceCode: string) => {
+    if (!FILE_CLOUD_SYNC_ENABLED) { setMessage(LOCAL_FILES_MESSAGE); return }
     if (!root) return
     setBusy(true); setError(""); setMessage("")
     try {

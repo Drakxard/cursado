@@ -1,5 +1,6 @@
 import { buildSynthesisLocalStorageKey, type SynthesisContext } from "../synthesis-context.ts"
 import { isNativeReadOnly } from '../native-workspace.ts'
+import { FILE_CLOUD_SYNC_ENABLED } from '../file-sync-policy.ts'
 import { SYNTHESIS_WORKSPACE_STORAGE_KEY, referencedLocalImageIds, type SynthesisWorkspaceV2 } from "../synthesis-workspace.ts"
 import { loadSynthesisImage } from "./synthesis-images.ts"
 import { getSynthesisFolderStore } from "./synthesis-persistence.ts"
@@ -9,6 +10,7 @@ export const SYNTHESIS_SYNC_EVENT = "synthesis-sync-status"
 const running = new Map<string, Promise<boolean>>()
 
 export function syncSynthesis(context: SynthesisContext): Promise<boolean> {
+  if (!FILE_CLOUD_SYNC_ENABLED) return Promise.resolve(true)
   if (isNativeReadOnly()) return Promise.resolve(false)
   const key = buildSynthesisLocalStorageKey(SYNTHESIS_WORKSPACE_STORAGE_KEY, context)
   const existing = running.get(key)

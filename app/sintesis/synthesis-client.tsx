@@ -20,6 +20,7 @@ import { createAsyncLocalAutosave } from "@/lib/client/async-local-autosave"
 import { getSynthesisFolderStore } from "@/lib/client/synthesis-persistence"
 import { synthesisContent, type FolderSynthesis } from "@/lib/client/synthesis-folder-store"
 import { syncSynthesis, SYNTHESIS_SYNC_EVENT } from "@/lib/client/synthesis-sync"
+import { FILE_CLOUD_SYNC_ENABLED } from '@/lib/file-sync-policy'
 import { parseStoredSynthesisWorkspace, preserveSynthesisCopy, type SynthesisLocalCopy } from "@/lib/client/synthesis-local-copies"
 import {
   SYNTHESIS_WORKSPACE_PENDING_KEY, SYNTHESIS_WORKSPACE_STORAGE_KEY, childrenOf,
@@ -147,6 +148,7 @@ export function SynthesisClient({ context, legacyReturnToken }: { context: Synth
 
   useEffect(() => {
     const sync = () => { if (!editorOpenRef.current && !autosave.dirty) void syncSynthesis(context) }
+    if (!FILE_CLOUD_SYNC_ENABLED) return
     let disposed = false
     const status = async (event: Event) => {
       const detail = (event as CustomEvent<{ key: string; error?: string }>).detail
