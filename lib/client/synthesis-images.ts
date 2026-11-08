@@ -38,12 +38,15 @@ export async function migrateSynthesisImagesToFolder(folder: SynthesisFolderStor
       request.onerror = () => reject(request.error)
     })
     for (const key of keys) {
+      // Existing UUID images are immutable. Do not load every legacy blob again
+      // whenever a fresh Study tab starts its migration pass.
+      if (await folder.readImage(String(key))) continue
       const blob = await new Promise<Blob>((resolve, reject) => {
         const request = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(key)
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })
-      if (blob instanceof Blob && !(await folder.readImage(String(key)))) await folder.saveImage(String(key), blob)
+      if (blob instanceof Blob) await folder.saveImage(String(key), blob)
     }
   } finally { db.close() }
 }

@@ -88,6 +88,8 @@ test("Azure sync uploads PDFs in bounded blocks, includes explanations, skips un
   await getAzureSyncStatus(true)
   const local = folder()
   await local.put("teoria/tema/documento.pdf", new Uint8Array(AZURE_UPLOAD_CHUNK_SIZE + 12))
+  // Uploading in blocks must not hide an earlier whole-file hash allocation.
+  Object.defineProperty(local.files.get('teoria/tema/documento.pdf')!, 'arrayBuffer', { value() { throw new Error('Whole-file allocation') } })
   await local.put("manifests/pdf-explanations/id/demo.html", "<html>Explicación</html>")
   await local.put("manifests/subject-voice/transcription.json", '{"text":"Página"}')
   await local.put("User.Services", "private-token")

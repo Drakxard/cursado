@@ -2,7 +2,7 @@
 import { getReadyInscreenConfigToken, getReadyWorkspaceHandle, loadServicesFile, loadWorkspaceHandle, queryWorkspacePermission, setReadyInscreenConfigToken } from '@/lib/local-workspace-client'
 import { isLibraryPath, LIBRARY_ROOTS, LIBRARY_STATE_PATH, type LibraryManifest, type LibraryFile, type LibraryItem } from '@/lib/workspace-library'
 import { SUBJECTS } from '@/lib/subjects'
-import { Sha256 } from '@aws-crypto/sha256-js'
+import { hashBlob } from './blob-hash'
 import { HOME_SUBJECT_WEEKDAY } from '@/lib/home-schedule'
 import { recoverLegacyLibrary } from './workspace-library-legacy'
 
@@ -65,11 +65,7 @@ export async function libraryOwnerApi(action: string, body: Record<string, unkno
   return value
 }
 async function hash(blob: Blob) {
-  if (blob.size < 8 * 1024 ** 2) return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map(b => b.toString(16).padStart(2, '0')).join('')
-  const digest = new Sha256(), reader = blob.stream().getReader()
-  try { while (true) { const chunk = await reader.read(); if (chunk.done) break; digest.update(chunk.value) } }
-  finally { reader.releaseLock() }
-  return [...await digest.digest()].map(b => b.toString(16).padStart(2, '0')).join('')
+  return hashBlob(blob)
 }
 export async function scanLibraryFiles(root: FileSystemDirectoryHandle): Promise<Candidate[]> {
   const output: Candidate[] = []

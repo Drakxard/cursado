@@ -3,6 +3,7 @@ import { safeCooperationPath, type Json } from '../cooperation-model.ts'
 import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
 import { readWorkspaceJson, writeWorkspaceJson, writeWorkspaceJsonIfUnchanged } from '../workspace-json.ts'
 import { validateAudioWorkspace } from '../subject-audio-model.ts'
+import { hashBlob } from './blob-hash.ts'
 
 export type SphereBinding = { id: string; groupId: string; subjectId: string; storageKey: string; sourceId: string; sourceKey: string; name: string; color: string; owner: boolean; reuseLocalIds?: boolean; legacyStorageKeys?: string[]; pathAliases?: Record<string, string>; numberAliases?: Record<string, number> }
 export type MirrorFile = { key: string; value?: Json; blob?: Blob }
@@ -13,7 +14,7 @@ function localFileError(error: unknown, path: string, action: string): Error {
   return Object.assign(new Error(`No se pudo ${action} «${path}». ${detail}`, { cause: error }), { name: cause?.name || 'Error' })
 }
 export async function digest(blob: Blob) {
-  try { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map(x => x.toString(16).padStart(2, '0')).join('') }
+  try { return await hashBlob(blob) }
   catch (error) {
     const filename = (blob as File).name
     if (filename) throw localFileError(error, filename, 'leer')
