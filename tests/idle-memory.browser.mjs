@@ -9,7 +9,11 @@ test('production Study and the material list stay bounded while idle', { timeout
   const browser = await chromium.launch({ headless: true })
   t.after(() => browser.close())
   const page = await browser.newPage({ viewport: { width: 1366, height: 768 } })
-  const errors = [], samples = []
+  const errors = [], samples = [], fileRequests = []
+  page.on('request', request => {
+    if (/\/api\/(?:storage\/azure|inscreen\/(?:workspace|synthesis-tree|synthesis-images|widget-targets)|google\/drive)|\/pizarra\/(?:api\/cooperation|upload-session)/.test(request.url())) fileRequests.push(request.url())
+  })
+  page.on('websocket', socket => { if (/cooperation/.test(socket.url())) fileRequests.push(socket.url()) })
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
     FileSystemHandle.prototype.queryPermission = async () => 'granted'
@@ -27,6 +31,9 @@ test('production Study and the material list stay bounded while idle', { timeout
       await writer.write(JSON.stringify(value)); await writer.close()
     }
     const now = new Date(), date = now.toISOString(), subject = 'custom-numerico'
+    // Previously enabled services must not restart uploads in local mode.
+    await write('manifests/workspace-library-sync.json', { version: 1, workspaceId: 'previous-library', enabled: true, name: 'Local', hashes: {} })
+    await write('manifests/inscreen-widget-target-sync.json', { version: 1, items: [{ id: 'pending', kind: 'catalog', subjects: [], status: 'pending' }] })
     const weekday = (now.getDay() + 6) % 7
     const week = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(2026, 2, 23)) / (7 * 86400000)) + 2
     await write('manifests/workspace-state.json', { workspaceTabs: {}, activeWorkspaceTabId: 'main', isMainWorkspaceTabVisible: true,
@@ -80,6 +87,7 @@ test('production Study and the material list stay bounded while idle', { timeout
       assert.equal(await page.locator('iframe').count(), 0, 'idle Study must not retain a PDF or board iframe')
     }
     assert.deepEqual(errors, [])
+    assert.deepEqual(fileRequests, [], 'local startup and the PDF list must not contact file sync services')
   } finally {
     await mkdir('test-results/idle-memory', { recursive: true })
     await writeFile('test-results/idle-memory/samples.json', JSON.stringify({ samples, errors }, null, 2))

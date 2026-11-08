@@ -2,7 +2,7 @@ name: Memoria en reposo y correcciones del documento
 
 on:
   push:
-    branches: ['codex/documento-resource-fixes']
+    branches: ['codex/documento-resource-fixes', 'codex/local-files-only']
   workflow_dispatch:
 
 permissions:
@@ -42,7 +42,7 @@ jobs:
         run: npm run test:explanations
       - name: Huellas por bloques, Azure y biblioteca
         if: ${{ !cancelled() }}
-        run: node --test --experimental-strip-types tests/blob-hash.test.mts tests/azure-workspace-sync.test.mts tests/workspace-library-publisher.test.mts tests/subject-pdf-search.test.mts tests/important-sharing.test.mts
+        run: node --test --experimental-strip-types tests/blob-hash.test.mts tests/azure-workspace-sync.test.mts tests/workspace-library-publisher.test.mts tests/subject-pdf-search.test.mts tests/important-sharing.test.mts tests/local-files-only.test.mts tests/cooperation-background.test.mts
       - name: Compilar la aplicación de producción
         if: ${{ !cancelled() }}
         run: npm run build

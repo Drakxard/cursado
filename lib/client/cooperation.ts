@@ -1,5 +1,6 @@
 'use client'
 import { createIdleSync } from './idle-sync.ts'
+import { FILE_CLOUD_SYNC_ENABLED } from '../file-sync-policy.ts'
 import { withWorkspaceFileLock } from '../workspace-file-lock.ts'
 import { uploadCooperationFile } from './cooperation-upload.ts'
 import { cooperationRequest } from './cooperation-request.ts'
@@ -126,9 +127,13 @@ export async function restoreCooperationOffline() {
   const userId = localStorage.getItem('cursado-cooperation-user')
   if (!userId) return
   activeRoot = await root()
-  state = await readJson(activeRoot, `.cooperation/${userId}/state.json`, { version: 1, userId, groups: [], mirrors: {}, deletions: [] } as CooperationState)
+  state = await readJson(activeRoot, `.cooperation/${userId}/state.json`, { version: 1, userId, groups: [], mirrors: {}, deletions: [] } as CooperationState, !FILE_CLOUD_SYNC_ENABLED)
+  if (!FILE_CLOUD_SYNC_ENABLED) {
+    // Keep only board identities, not cached file snapshots or pending transfers.
+    state = { version: 1, userId, groups: [], deletions: [], mirrors: Object.fromEntries(Object.entries(state.mirrors).map(([id, mirror]) => [id, { binding: mirror.binding, baseline: { seq: 0, resources: {}, conflicts: [] } }])) }
+  }
   cooperationChanged()
-  await resumePendingUndos()
+  if (FILE_CLOUD_SYNC_ENABLED) await resumePendingUndos()
 }
 export async function createCooperationGroup(names: string) {
   const result = await cooperationApi('groups', { names })
@@ -924,6 +929,7 @@ async function repairLegacyCooperationCopies() {
   }
 }
 async function connectMirror(id: string) {
+  if (!FILE_CLOUD_SYNC_ENABLED) return
   if (isUndoPending(id) || (state.removedSpheres || []).includes(id) || sockets.has(id) || connectingSockets.has(id) || navigator.onLine === false) return
   connectingSockets.add(id)
   const userId = state.userId, directory = id === '@directory', generation = connectionGeneration
@@ -963,6 +969,7 @@ let syncing: Promise<void> | null = null
 let syncAgain = false
 let deferredBackgroundSync = false
 function synchronizeInBackground() {
+  if (!FILE_CLOUD_SYNC_ENABLED) return
   if (typeof document !== 'undefined' && document.hidden) { deferredBackgroundSync = true; return }
   deferredBackgroundSync = false
   void synchronizeCooperation().catch(error => {
@@ -1069,8 +1076,21 @@ export function localCooperationBoardId(subjectId: string, id: string) {
   return b && !b.owner ? `${id}-${b.id.slice(0, 8)}` : id
 }
 export async function cooperationStudyRoomId(subjectId: string | undefined, boardId: string) {
+  // Also support direct links that bypass the Study home screen.
+  if (!FILE_CLOUD_SYNC_ENABLED) await restoreLocalCooperationBoards()
   const binding = Object.values(state.mirrors).find(m => m.binding.subjectId === subjectId)?.binding
   return binding ? cooperativeStudyRoomId(binding, boardId) : undefined
+}
+let localBoardsRoot: FileSystemDirectoryHandle | null = null
+let localBoardsLoading: Promise<void> | null = null
+export function restoreLocalCooperationBoards(): Promise<void> {
+  const handle = getReadyWorkspaceHandle()
+  if (FILE_CLOUD_SYNC_ENABLED || !handle) return Promise.resolve()
+  if (localBoardsRoot === handle && localBoardsLoading) return localBoardsLoading
+  localBoardsRoot = handle
+  const loading: Promise<void> = restoreCooperationOffline().catch(error => { if (localBoardsLoading === loading) { localBoardsLoading = null; localBoardsRoot = null }; throw error })
+  localBoardsLoading = loading
+  return loading
 }
 export function cooperationPresence(subjectId: string) {
   const b = Object.values(state.mirrors).find(m => m.binding.subjectId === subjectId)?.binding
@@ -1090,6 +1110,7 @@ export async function dismissCooperationSphere(id: string) { await withStateLock
 
 /** Used by the standalone PDF viewer, which may outlive its originating Study tab. */
 export function startCooperationBackground() {
+  if (!FILE_CLOUD_SYNC_ENABLED) return () => {}
   backgroundUsers++
   let released = false
   const release = () => { if (released) return; released = true; if (--backgroundUsers === 0) { stopBackground?.(); stopBackground = null } }

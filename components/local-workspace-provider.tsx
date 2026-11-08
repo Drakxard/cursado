@@ -6,7 +6,7 @@ import QRCode from "qrcode"
 import { ServicesEditor } from "@/components/services-editor"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { SERVICE_GROUPS, emptyServicesDraft, type ServiceGroup, type ServicesDraft, type ServicesStatus } from "@/lib/services-config"
-import { getSynthesisFolderStore } from "@/lib/client/synthesis-persistence"
+import { FILE_CLOUD_SYNC_ENABLED, LOCAL_FILES_MESSAGE } from '@/lib/file-sync-policy'
 
 import { LocalFetchInterceptor } from "@/components/local-fetch-interceptor"
 import { AzureWorkspaceSyncControls, useAzureWorkspaceSync } from "@/components/azure-workspace-sync"
@@ -282,7 +282,7 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
         </button>)}
       </div>
       {servicesFileMessage ? <p className="text-xs text-emerald-700">{servicesFileMessage}</p> : null}
-      <details className="rounded-xl border p-3 text-sm">
+      {FILE_CLOUD_SYNC_ENABLED ? <details className="rounded-xl border p-3 text-sm">
         <summary className="cursor-pointer font-medium">Sincronizacion y dispositivos</summary>
         <div className="mt-3 space-y-3">
           {azure.status?.configured ? <AzureWorkspaceSyncControls sync={azure} /> : <div>
@@ -299,7 +299,7 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
           <p className="text-xs text-slate-600">R2 revision {widgetSummary.revision} · {widgetSummary.pending} pendientes · {widgetSummary.failed} con error</p>
           <div className="flex gap-2"><button type="button" onClick={onPair} disabled={busy || !apis.r2} className="rounded-lg border px-3 py-2 disabled:opacity-50">Vincular telefono</button>{widgetSummary.pending > 0 || widgetSummary.failed > 0 ? <button type="button" onClick={onRetryWidgets} disabled={busy} className="rounded-lg border px-3 py-2">Reintentar widgets</button> : null}</div>
         </div>
-      </details>
+      </details> : <p className="rounded-xl border p-3 text-sm">{LOCAL_FILES_MESSAGE}</p>}
       {driveCleanupMessage ? <p className="text-xs text-emerald-700">{driveCleanupMessage}</p> : null}
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
       <div className="flex justify-end"><button type="button" onClick={onClose} disabled={busy} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Cerrar</button></div>
@@ -434,16 +434,7 @@ export function LocalWorkspaceProvider({
   const [widgetTargetSummary, setWidgetTargetSummary] = useState<WidgetTargetSummary>({ pending: 0, failed: 0, errors: [], revision: 0, lastPublishedAt: "" })
   const isReady = !enabled || ((bootState === "ready" || bootState === "configure") && Boolean(rootHandle) && permissionState === "granted")
   const canRenderBeforeWorkspaceReady = enabled && pathname === "/practice/viewer"
-  const [synthesisMigrationError, setSynthesisMigrationError] = useState("")
   const azure = useAzureWorkspaceSync(rootHandle, enabled && permissionState === "granted", isReady)
-
-  useEffect(() => {
-    if (!enabled || !isReady || !rootHandle) return
-    let cancelled = false
-    void getSynthesisFolderStore().then(() => { if (!cancelled) setSynthesisMigrationError("") })
-      .catch((error) => { if (!cancelled) setSynthesisMigrationError(error instanceof Error ? error.message : "No se pudo migrar Síntesis a la carpeta.") })
-    return () => { cancelled = true }
-  }, [enabled, isReady, rootHandle])
 
   useEffect(() => {
     if (!enabled) {
@@ -597,7 +588,7 @@ export function LocalWorkspaceProvider({
   }, [bootState, enabled, pathname, permissionState, rootHandle])
 
   useEffect(() => {
-    if (!enabled || bootState !== "ready" || !rootHandle) return
+    if (!FILE_CLOUD_SYNC_ENABLED || !enabled || bootState !== "ready" || !rootHandle) return
     let cancelled = false
     const run = async () => {
       if (!getReadyDriveConfigToken()) return
@@ -613,7 +604,7 @@ export function LocalWorkspaceProvider({
   }, [bootState, enabled, rootHandle])
 
   useEffect(() => {
-    if (!enabled || bootState !== "ready" || !rootHandle || !getReadyInscreenConfigToken()) return
+    if (!FILE_CLOUD_SYNC_ENABLED || !enabled || bootState !== "ready" || !rootHandle || !getReadyInscreenConfigToken()) return
     void processLocalWidgetTargetSyncQueue().then(setWidgetTargetSummary)
   }, [bootState, enabled, rootHandle])
 
@@ -938,10 +929,6 @@ export function LocalWorkspaceProvider({
           </DialogContent>
         </Dialog>
       ) : null}
-      {isReady && synthesisMigrationError ? <div role="alert" className="fixed bottom-4 left-4 right-4 z-[100] rounded-lg bg-amber-100 p-4 text-sm text-amber-950">
-        Síntesis: {synthesisMigrationError} Los originales del navegador se conservaron.
-        <button className="ml-3 underline" onClick={() => { void getSynthesisFolderStore().then(() => setSynthesisMigrationError("")).catch((error) => setSynthesisMigrationError(String(error.message || error))) }}>Reintentar migración</button>
-      </div> : null}
       {enabled && bootState === "configure" && configStep === 4 ? (
         <ServicesPanel apis={apiStatus} drive={driveStatus} azure={azure} summary={driveSummary} widgetSummary={widgetTargetSummary} servicesFileMessage={servicesFileMessage} busy={savingConfig} error={error} driveCleanupMessage={driveCleanupMessage} onConfigureGroq={() => { setSelectedService("groq"); setConfigValues(EMPTY_INSCREEN_CONFIG); setConfigStep(0) }} onConfigureR2={() => { setConfigValues(EMPTY_INSCREEN_CONFIG); setConfigStep(1) }} onConfigureService={group => { setSelectedService(group); setConfigValues(EMPTY_INSCREEN_CONFIG); setError(""); setConfigStep(0) }} onPair={() => { setConfigStep(3); void createPairingQr() }} onConnect={connectDrive} onDisconnect={() => { void disconnectDrive() }} onSync={() => { void syncDrive() }} onCleanupDrive={() => { void cleanupDriveDuplicates() }} onRetryWidgets={() => { void retryWidgets() }} onClose={finishInscreenConfiguration} />
       ) : enabled && bootState === "configure" && configStep < 2 ? (

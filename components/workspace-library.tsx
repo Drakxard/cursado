@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { createIdleSync } from '@/lib/client/idle-sync'
+import { FILE_CLOUD_SYNC_ENABLED, LOCAL_FILES_MESSAGE } from '@/lib/file-sync-policy'
 import { startVisibleTask } from '@/lib/client/visible-task'
 import QRCode from 'qrcode'
 import { Share2, X, RefreshCw, QrCode, FolderOpen } from 'lucide-react'
@@ -12,6 +13,7 @@ import { getReadyInscreenConfigToken, loadServicesFile, loadWorkspaceHandle, per
 
 export function WorkspaceLibraryPublisher() {
   useEffect(() => {
+    if (!FILE_CLOUD_SYNC_ENABLED) return
     let disposed = false
     const sync = async () => {
       if (disposed || !navigator.onLine) return false
@@ -64,6 +66,7 @@ export function WorkspaceLibraryButton() {
     return () => window.removeEventListener('cursado-library-progress', update)
   }, [])
   async function inspect(handle: FileSystemDirectoryHandle) {
+    if (!FILE_CLOUD_SYNC_ENABLED) { setError(LOCAL_FILES_MESSAGE); return }
     setRoot(handle); setReadyWorkspaceHandle(handle)
     setConfigured(null); setEditing(false)
     setScreen('setup'); setProgress(null); setQr('')
@@ -102,6 +105,7 @@ export function WorkspaceLibraryButton() {
     window.dispatchEvent(new Event('cursado-services-changed'))
   }
   async function upload() {
+    if (!FILE_CLOUD_SYNC_ENABLED) { setError(LOCAL_FILES_MESSAGE); return }
     await run(async () => {
       if (!root) throw new Error('Elegí la carpeta que contiene tus materiales.')
       const connection = await libraryConnection(root)

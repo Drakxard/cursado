@@ -5,6 +5,7 @@ import { cooperationUndoStatus } from '@/lib/client/cooperation'
 import { ListChecks, RefreshCw, X } from 'lucide-react'
 import { undoCooperationSphere, acceptCooperationGroup, acceptCooperationSphere, cooperationState, createCooperationGroup, decideCooperationDeletion, dismissCooperationSphere, refreshCooperation, startCooperationBackground, synchronizeCooperation, type CooperativeSphere, type PendingDeletion } from '@/lib/client/cooperation'
 import { isNativeReadOnly } from '@/lib/native-workspace'
+import { FILE_CLOUD_SYNC_ENABLED, LOCAL_FILES_MESSAGE } from '@/lib/file-sync-policy'
 import { cooperationSubjectSyncDetails, cooperationSubjectSyncLabel } from '@/lib/client/cooperation'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { cooperationDeletionName, hasMeaningfulCooperationRecovery } from '@/lib/cooperation-review'
@@ -14,11 +15,12 @@ export function CooperationSyncStatus({ subjectId }: { subjectId: string }) {
   const [online, setOnline] = useState<boolean | null>(null)
   const [details, setDetails] = useState<{ name: string; bytes: number } | null>(null)
   useEffect(() => {
+    if (!FILE_CLOUD_SYNC_ENABLED) return
     const update = () => setOnline(navigator.onLine !== false)
     window.addEventListener('online', update); window.addEventListener('offline', update); update()
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
   }, [])
-  if (!Object.values(state.mirrors).some(mirror => mirror.binding.subjectId === subjectId)) return null
+  if (!FILE_CLOUD_SYNC_ENABLED || !Object.values(state.mirrors).some(mirror => mirror.binding.subjectId === subjectId)) return null
   const label = online === null ? null : online ? cooperationSubjectSyncLabel(subjectId) : '???'
   if (label === null) return null
   const megabytes = details ? details.bytes > 0 && details.bytes < 10_000 ? '<0,01' : new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(details.bytes / 1_000_000) : ''
@@ -45,6 +47,7 @@ export function useCooperation() {
 export function CooperationGroupForm({ onCreated }: { onCreated?: () => void }) {
   const [names, setNames] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [login, setLogin] = useState(false), [password, setPassword] = useState('')
+  if (!FILE_CLOUD_SYNC_ENABLED) return <p className="text-sm text-muted-foreground">{LOCAL_FILES_MESSAGE}</p>
   return <form className="space-y-3" onSubmit={async event => {
     event.preventDefault(); setBusy(true); setError('')
     try {
@@ -134,6 +137,7 @@ function CooperationDeletionChoice({ pending }: { pending: PendingDeletion }) {
 export function CooperationPanel({ onOpen }: { onOpen: (subjectId: string, groupId: string) => void }) {
   const state = useCooperation(), [invite, setInvite] = useState<CooperativeSphere | null>(null), [error, setError] = useState('')
   const [sharingImportant, setSharingImportant] = useState(false)
+  if (!FILE_CLOUD_SYNC_ENABLED) return <p className="p-6 text-sm text-muted-foreground">{LOCAL_FILES_MESSAGE}</p>
   return <section className="relative z-10 mx-auto w-full max-w-2xl space-y-5 rounded-2xl border bg-background p-6 shadow-sm" aria-label="Estudio cooperativo">
     <h1 className="text-xl font-medium">Cooperativo</h1>
     <CooperationGroupForm />
