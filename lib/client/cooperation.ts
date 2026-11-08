@@ -127,7 +127,7 @@ export async function restoreCooperationOffline() {
   const userId = localStorage.getItem('cursado-cooperation-user')
   if (!userId) return
   activeRoot = await root()
-  state = await readJson(activeRoot, `.cooperation/${userId}/state.json`, { version: 1, userId, groups: [], mirrors: {}, deletions: [] } as CooperationState)
+  state = await readJson(activeRoot, `.cooperation/${userId}/state.json`, { version: 1, userId, groups: [], mirrors: {}, deletions: [] } as CooperationState, !FILE_CLOUD_SYNC_ENABLED)
   if (!FILE_CLOUD_SYNC_ENABLED) {
     // Keep only board identities, not cached file snapshots or pending transfers.
     state = { version: 1, userId, groups: [], deletions: [], mirrors: Object.fromEntries(Object.entries(state.mirrors).map(([id, mirror]) => [id, { binding: mirror.binding, baseline: { seq: 0, resources: {}, conflicts: [] } }])) }
@@ -1076,7 +1076,7 @@ export function localCooperationBoardId(subjectId: string, id: string) {
   return b && !b.owner ? `${id}-${b.id.slice(0, 8)}` : id
 }
 export async function cooperationStudyRoomId(subjectId: string | undefined, boardId: string) {
-  // Restore saved room identities only when a board is actually opened.
+  // Also support direct links that bypass the Study home screen.
   if (!FILE_CLOUD_SYNC_ENABLED) await restoreLocalCooperationBoards()
   const binding = Object.values(state.mirrors).find(m => m.binding.subjectId === subjectId)?.binding
   return binding ? cooperativeStudyRoomId(binding, boardId) : undefined

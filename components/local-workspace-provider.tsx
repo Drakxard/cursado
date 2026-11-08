@@ -6,7 +6,7 @@ import QRCode from "qrcode"
 import { ServicesEditor } from "@/components/services-editor"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { SERVICE_GROUPS, emptyServicesDraft, type ServiceGroup, type ServicesDraft, type ServicesStatus } from "@/lib/services-config"
-import { FILE_CLOUD_SYNC_ENABLED } from '@/lib/file-sync-policy'
+import { FILE_CLOUD_SYNC_ENABLED, LOCAL_FILES_MESSAGE } from '@/lib/file-sync-policy'
 
 import { LocalFetchInterceptor } from "@/components/local-fetch-interceptor"
 import { AzureWorkspaceSyncControls, useAzureWorkspaceSync } from "@/components/azure-workspace-sync"
@@ -282,7 +282,7 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
         </button>)}
       </div>
       {servicesFileMessage ? <p className="text-xs text-emerald-700">{servicesFileMessage}</p> : null}
-      <details className="rounded-xl border p-3 text-sm">
+      {FILE_CLOUD_SYNC_ENABLED ? <details className="rounded-xl border p-3 text-sm">
         <summary className="cursor-pointer font-medium">Sincronizacion y dispositivos</summary>
         <div className="mt-3 space-y-3">
           {azure.status?.configured ? <AzureWorkspaceSyncControls sync={azure} /> : <div>
@@ -299,7 +299,7 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
           <p className="text-xs text-slate-600">R2 revision {widgetSummary.revision} · {widgetSummary.pending} pendientes · {widgetSummary.failed} con error</p>
           <div className="flex gap-2"><button type="button" onClick={onPair} disabled={busy || !apis.r2} className="rounded-lg border px-3 py-2 disabled:opacity-50">Vincular telefono</button>{widgetSummary.pending > 0 || widgetSummary.failed > 0 ? <button type="button" onClick={onRetryWidgets} disabled={busy} className="rounded-lg border px-3 py-2">Reintentar widgets</button> : null}</div>
         </div>
-      </details>
+      </details> : <p className="rounded-xl border p-3 text-sm">{LOCAL_FILES_MESSAGE}</p>}
       {driveCleanupMessage ? <p className="text-xs text-emerald-700">{driveCleanupMessage}</p> : null}
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
       <div className="flex justify-end"><button type="button" onClick={onClose} disabled={busy} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Cerrar</button></div>
