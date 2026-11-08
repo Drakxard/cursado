@@ -5,6 +5,7 @@ import katex from "katex"
 import { resolveStructuredLesson, StructuredLessonError } from "../pdf-explanation-structured.ts"
 import { STRUCTURED_LESSON_RUNTIME, STRUCTURED_LESSON_STYLES } from "../pdf-explanation-runtime.ts"
 import { graphPresentationHtml } from "../pdf-explanation-graph-html.ts"
+import type { ExplanationPreferences } from '../pdf-explanation-preferences.ts'
 
 let mathStyles: string | undefined
 function offlineMathStyles() {
@@ -23,9 +24,9 @@ function offlineMathStyles() {
 
 const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")
 
-export function structuredLessonHtml(input: unknown): string {
+export function structuredLessonHtml(input: unknown, preferences: ExplanationPreferences = {}): string {
   if (input && typeof input === "object" && "plantilla" in input) {
-    return graphPresentationHtml(input)
+    return graphPresentationHtml(input, preferences)
   }
   const lesson = resolveStructuredLesson(input)
   const formulas: Record<string, string> = {}

@@ -11,13 +11,17 @@ import { explanationSystemConfig } from "@/lib/server/pdf-explanation-system"
 export const runtime = "nodejs"
 export const maxDuration = 300
 
-async function handleGET() {
+async function handleGET(request: Request) {
   const auth = await requireAuthSession()
   if (auth.response) return auth.response
   try {
+    const params = new URL(request.url).searchParams
+    const specialty = params.get('specialty') === 'math' ? 'math' : 'prog'
+    const direction = params.get('orientation')
+    const orientation = direction === 'horizontal' || direction === 'vertical' ? direction : 'auto'
     const azure = azureExplanationConfig()
-    if (azure) return Response.json({ provider: "azure", models: [{ id: azure.deployment, name: `${azure.deployment} · Azure` }], ...await explanationSystemConfig("azure") }, { headers: { "Cache-Control": "no-store" } })
-    return Response.json({ provider: "gateway", models: await freeExplanationModels(process.env.PDF_EXPLANATION_MODEL), ...await explanationSystemConfig("gateway") }, { headers: { "Cache-Control": "no-store" } })
+    if (azure) return Response.json({ provider: "azure", models: [{ id: azure.deployment, name: `${azure.deployment} · Azure` }], ...await explanationSystemConfig("azure", specialty, orientation) }, { headers: { "Cache-Control": "no-store" } })
+    return Response.json({ provider: "gateway", models: await freeExplanationModels(process.env.PDF_EXPLANATION_MODEL), ...await explanationSystemConfig("gateway", specialty, orientation) }, { headers: { "Cache-Control": "no-store" } })
   } catch (error) {
     if (getInscreenRuntimeSecret('gpt5mini') || process.env.gpt5mini || process.env.AZURE_OPENAI_API_KEY) return Response.json({ error: error instanceof Error ? error.message : "Revisá la configuración de Azure." }, { status: 503 })
     return Response.json({ error: error instanceof FreeExplanationModelsError ? error.message : "No se pudo cargar la lista de modelos gratuitos." }, { status: 503 })
@@ -43,7 +47,7 @@ async function handlePOST(request: Request) {
   try {
     const azure = azureExplanationConfig()
     if (azure) return explanationStream(azureExplanationModel(azure), input.question, input.transcription,
-      { maxOutputTokens: 12_000, reasoning: "low", provider: "azure", image: input.image, instructions: input.instructions, systemPrompt: input.systemPrompt })
+      { maxOutputTokens: 12_000, reasoning: "low", provider: "azure", image: input.image, instructions: input.instructions, systemPrompt: input.systemPrompt, specialty: input.specialty, orientation: input.orientation })
   } catch (error) {
     const failure = explanationFailure(error, "azure")
     return Response.json({ error: error instanceof Error && !failure.diagnostics.status ? error.message : failure.message,
@@ -62,7 +66,7 @@ async function handlePOST(request: Request) {
       gateway(selected.id),
       input.question,
       input.transcription,
-      { maxOutputTokens: selected.maxOutputTokens, image: input.image, instructions: input.instructions, systemPrompt: input.systemPrompt },
+      { maxOutputTokens: selected.maxOutputTokens, image: input.image, instructions: input.instructions, systemPrompt: input.systemPrompt, specialty: input.specialty, orientation: input.orientation },
     )
   } catch (error) {
     if (error instanceof FreeExplanationModelsError) return Response.json({ error: error.message, stage: "catalogo-modelos-gratuitos" }, { status: 503 })
@@ -73,7 +77,7 @@ async function handlePOST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  return withOptionalServicesConfig(request, () => handleGET())
+  return withOptionalServicesConfig(request, () => handleGET(request))
 }
 
 export async function POST(request: Request) {

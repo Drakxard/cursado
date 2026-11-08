@@ -3162,10 +3162,14 @@ export function SubjectWheel({
       const weekNumber = Number(payload.weekNumber)
       void refreshLocalWeekOptions().catch(() => undefined)
       if (!currentSubject || !isDialogOpen) return
-      if (subjectId !== currentSubject.id || weekNumber !== dialogSelectedWeekNumber) return
-      if (!isWeeklyExercisesScope && sessionDate !== subjectDialogDateKey) return
+      const pinnedContainer = "containerId" in payload && subjectMaterialContainers.some(container => container.id === payload.containerId && container.isPinned)
+      if (subjectId !== currentSubject.id) return
+      if (!pinnedContainer && weekNumber !== dialogSelectedWeekNumber) return
+      if (!pinnedContainer && !isWeeklyExercisesScope && sessionDate !== subjectDialogDateKey) return
 
-      void loadSubjectDayData()
+      // Invalidate cached manifests before reading a change from another tab.
+      window.dispatchEvent(new Event("cursado-workspace-saved"))
+      void loadSubjectDayData(true)
     }
 
     const handleStorage = (event: StorageEvent) => {
@@ -3178,16 +3182,19 @@ export function SubjectWheel({
     const handleMessage = (event: MessageEvent) => {
       handleRefreshPayload(event.data)
     }
+    const handleLocalRefresh = (event: Event) => handleRefreshPayload((event as CustomEvent).detail)
 
     channel?.addEventListener("message", handleMessage)
     window.addEventListener("storage", handleStorage)
+    window.addEventListener("subject-day-materials:refresh", handleLocalRefresh)
 
     return () => {
       channel?.removeEventListener("message", handleMessage)
       channel?.close()
       window.removeEventListener("storage", handleStorage)
+      window.removeEventListener("subject-day-materials:refresh", handleLocalRefresh)
     }
-  }, [currentSubject, dialogSelectedWeekNumber, isDialogOpen, isWeeklyExercisesScope, loadSubjectDayData, refreshLocalWeekOptions, subjectDialogDateKey])
+  }, [currentSubject, dialogSelectedWeekNumber, isDialogOpen, isWeeklyExercisesScope, loadSubjectDayData, refreshLocalWeekOptions, subjectDialogDateKey, subjectMaterialContainers])
 
   useEffect(() => {
     return () => {

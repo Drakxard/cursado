@@ -3,7 +3,7 @@ import { StructuredLessonError } from "./pdf-explanation-structured.ts"
 
 const id = z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/)
 const state = z.enum(["normal", "alerta", "exito", "destacado", "atenuado"])
-export const graphNodeDataSchema = z.array(z.object({ etiqueta: z.string().trim().min(1).max(40), valor: z.string().trim().min(1).max(120) }).strict()).max(4)
+export const graphNodeDataSchema = z.array(z.object({ etiqueta: z.string().trim().min(1).max(40), valor: z.string().trim().min(1).max(1200) }).strict()).max(4)
 export const gridPositionSchema = z.object({ fila: z.number().int().min(1).max(6), columna: z.number().int().min(1).max(10), estado: state, datos: graphNodeDataSchema.nullish() }).strict()
 export const pixelPositionSchema = z.object({ x: z.number().finite().min(50).max(950), y: z.number().finite().min(50).max(440), estado: state, datos: graphNodeDataSchema.nullish() }).strict()
 const commentFields = { anclado_a: id, color: z.enum(["rojo", "verde", "amarillo", "azul"]), texto: z.string().trim().min(1).max(600) }

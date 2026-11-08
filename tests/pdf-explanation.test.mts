@@ -2,6 +2,17 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { explanationHtml, explanationInput, explanationPrompt } from "../lib/pdf-explanation.ts"
 import { explanationFailure } from "../lib/pdf-explanation-errors.ts"
+import { graphMathHtml } from '../lib/pdf-explanation-math.ts'
+
+test('specialties and map orientation are validated and math escapes surrounding markup', () => {
+  const base = { question: 'Explicá', transcription: 'Apunte' }
+  assert.equal(explanationInput({ ...base, specialty: 'math', orientation: 'vertical' }).specialty, 'math')
+  for (const options of [{ specialty: 'invalid' }, { orientation: ['auto'] }, { orientation: 'diagonal' }]) assert.throws(() => explanationInput({ ...base, ...options }))
+  assert.match(graphMathHtml(String.raw`<img src=x> \(\frac{x}{2}\)` )!, /&lt;img/)
+  assert.match(graphMathHtml(String.raw`\(\frac{x}{2}\)` )!, /class="mfrac"/)
+  assert.throws(() => graphMathHtml(String.raw`\(\frac{\)`), /Fórmula inválida/)
+  assert.equal(graphMathHtml('Costo: $20, sin fórmula.'), undefined)
+})
 
 test("optional region is accepted while page transcription remains required", () => {
   const image = "data:image/png;base64,aGVsbG8="

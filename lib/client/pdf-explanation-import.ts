@@ -26,7 +26,11 @@ export async function preparePdfExplanationHtml(html: string): Promise<string> {
   const graphData = doc.querySelector<HTMLScriptElement>('script#graph-data[type="application/json"]')
   if (graphData && doc.querySelector('#stage #scene')) {
     const graph = JSON.parse(graphData.textContent || 'null')
-    if (graph?.plantilla === 'pantilla1_grafos') return graphPresentationHtml(graph)
+    const options = JSON.parse(doc.querySelector('#graph-options')?.textContent || '{}')
+    if (graph?.plantilla === 'pantilla1_grafos') return graphPresentationHtml(graph, {
+      specialty: options.specialty === 'math' ? 'math' : 'prog',
+      orientation: options.orientation === 'horizontal' || options.orientation === 'vertical' ? options.orientation : 'auto',
+    })
   }
   const tailwind = [...doc.querySelectorAll<HTMLScriptElement>("script[src]")].filter(script => {
     try { return new URL(script.src).hostname === "cdn.tailwindcss.com" } catch { return false }

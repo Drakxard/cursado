@@ -12,7 +12,10 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
   const instructionKey = "pdf-explanation-instructions.v1";
   const defaultInstructions = "Explicaci\u00f3n visual e interactiva paso a paso. Us\u00e1 texto, f\u00f3rmulas, tablas y diagramas cuando ayuden a entender; conserv\u00e1 las etiquetas del apunte y aclar\u00e1 las incertidumbres.";
   const getInstructions = () => { try { return localStorage.getItem(instructionKey)?.trim() || defaultInstructions; } catch { return defaultInstructions; } };
-  const systemKey = provider => `pdf-explanation-system.v1.${provider}`;
+  const specialtyKey = 'pdf-explanation-specialty.v1', orientationKey = 'pdf-explanation-orientation.v1';
+  const getSpecialty = () => { try { return localStorage.getItem(specialtyKey) === 'math' ? 'math' : 'prog'; } catch { return 'prog'; } };
+  const getOrientation = () => { try { const value = localStorage.getItem(orientationKey); return value === 'horizontal' || value === 'vertical' ? value : 'auto'; } catch { return 'auto'; } };
+  const systemKey = provider => `pdf-explanation-system.v1.${provider}` + (getSpecialty() === 'prog' && getOrientation() === 'auto' ? '' : `.${getSpecialty()}.${getOrientation()}`);
   const getSystemPrompt = provider => { try { const text = localStorage.getItem(systemKey(provider)); return text?.trim() ? text : undefined; } catch { return undefined; } };
   let documentState = null, loading = null, modal = null, restoring = false;
   let saving = Promise.resolve();
@@ -81,7 +84,19 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       const path = `manifests/pdf-explanations/${key}/explanations.json`;
       const local = JSON.parse(localStorage.getItem(`pdf-explanations:${key}`) || "null");
       const stored = root ? await read(root, path) : null;
-      const saved = stored && (!local || (stored.updatedAt || 0) >= (local.updatedAt || 0)) ? stored : local;
+      let saved = stored && (!local || (stored.updatedAt || 0) >= (local.updatedAt || 0)) ? stored : local;
+      let imported = false;
+      if (!saved) {
+        const attachment = (await pdf.getAttachments())?.["cursado-explanation-links.json"];
+        if (attachment) {
+          saved = JSON.parse(new TextDecoder().decode(attachment.content));
+          if (saved.version !== 1 || !Array.isArray(saved.entries) || !saved.transcriptions || saved.entries.some(entry =>
+            typeof entry.id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(entry.id) || !/^[a-f0-9]{64}$/.test(entry.htmlReference?.key) || typeof entry.htmlReference?.id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(entry.htmlReference.id) ||
+            !Number.isInteger(entry.annotation?.pageIndex) || entry.annotation.pageIndex < 0 || entry.annotation.pageIndex >= pdf.numPages ||
+            typeof entry.annotation.value !== "string")) throw new Error("Los vínculos HTML del recorte no son válidos.");
+          imported = true;
+        }
+      }
       if (saved && (saved.version !== 1 || !Array.isArray(saved.entries) || !saved.transcriptions)) {
         throw new Error("El archivo de explicaciones guardadas no es válido.");
       }
@@ -92,7 +107,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       cooperativeBaseline = structuredClone(data);
       // Some PDFs have no document ID until PDF.js saves the first annotation, so their
       // fingerprint changes on that save. A persisted note links that revision to its source.
-      if (saved && data.fingerprint !== fingerprint) {
+      if (saved && data.fingerprint && data.fingerprint !== fingerprint) {
         for (const entry of data.entries) {
           const page = entry.annotation?.pageIndex + 1;
           if (!(page > 0 && page <= pdf.numPages)) continue;
@@ -107,6 +122,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       data.fingerprint = fingerprint;
       data.extractionHash = extractionHash;
       documentState = { pdf, bytes, sourceHash: extractionHash, fingerprint, key, root, path, data };
+      if (imported) {
+        await persist(documentState);
+      }
       return documentState;
     })();
     try { return await loading; } finally { loading = null; }
@@ -143,6 +161,33 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     saving = next;
     return next;
   }
+  // Only pointers travel with the PDF. HTML stays in the source workspace.
+  window.exportPdfFragmentExplanations = async pages => {
+    const state = await load();
+    await saving;
+    const entries = [];
+    pages.forEach((page, pageIndex) => {
+      let noteIndex = 0;
+      for (const original of state.data.entries) {
+        if (original.deleted || original.annotation?.pageIndex !== page.pageNumber - 1) continue;
+        const entry = structuredClone(original);
+        entry.htmlReference = original.htmlReference || { key: state.key, id: original.id };
+        delete entry.html;
+        entry.id = crypto.randomUUID();
+        entry.annotation.pageIndex = pageIndex;
+        delete entry.annotation.id;
+        if (page.width && page.height) {
+          // Area crops can exclude the original note. Keep an accessible note inside the crop.
+          const top = Math.max(12, page.height - 12 - noteIndex++ * 24);
+          entry.annotation.rect = [4, Math.max(0, top - 20), Math.max(5, page.width - 4), top];
+          entry.annotation.rotation = 0;
+          delete entry.position;
+        }
+        entries.push(entry);
+      }
+    });
+    return { version: 1, entries, transcriptions: {} };
+  };
   async function transcription(state, page) {
     const key = `${state.fingerprint}:${page}`;
     if (state.data.transcriptions[key]) return state.data.transcriptions[key];
@@ -286,6 +331,20 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     const escapeBridge = `<script>addEventListener('keydown',e=>{if(e.ctrlKey&&!e.altKey&&!e.shiftKey&&e.key.toLowerCase()==='q'){e.preventDefault();parent.postMessage({type:'cursado-return-home'},'*')}if(e.key==='Escape')parent.postMessage({type:'pdf-explanation-escape'},'*')});<\/script>`;
     const loadHtml = async () => {
       let html = entry.html;
+      if (entry.htmlReference) {
+        const { key, id } = entry.htmlReference;
+        if (!/^[a-f0-9]{64}$/.test(key) || !/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("El vínculo HTML no es válido.");
+        if (documentState.root) {
+          try { html = await (await (await fileHandle(documentState.root, `manifests/pdf-explanations/${key}/${id}.html`)).getFile()).text(); }
+          catch (error) { if (error.name !== "NotFoundError") throw error; }
+        }
+        if (!html) {
+          const source = documentState.root ? await read(documentState.root, `manifests/pdf-explanations/${key}/explanations.json`) : null;
+          const local = JSON.parse(localStorage.getItem(`pdf-explanations:${key}`) || "null");
+          html = (source || local)?.entries?.find(item => item.id === id)?.html;
+        }
+        if (!html) throw new Error("No se encontró el HTML vinculado. Abrí el recorte con la carpeta del original disponible.");
+      }
       if (/cdn\.tailwindcss\.com|data-pdf-slide-deck|id=["']graph-data["']/.test(html)) {
         const { preparePdfExplanationHtml } = await import("./viewer-explanation-import.js");
         html = await preparePdfExplanationHtml(html);
@@ -314,11 +373,13 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         const html = await preparePdfExplanationHtml(await file.text());
         if (documentState !== state || modal !== view) return;
         const previous = entry.html;
+        const previousReference = entry.htmlReference;
         entry.html = html;
+        delete entry.htmlReference;
         try {
           if (state.root) await write(state.root, `manifests/pdf-explanations/${state.key}/${entry.id}.html`, html);
           await persist(state);
-        } catch (error) { entry.html = previous; throw error; }
+        } catch (error) { entry.html = previous; if (previousReference) entry.htmlReference = previousReference; throw error; }
         openHtml(entry);
       } catch (error) { report(error); }
       finally { picker.value = ""; }
@@ -522,6 +583,11 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     const form = document.createElement("form");
     form.innerHTML = '<label hidden for="pdf-explanation-model">Modelo gratuito de AI Gateway</label><div class="pdf-explanation-model-row" hidden><select id="pdf-explanation-model" disabled><option value="">Cargando modelos…</option></select><button type="button" class="pdf-explanation-refresh" title="Actualizar modelos gratuitos" aria-label="Actualizar modelos gratuitos">↻</button></div><p class="pdf-explanation-model-status" role="status"></p><textarea aria-label="?Qu? quer?s entender?" id="pdf-explanation-question" maxlength="2000" rows="4" placeholder="Explicalo · Enter para generar; Shift+Enter para otra línea"></textarea><div class="pdf-explanation-loading" hidden><span class="pdf-explanation-spinner" aria-hidden="true"></span><span class="pdf-explanation-elapsed">Cargando…</span></div><p class="pdf-explanation-progress" role="status" aria-live="polite"></p><button type="submit">Generar explicación</button>';
     view.panel.append(form);
+    const choices = document.createElement('div'); choices.className = 'pdf-explanation-choices';
+    choices.innerHTML = '<label>Especialidad<select aria-label="Especialidad"><option value="prog">Prog · Programación</option><option value="math">Math · Matemática</option></select></label><label>Dirección del mapa<select aria-label="Dirección del mapa"><option value="auto">Automática</option><option value="horizontal">Horizontal →</option><option value="vertical">Vertical ↓</option></select></label>';
+    const [specialtySelect, orientationSelect] = choices.querySelectorAll('select');
+    specialtySelect.value = getSpecialty(); orientationSelect.value = getOrientation();
+    form.querySelector('textarea').before(choices);
     const settings = document.createElement("button");
     settings.type = "button"; settings.className = "pdf-explanation-icon";
     settings.textContent = "⚙"; settings.title = "Prompt de sistema y preferencias"; settings.setAttribute("aria-label", settings.title);
@@ -676,14 +742,15 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       modelStatus.hidden = true;
       modelStatus.textContent = "Consultando el modelo de explicación…";
       try {
-        const response = await servicesFetch("/api/pdf-explanation", { cache: "no-store" });
+        const params = new URLSearchParams({ specialty: specialtySelect.value, orientation: orientationSelect.value });
+        const response = await servicesFetch(`/api/pdf-explanation?${params}`, { cache: "no-store" });
         const payload = await response.json();
         if (revision !== modelsRevision || modal !== view) return;
         if (!response.ok) throw new Error(payload.error || "No se pudo cargar la lista de modelos.");
         if (!Array.isArray(payload.models) || !payload.models.length) throw new Error("No hay modelos disponibles.");
         systemPromptBase = typeof payload.systemPromptBase === 'string' ? payload.systemPromptBase : "";
         const provider = payload.provider === 'azure' ? 'azure' : 'gateway';
-        if (provider !== currentProvider) { currentProvider = provider; loadSavedSystem(); }
+        currentProvider = provider; loadSavedSystem();
         systemPreview.placeholder = systemPromptBase ? "" : "El servidor no envió el prompt de sistema. Actualizá la aplicación.";
         updateSystemPreview();
         schemaDetails.hidden = !payload.outputSchema;
@@ -713,6 +780,12 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
     }
     let modelsReady = loadModels();
     modelsReady.catch(() => {});
+    const changeSpecialty = () => {
+      try { localStorage.setItem(specialtyKey, specialtySelect.value); localStorage.setItem(orientationKey, orientationSelect.value); } catch {}
+      modelsReady = loadModels(); modelsReady.catch(() => {});
+    };
+    specialtySelect.addEventListener('change', changeSpecialty);
+    orientationSelect.addEventListener('change', changeSpecialty);
     refresh.addEventListener("click", () => { modelsReady = loadModels(); modelsReady.catch(() => {}); });
     const servicesChanged = () => {
       if (modal !== view) return;
@@ -750,6 +823,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       submit.disabled = true;
       input.disabled = true; removeRegion.disabled = true;
       modelSelect.disabled = true; refresh.disabled = true;
+      specialtySelect.disabled = true; orientationSelect.disabled = true;
       form.setAttribute("aria-busy", "true"); loadingIndicator.hidden = false;
       const started = Date.now();
       const updateElapsed = () => { elapsed.textContent = `Cargando… ${Math.floor((Date.now() - started) / 1000)} s`; };
@@ -767,7 +841,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         debug.transcription = text;
         const image = await captureRegion();
         if (image) debug.region = { ...region };
-        const html = await window.requestPdfExplanation(question, text, message => { status.textContent = `${selectedModel} · ${message}`; }, debug, selectedModel, image, servicesFetch, getInstructions(), getSystemPrompt(currentProvider));
+        const html = await window.requestPdfExplanation(question, text, message => { status.textContent = `${selectedModel} · ${message}`; }, debug, selectedModel, image, servicesFetch, getInstructions(), getSystemPrompt(currentProvider), { specialty: specialtySelect.value, orientation: orientationSelect.value });
         debug.html = html;
         debug.stage = "guardar-html-y-nota";
         const pdfPage = await state.pdf.getPage(page);
@@ -792,6 +866,7 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
         try { window.downloadPdfExplanationAttempt(debug); } catch (error) { console.error("[Verlo] Descarga de diagnóstico", error); }
         generating = false; submit.disabled = false; input.disabled = false; removeRegion.disabled = false;
         modelSelect.disabled = !modelSelect.value; refresh.disabled = false;
+        specialtySelect.disabled = false; orientationSelect.disabled = false;
         if (modal === view) input.focus();
       }
     });

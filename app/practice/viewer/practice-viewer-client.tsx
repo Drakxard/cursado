@@ -27,6 +27,7 @@ type MaterialContext = {
   weekNumber: number
   weekdayIndex: number
   materialType?: "practice" | "theory"
+  containerId?: number | null
   fileName: string
   workspaceFileId?: string | null
   sourceRevision?: string
@@ -226,8 +227,9 @@ function buildViewerSrc({
   return `/pdfjs/web/viewer.html?${params.toString()}#locale=es-AR`
 }
 
-function notifySubjectDayMaterialsRefresh(payload: { subjectId: string; sessionDate: string; weekNumber: number }) {
+function notifySubjectDayMaterialsRefresh(payload: { subjectId: string; sessionDate: string; weekNumber: number; containerId?: number | null }) {
   if (typeof window === "undefined") return
+  window.dispatchEvent(new CustomEvent("subject-day-materials:refresh", { detail: payload }))
 
   try {
     const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("subject-day-materials") : null
@@ -325,6 +327,11 @@ function EditablePracticeViewerClient({
   const [previewPlayingRole, setPreviewPlayingRole] = useState<PairRole | null>(null)
   const [draggedRole, setDraggedRole] = useState<PairRole | null>(null)
   const [uploadFeedback, setUploadFeedback] = useState("")
+  useEffect(() => {
+    if (uploadFeedback !== "Guardado") return
+    const timer = window.setTimeout(() => setUploadFeedback(""), 3200)
+    return () => window.clearTimeout(timer)
+  }, [uploadFeedback])
   const [resolvedMaterial, setResolvedMaterial] = useState<MaterialContext | undefined>(material)
   const [viewerSourceError, setViewerSourceError] = useState("")
   const [notebookDraft,setNotebookDraft]=useState<string|null>(null)
@@ -851,12 +858,15 @@ function EditablePracticeViewerClient({
   const uploadPracticeFragment = useCallback(
     async (payload: FragmentUploadPayload) => {
       if (!activeContext) return
-      const draftMaterialType = draftContext?.materialType ?? "practice"
 
       setUploadFeedback("Subiendo PDF fragmentado...")
       postToViewer({ type: "practiceFragmentUploadState", status: "uploading" })
 
       try {
+        const source = resolvedMaterial && isLocalMode
+          ? await getLocalMaterialById(resolvedMaterial.id, resolvedMaterial.subjectId)
+          : null
+        if (resolvedMaterial && isLocalMode && !source) throw new Error("No se encontró el PDF original para guardar en su contenedor.")
         const rawFileName = typeof payload.fileName === "string" ? payload.fileName : ""
         const safeFileName = rawFileName.trim() || `fragmento-${activeContext.sessionDate}.pdf`
         const fileName = safeFileName.toLowerCase().endsWith(".pdf") ? safeFileName : `${safeFileName}.pdf`
@@ -867,14 +877,15 @@ function EditablePracticeViewerClient({
             subjectName: activeContext.subjectName,
             sessionDate: activeContext.sessionDate,
             weekNumber: activeContext.weekNumber,
-            materialType: draftMaterialType,
+            materialType: source?.material_type ?? resolvedMaterial?.materialType ?? draftContext?.materialType ?? "practice",
+            containerId: source?.container_id ?? resolvedMaterial?.containerId,
           },
           payload.blob,
           fileName,
           "application/pdf"
         )
 
-        setUploadFeedback(`PDF creado: ${fileName}`)
+        setUploadFeedback("Guardado")
         postToViewer({
           type: "practiceFragmentUploadState",
           status: "success",
@@ -884,6 +895,7 @@ function EditablePracticeViewerClient({
           subjectId: activeContext.subjectId,
           sessionDate: activeContext.sessionDate,
           weekNumber: activeContext.weekNumber,
+          containerId: source?.container_id ?? resolvedMaterial?.containerId,
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : "No se pudo subir el PDF fragmentado."
@@ -896,7 +908,7 @@ function EditablePracticeViewerClient({
         })
       }
     },
-    [activeContext, draftContext?.materialType, postToViewer]
+    [activeContext, resolvedMaterial, isLocalMode, draftContext?.materialType, postToViewer]
   )
 
   const handleViewerMessage = useCallback(
@@ -1185,6 +1197,7 @@ function EditablePracticeViewerClient({
         weekNumber: localMaterial.week_number,
         weekdayIndex: localMaterial.weekday_index,
         materialType: localMaterial.material_type,
+        containerId: localMaterial.container_id,
         fileName: localMaterial.file_name,
         workspaceFileId: localMaterial.drive_file_id,
           sourceRevision: `${localMaterial.drive_file_id}:${localMaterial.updated_at}`,

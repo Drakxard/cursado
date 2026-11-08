@@ -1100,19 +1100,19 @@
     svg.textContent = "SVG";
     svg.title = "Exportar las páginas seleccionadas como SVG";
     svg.setAttribute("aria-label", svg.title);
-    svg.addEventListener("click", () => {
-      if (state.cutStartPage == null) {
-        showToast("Selecciona la página inicial y final en el PDF.", "info");
-        return;
-      }
-      void exportAllPagesAsSvg(state.cutStartPage, state.cutEndPage ?? state.cutStartPage);
-    });
+    svg.id = "exportSelectedSvgButton";
+    svg.addEventListener("click", () => exportSelectedPagesAsSvg());
     allSvg.textContent = "All SVG";
     menu.append(state.cutButton, svg, allSvg);
     toolbar.prepend(group);
     const setOpen = (open) => {
       menu.hidden = !open;
       trigger.setAttribute("aria-expanded", String(open));
+      if (open) {
+        const rect = trigger.getBoundingClientRect();
+        menu.style.top = `${rect.bottom + 4}px`;
+        menu.style.left = `${Math.max(4, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 4))}px`;
+      }
     };
     trigger.addEventListener("click", () => {
       const open = menu.hidden;
@@ -1725,7 +1725,31 @@
     for (const page of copiedPages) {
       outputDocument.addPage(page);
     }
+    await attachFragmentExplanations(outputDocument, pageIndices.map(index => ({ pageNumber: index + 1 })));
     return outputDocument.save({ useObjectStreams: true });
+  }
+
+  async function attachFragmentExplanations(document, pages) {
+    if (!window.exportPdfFragmentExplanations) return;
+    const data = await window.exportPdfFragmentExplanations(pages);
+    if (!data.entries.length) return;
+    await document.attach(new TextEncoder().encode(JSON.stringify(data)), "cursado-explanation-links.json", {
+      mimeType: "application/json", description: "Punteros a los HTML del recorte",
+    });
+  }
+
+  function saveFragmentInContainer(blob, fileName) {
+    return new Promise((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
+      const receive = event => {
+        if (event.origin !== location.origin || event.source !== window.parent || event.data?.type !== "practiceFragmentUploadState") return;
+        if (event.data.status === "success") { cleanup(); resolve(); }
+        if (event.data.status === "error") { cleanup(); reject(new Error(event.data.error || "No se pudo guardar el recorte.")); }
+      };
+      const timer = setTimeout(() => { cleanup(); reject(new Error("El guardado está tardando demasiado. Revisá el contenedor antes de reintentar.")); }, 120000);
+      window.addEventListener("message", receive);
+      window.parent.postMessage({ type: "uploadPracticeFragment", payload: { blob, fileName } }, location.origin);
+    });
   }
 
   function downloadPdfBytes(pdfBytes, fileName) {
@@ -1869,7 +1893,18 @@
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   }
 
-  async function exportAllPagesAsSvg(startPage = 1, endPage = null) {
+  function exportSelectedPagesAsSvg() {
+    const pages = state.cutStartPage != null
+      ? Array.from({ length: (state.cutEndPage ?? state.cutStartPage) - state.cutStartPage + 1 }, (_, index) => state.cutStartPage + index)
+      : [...new Set(state.selections.map(selection => selection.pageNum))].sort((a, b) => a - b);
+    if (!pages.length) {
+      showToast("Seleccioná las páginas que querés exportar.", "info");
+      return;
+    }
+    return exportAllPagesAsSvg(pages[0], pages.at(-1), pages);
+  }
+
+  async function exportAllPagesAsSvg(startPage = 1, endPage = null, selectedPages = null) {
     const source = state.app?.pdfDocument;
     if (!source || state.isExportingSvg) return;
     const rotation = state.app.pdfViewer.pagesRotation || 0;
@@ -1891,7 +1926,8 @@
       if (!context) throw new Error("El navegador no pudo crear el lienzo de exportacion.");
       const pages = [];
       const lastPage = endPage ?? exportDocument.numPages;
-      for (let pageNumber = startPage; pageNumber <= lastPage; pageNumber += 1) {
+      const pageNumbers = selectedPages || Array.from({ length: lastPage - startPage + 1 }, (_, index) => startPage + index);
+      for (const pageNumber of pageNumbers) {
         updateBusy(`Renderizando pagina ${pageNumber} de ${exportDocument.numPages}...`);
         const page = await exportDocument.getPage(pageNumber);
         const viewport = page.getViewport({ scale: SVG_RENDER_SCALE, rotation: (page.rotate + rotation) % 360 });
@@ -2010,7 +2046,12 @@
     try {
       const pdfBytes = await buildCopiedPageRangePdf(startPage, endPage);
       const fileName = normalizePdfFileName(strippedName);
-      downloadPdfBytes(pdfBytes, fileName);
+      if (canUseFragmentUpload() && window.parent !== window) {
+        updateBusy("Guardando...");
+        await saveFragmentInContainer(new Blob([pdfBytes], { type: "application/pdf" }), fileName);
+      } else {
+        downloadPdfBytes(pdfBytes, fileName);
+      }
       cancelCutSelection();
     } catch (error) {
       console.error("Custom PDF.js rasterized range export failed:", error);
@@ -2828,6 +2869,9 @@
       }
     }
 
+    await attachFragmentExplanations(outputDoc, orderedSelections.map((selection, index) => ({
+      pageNumber: selection.pageNum, width: outputDoc.getPage(index).getWidth(), height: outputDoc.getPage(index).getHeight(),
+    })));
     const pdfBytes = await outputDoc.save();
     return {
       blob: new Blob([pdfBytes], { type: "application/pdf" }),
@@ -4537,7 +4581,7 @@
       }
       hideBusy();
       if (event.data.status === "success") {
-        showToast(`PDF creado: ${event.data.fileName || "fragmento.pdf"}`, "success", 3200);
+        showToast("Guardado", "success", 2800);
         return;
       }
       if (event.data.status === "error") {
@@ -4581,9 +4625,10 @@
     ensureUi();
     state.modalMode = "page-range-download";
     state.pendingPageRange = { startPage, endPage };
-    state.modalTitle.textContent = "Descargar PDF recortado";
-    state.modalDescription.textContent = `Se descargaran las paginas ${startPage} a ${endPage}. La extension .pdf se agregara automaticamente.`;
-    state.modalConfirm.textContent = "Descargar";
+    const savesInContainer = canUseFragmentUpload() && window.parent !== window;
+    state.modalTitle.textContent = savesInContainer ? "Guardar PDF recortado" : "Descargar PDF recortado";
+    state.modalDescription.textContent = `Páginas ${startPage} a ${endPage}. ${savesInContainer ? "Se guardará en el mismo contenedor que el PDF original." : "La extensión .pdf se agregará automáticamente."}`;
+    state.modalConfirm.textContent = savesInContainer ? "Guardar" : "Descargar";
     state.modalError.textContent = "";
     state.modalInput.value = `${getDefaultBaseName()}_paginas-${startPage}-${endPage}`;
     state.modal.dataset.open = "true";
@@ -4624,24 +4669,13 @@
     try {
       const pdfData = await buildPdfFromSelections(inputName);
 
+      if (window.parent && window.parent !== window) {
+        await saveFragmentInContainer(pdfData.blob, pdfData.fileName);
+        clearSelections();
+        leaveSelectionMode();
+        return;
+      }
       if (isLocalWorkspaceMode()) {
-        if (window.parent && window.parent !== window) {
-          window.parent.postMessage(
-            {
-              type: "uploadPracticeFragment",
-              payload: {
-                blob: pdfData.blob,
-                fileName: pdfData.fileName,
-              },
-            },
-            window.location.origin
-          );
-          clearSelections();
-          leaveSelectionMode();
-          showToast(`PDF enviado: ${pdfData.fileName}`, "success", 3200);
-          return;
-        }
-
         throw new Error("El modo local de fragmentos necesita abrirse desde la app principal.");
       }
 

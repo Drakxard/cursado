@@ -34,7 +34,7 @@ test('graph metadata remains bounded data rather than executable markup', () => 
   for (const mutate of [
     (d: any) => { d.elementos_iniciales[0].datos = Array(5).fill({ etiqueta: 'Dato', valor: '1' }) },
     (d: any) => { d.elementos_iniciales[0].datos[0].valor = 1 },
-    (d: any) => { d.diapositivas[0].posiciones.A.datos = [{ etiqueta: 'Dato', valor: 'x'.repeat(121) }] },
+    (d: any) => { d.diapositivas[0].posiciones.A.datos = [{ etiqueta: 'Dato', valor: 'x'.repeat(1201) }] },
     (d: any) => { d.diapositivas[0].aristas[0].dirigida = 'true' },
     (d: any) => { d.diapositivas[0].aristas[0].etiqueta = 'x'.repeat(81) },
   ]) { const bad = structuredClone(graph); mutate(bad); assert.throws(() => resolveGraphPresentation(bad)) }

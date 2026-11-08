@@ -12,10 +12,15 @@ export function explanationInput(body: unknown) {
   const systemPrompt = data?.systemPrompt
   if (systemPrompt !== undefined && (typeof systemPrompt !== "string" || !systemPrompt.trim() || systemPrompt.length > 100_000)) throw new Error("El prompt de sistema debe contener entre 1 y 100000 caracteres.")
   const image = data?.image
+  const specialty = data?.specialty
+  const orientation = data?.orientation
+  if (specialty !== undefined && specialty !== 'prog' && specialty !== 'math') throw new Error('Especialidad inválida.')
+  if (orientation !== undefined && orientation !== 'auto' && orientation !== 'horizontal' && orientation !== 'vertical') throw new Error('Orientación inválida.')
   if (image !== undefined && (typeof image !== "string" || image.length > 4_000_000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image))) {
     throw new Error("La región adjunta no es una imagen válida.")
   }
-  return { question, transcription, ...(typeof instructions === "string" ? { instructions: instructions.trim() } : {}), ...(typeof systemPrompt === "string" ? { systemPrompt } : {}), ...(typeof image === "string" ? { image } : {}) }
+  return { question, transcription, ...(typeof instructions === "string" ? { instructions: instructions.trim() } : {}), ...(typeof systemPrompt === "string" ? { systemPrompt } : {}), ...(typeof image === "string" ? { image } : {}),
+    ...(specialty !== undefined ? { specialty: specialty as 'prog' | 'math' } : {}), ...(orientation !== undefined ? { orientation: orientation as 'auto' | 'horizontal' | 'vertical' } : {}) }
 }
 
 export function explanationPrompt(question: string, transcription: string) {

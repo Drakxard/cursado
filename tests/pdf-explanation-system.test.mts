@@ -4,18 +4,28 @@ import { explanationSystemConfig, COMMON_EXPLANATION_INSTRUCTIONS } from "../lib
 import { composeExplanationSystem } from "../lib/pdf-explanation-system.ts"
 import { DEFAULT_EXPLANATION_INSTRUCTIONS } from "../lib/pdf-explanation.ts"
 import { resolveGraphPresentation } from "../lib/pdf-explanation-graphs.ts"
-import { resolveStructuredLesson } from "../lib/pdf-explanation-structured.ts"
 import { decodeAzureExplanation } from "../lib/pdf-explanation-formats.ts"
 import { azureExplanationFormatSchema } from '../lib/pdf-explanation-formats.ts'
 
-test("system instructions scope both formats and provide valid examples for each provider", async () => {
+test('math and prog use different teaching prompts and honor the requested direction', async () => {
+  const math = (await explanationSystemConfig('azure', 'math', 'vertical')).systemPromptBase
+  const prog = (await explanationSystemConfig('azure', 'prog', 'horizontal')).systemPromptBase
+  assert.match(math, /ESPECIALIDAD MATH/)
+  assert.match(math, /LaTeX delimitado/)
+  assert.match(math, /ORIENTACIÓN VERTICAL/)
+  assert.match(prog, /ESPECIALIDAD PROG/)
+  assert.match(prog, /ORIENTACIÓN HORIZONTAL/)
+  assert.match(math, /exclusivamente pantilla1_grafos/)
+})
+
+test("system instructions request only maps and provide valid examples for each provider", async () => {
   for (const provider of ["azure", "gateway"] as const) {
     const config = await explanationSystemConfig(provider)
     const prompt = config.systemPromptBase
     assert.ok(prompt.startsWith(COMMON_EXPLANATION_INSTRUCTIONS))
     assert.ok(prompt.includes("Nunca mezcles campos"))
     const graphJson = prompt.split("EJEMPLO COMPLETO DE pantilla1_grafos (formato de este proveedor; adaptá contenido y cantidad de pasos al apunte):\n\n")[1].split("\n\n")[0]
-    const mixedJson = prompt.split("EJEMPLO DE version 2:\n\n")[1].split("\n\n")[0]
+    assert.ok(!prompt.includes('EJEMPLO DE version 2:'))
     const decode = (json: string) => provider === "azure" ? decodeAzureExplanation(JSON.parse(json)) : JSON.parse(json)
     const graph = resolveGraphPresentation(decode(graphJson))
     const processJson = prompt.split('EJEMPLO GENERAL DE PROCESO (datos visibles, flechas y cambio de estado; adaptar al tema):\n\n')[1].split('\n\n')[0]
@@ -31,7 +41,6 @@ test("system instructions scope both formats and provide valid examples for each
     assert.deepEqual(graph.diapositivas[0].aristas, graph.diapositivas[1].aristas, 'prepare the movement before changing topology')
     assert.equal(graph.diapositivas[2].aristas[1].desde, "D")
     assert.equal(graph.diapositivas[2].aristas[1].hacia, "C")
-    assert.equal(resolveStructuredLesson(decode(mixedJson)).version, 2)
     if (provider === "azure") {
       assert.ok(config.outputSchema)
       const example = JSON.parse(graphJson)

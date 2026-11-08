@@ -9,6 +9,43 @@ import { structuredLessonHtml } from "../lib/server/pdf-explanation-renderer.ts"
 import { graphFixture, gridGraphFixture } from "./helpers/explanation-graphs-fixture.mts"
 import { generalGraphFixture } from './helpers/explanation-general-graphs-fixture.mts'
 import { avlTeachingFixture } from './helpers/explanation-avl-teaching-fixture.mts'
+import { mathGraphFixture } from './helpers/explanation-math-fixture.mts'
+
+test('math maps render fractions, matrices, edge labels and callouts offline in both directions', async () => {
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ viewport: { width: 1366, height: 768 }, reducedMotion: 'reduce' })
+  const errors: string[] = [], requests: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('request', request => { if (/^https?:/.test(request.url())) requests.push(request.url()) })
+  try {
+    await page.context().setOffline(true)
+    for (const orientation of ['horizontal', 'vertical'] as const) {
+      const html = structuredLessonHtml(mathGraphFixture, { specialty: 'math', orientation })
+      assert.ok(html.length < 1_500_000, 'generated HTML can be imported again')
+      await page.setContent(html)
+      await page.locator('.graph-math .katex').first().waitFor()
+      await page.evaluate(() => document.fonts.ready)
+      assert.ok(await page.locator('.graph-math .mfrac').count() > 0)
+      assert.ok(await page.locator('.graph-math .mtable').count() > 0)
+      assert.ok(await page.locator('.callout .katex').count() > 0)
+      assert.equal(await page.locator('.katex-error').count(), 0)
+      const stage = (await page.locator('#stage').boundingBox())!
+      assert.ok(stage.y < 12 && stage.height > 650, 'the map fills the viewport above its controls')
+      const first = (await page.locator('[data-node-id="ecuacion"]').boundingBox())!
+      const last = (await page.locator('[data-node-id="verificar"]').boundingBox())!
+      assert.ok(orientation === 'vertical' ? Math.abs(last.y-first.y)>Math.abs(last.x-first.x) : Math.abs(last.x-first.x)>Math.abs(last.y-first.y))
+      await page.getByRole('button', { name: 'Siguiente', exact: true }).click()
+      assert.ok(await page.locator('.edge-label .katex').count() > 0)
+      await page.screenshot({ path: `test-results/math-map-${orientation}.png` })
+      await page.setViewportSize({ width: 390, height: 667 })
+      await page.getByRole('button', { name: 'Ajustar gráfico al espacio', exact: true }).click()
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight), true)
+      await page.setViewportSize({ width: 1366, height: 768 })
+    }
+    assert.deepEqual(errors, [])
+    assert.deepEqual(requests, [])
+  } finally { await browser.close() }
+})
 
 test('light graph player fits the viewport, zooms at the pointer with Ctrl+wheel and resets after panning', async () => {
   const browser = await chromium.launch({ headless: true })
@@ -17,7 +54,7 @@ test('light graph player fits the viewport, zooms at the pointer with Ctrl+wheel
   page.on('pageerror', error => errors.push(error.message))
   try {
     await page.setContent(structuredLessonHtml(avlTeachingFixture))
-    assert.equal(await page.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(241, 245, 249)')
+    assert.equal(await page.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)')
     for (const [width, height] of [[1366,768],[1280,480],[390,667],[390,400]]) {
       await page.setViewportSize({ width, height })
       await page.getByRole('button', { name: 'Ajustar gráfico al espacio', exact: true }).click()

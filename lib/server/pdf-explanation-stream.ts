@@ -6,9 +6,10 @@ import { azureExplanationFormatSchema, decodeAzureExplanation } from "../pdf-exp
 import { explanationSystemConfig } from "./pdf-explanation-system.ts"
 import { composeExplanationSystem } from "../pdf-explanation-system.ts"
 import { explanationPrompt } from "../pdf-explanation.ts"
+import type { ExplanationPreferences } from '../pdf-explanation-preferences.ts'
 
 export function explanationStream(model: LanguageModel, question: string, transcription: string,
-  options: { instructions?: string; systemPrompt?: string; fallbackModels?: string[]; maxOutputTokens?: number; reasoning?: "none" | "low"; image?: string; provider?: "azure" | "gateway" } = {}) {
+  options: ExplanationPreferences & { instructions?: string; systemPrompt?: string; fallbackModels?: string[]; maxOutputTokens?: number; reasoning?: "none" | "low"; image?: string; provider?: "azure" | "gateway" } = {}) {
   return createUIMessageStreamResponse({
     stream: createUIMessageStream({
       execute: async ({ writer }) => {
@@ -18,7 +19,7 @@ export function explanationStream(model: LanguageModel, question: string, transc
         })
         const status = (text: string) => writer.write({ type: "data-explanation-status", data: { text } })
         diagnostic("modelo-principal", { model: typeof model === "object" ? model.modelId : model, format: "lesson-v2|pantilla1_grafos" })
-        const { systemPromptBase } = await explanationSystemConfig(options.provider ?? "gateway")
+        const { systemPromptBase } = await explanationSystemConfig(options.provider ?? "gateway", options.specialty, options.orientation)
         const system = options.systemPrompt ?? composeExplanationSystem(systemPromptBase, options.instructions)
         let correction = ""
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -66,7 +67,9 @@ export function explanationStream(model: LanguageModel, question: string, transc
               catch (error) { throw new StructuredLessonError(error instanceof Error ? error.message : "Formato Azure inválido.") }
             }
             status("Validando los diagramas y preparando la explicación…")
-            const html = structuredLessonHtml(lesson)
+            if (options.specialty && (!lesson || typeof lesson !== 'object' || !('plantilla' in lesson)))
+              throw new StructuredLessonError('La especialidad seleccionada requiere pantilla1_grafos: usá un mapa secuenciado, no version 2.')
+            const html = structuredLessonHtml(lesson, options)
             diagnostic("leccion-validada", { attempt: attempt + 1, htmlBytes: new TextEncoder().encode(html).length })
             writer.write({ type: "data-explanation", data: { html } })
             writer.write({ type: "finish" })

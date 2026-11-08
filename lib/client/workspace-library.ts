@@ -186,9 +186,12 @@ async function catalog(candidates: Candidate[], files: LibraryFile[]) {
     if (!match) continue
     referenced.add(byPath.get(path)!.id)
     const context = explanationContexts.get(match[1])
-    const payload = data as { entries?: { id: string; question?: string; annotation?: { pageIndex?: number } }[] }
+    const payload = data as { entries?: { id: string; question?: string; htmlReference?: { key: string; id: string }; annotation?: { pageIndex?: number } }[] }
     for (const entry of payload.entries || []) {
-      const file = byPath.get(path.replace(/explanations\.json$/, `${entry.id}.html`))
+      const reference = entry.htmlReference
+      const file = byPath.get(reference && /^[a-f0-9]{64}$/.test(reference.key) && /^[a-zA-Z0-9_-]+$/.test(reference.id)
+        ? `manifests/pdf-explanations/${reference.key}/${reference.id}.html`
+        : path.replace(/explanations\.json$/, `${entry.id}.html`))
       if (!file) continue
       referenced.add(file.id)
       items.push({ id: `explanation:${match[1]}:${entry.id}`, title: `${entry.question || 'Verlo'}${entry.annotation?.pageIndex != null ? ` · Página ${entry.annotation.pageIndex + 1}` : ''}`, kind: 'html', fileId: file.id, section: 'Verlo', ...context })

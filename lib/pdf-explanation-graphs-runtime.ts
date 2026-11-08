@@ -13,6 +13,12 @@ button{font:inherit;color:#1e293b;background:#f8fafc;border:1px solid #cbd5e1;bo
 .graph-view-controls{position:absolute;top:8px;right:8px;display:flex;align-items:center;gap:4px;padding:4px;border:1px solid #cbd5e1;border-radius:10px;background:#fffffff0;box-shadow:0 2px 8px #0f172a12;z-index:2}.graph-view-controls button{padding:4px 8px;font-size:12px;min-height:28px}.graph-view-controls output{font-size:12px;min-width:40px;text-align:center;color:#475569}
 .node .ring{animation:focus-pulse 2s ease-in-out infinite}@keyframes focus-pulse{50%{opacity:.25}}
 @media(max-width:700px){main{padding:8px;gap:6px}header,nav{gap:6px;padding:7px 9px}header{flex-wrap:wrap}.tag{display:none}#counter{white-space:normal}#stage{border-radius:12px}#step-objective{font-size:13px}nav{display:grid;grid-template-columns:auto 1fr}#dots{grid-column:1/-1;grid-row:2}.controls{justify-content:flex-end}button{padding:6px 9px;font-size:14px}}
+/* Map-first view: teaching text stays anchored to the map, without title panels. */
+body{background:#fff}main{position:relative;max-width:none;padding:8px;grid-template-rows:minmax(0,1fr) auto auto;gap:8px}
+main>header,#step-intro{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+#stage{grid-row:1;border:0;border-radius:10px}#notes{position:absolute;bottom:80px;left:8px;right:8px;z-index:3;grid-row:2;height:auto;max-height:22dvh;min-height:0}#notes:empty{display:none}#notes:empty::before{content:none}main>nav{grid-row:3}
+@media(max-width:699px){#notes{position:static;z-index:auto}}
+.graph-math{overflow:visible}.graph-math-content{height:100%;display:flex;align-items:center;justify-content:center;gap:4px;line-height:1.35;color:#0f172a;text-align:center;stroke:none;font-family:system-ui,sans-serif;font-weight:400}.graph-math-content .katex-display{margin:0}.graph-math-content.datum-value,.datum-value .graph-math-content{color:#92400e}.datum-caption .graph-math-content{color:#0369a1}.callout .katex{font-size:1.08em}.callout .katex-display{margin:4px 0;overflow-x:auto;overflow-y:hidden}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 `
 
