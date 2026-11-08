@@ -94,6 +94,7 @@
     presentationFileName: "",
     presentationScaleInitialized: false,
     cutButton: null,
+    selectionTools: null,
     cutSelectionMode: false,
     cutStartPage: null,
     cutEndPage: null,
@@ -707,7 +708,7 @@
       state.svgButtons = ["exportSvgButton", "secondaryExportSvgButton"]
         .map((id) => document.getElementById(id)).filter(Boolean);
       for (const button of state.svgButtons) {
-        button.addEventListener("click", exportAllPagesAsSvg);
+        button.addEventListener("click", () => exportAllPagesAsSvg());
       }
     }
     if (!state.translateButton) {
@@ -753,6 +754,8 @@
         refreshCutButton();
       }
     }
+
+    ensureSelectionTools();
 
     if (!state.subjectShortcutContainer) {
       const toolbar = document.getElementById("toolbarViewerRight") || document.getElementById("toolbarViewer");
@@ -1081,6 +1084,58 @@
       : "Recortar paginas";
   }
 
+  function ensureSelectionTools() {
+    if (state.selectionTools || !state.cutButton) return;
+    const toolbar = document.getElementById("toolbarViewerRight");
+    const allSvg = document.getElementById("exportSvgButton");
+    if (!toolbar || !allSvg) return;
+    const group = document.createElement("div");
+    group.className = "pdfjs-custom-selection-tools";
+    group.innerHTML = '<button id="selectionToolsButton" class="toolbarButton" type="button" aria-expanded="false" aria-controls="selectionToolsMenu">Seleccionar ▾</button><div id="selectionToolsMenu" role="group" aria-label="Acciones de selección" hidden></div>';
+    const trigger = group.firstElementChild;
+    const menu = group.lastElementChild;
+    const svg = document.createElement("button");
+    svg.type = "button";
+    svg.className = "toolbarButton";
+    svg.textContent = "SVG";
+    svg.title = "Exportar las páginas seleccionadas como SVG";
+    svg.setAttribute("aria-label", svg.title);
+    svg.addEventListener("click", () => {
+      if (state.cutStartPage == null) {
+        showToast("Selecciona la página inicial y final en el PDF.", "info");
+        return;
+      }
+      void exportAllPagesAsSvg(state.cutStartPage, state.cutEndPage ?? state.cutStartPage);
+    });
+    allSvg.textContent = "All SVG";
+    menu.append(state.cutButton, svg, allSvg);
+    toolbar.prepend(group);
+    const setOpen = (open) => {
+      menu.hidden = !open;
+      trigger.setAttribute("aria-expanded", String(open));
+    };
+    trigger.addEventListener("click", () => {
+      const open = menu.hidden;
+      if (open && !state.cutSelectionMode) startCutSelection();
+      setOpen(open);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!group.contains(event.target)) setOpen(false);
+    });
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        trigger.focus();
+        event.stopPropagation();
+      } else if (event.key === "ArrowDown" && event.target === trigger) {
+        event.preventDefault();
+        setOpen(true);
+        state.cutButton.focus();
+      }
+    });
+    state.selectionTools = { trigger, svg };
+  }
+
   function setPagesZipButtonState(button) {
     if (!(button instanceof HTMLElement)) return;
     const hasDocument = Boolean(state.app?.pdfDocument);
@@ -1103,6 +1158,10 @@
 
     setPagesZipButtonState(state.pagesZipButton);
     setPagesZipButtonState(state.secondaryPagesZipButton);
+    if (state.selectionTools) {
+      state.selectionTools.trigger.disabled = !state.app.pdfDocument;
+      state.selectionTools.svg.disabled = !state.app.pdfDocument || state.isExportingSvg;
+    }
     for (const button of state.svgButtons || []) {
       button.disabled = !state.app.pdfDocument || state.isExportingSvg;
       button.setAttribute("aria-busy", String(state.isExportingSvg));
@@ -1810,7 +1869,7 @@
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   }
 
-  async function exportAllPagesAsSvg() {
+  async function exportAllPagesAsSvg(startPage = 1, endPage = null) {
     const source = state.app?.pdfDocument;
     if (!source || state.isExportingSvg) return;
     const rotation = state.app.pdfViewer.pagesRotation || 0;
@@ -1831,7 +1890,8 @@
       const context = canvas.getContext("2d", { alpha: false });
       if (!context) throw new Error("El navegador no pudo crear el lienzo de exportacion.");
       const pages = [];
-      for (let pageNumber = 1; pageNumber <= exportDocument.numPages; pageNumber += 1) {
+      const lastPage = endPage ?? exportDocument.numPages;
+      for (let pageNumber = startPage; pageNumber <= lastPage; pageNumber += 1) {
         updateBusy(`Renderizando pagina ${pageNumber} de ${exportDocument.numPages}...`);
         const page = await exportDocument.getPage(pageNumber);
         const viewport = page.getViewport({ scale: SVG_RENDER_SCALE, rotation: (page.rotate + rotation) % 360 });
@@ -1846,7 +1906,8 @@
         page.cleanup?.();
       }
       const markup = buildRasterSvg(pages);
-      downloadBlob(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }), `${sourceName}-paginas.svg`);
+      const suffix = endPage == null ? "paginas" : `paginas-${startPage}-${lastPage}`;
+      downloadBlob(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }), `${sourceName}-${suffix}.svg`);
       showToast("SVG descargado.", "success", 2800);
     } catch (error) {
       console.error("Custom PDF.js SVG export failed:", error);

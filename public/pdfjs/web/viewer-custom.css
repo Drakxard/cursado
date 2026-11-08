@@ -612,11 +612,58 @@ html.pdfjs-custom-presentation-preparing #viewerContainer {
   cursor: pointer;
 }
 
-#exportSvgButton.pdfjs-custom-svg-button {
-  width: 36px;
-  min-width: 36px;
-  padding: 0 3px;
+.pdfjs-custom-selection-tools {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+#selectionToolsButton {
+  width: auto;
+  padding: 0 8px;
+  white-space: nowrap;
+  font: 500 12px/1 system-ui, sans-serif;
+}
+
+#selectionToolsButton::before,
+#selectionToolsMenu > button::before {
+  display: none;
+}
+
+#selectionToolsMenu {
+  position: absolute;
+  inset-block-start: calc(100% + 5px);
+  inset-inline-end: 0;
+  z-index: 100;
+  display: flex;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--doorhanger-border-color, #8885);
+  border-radius: 8px;
+  background: var(--toolbar-bg-color, #f9f9fa);
+  box-shadow: 0 4px 14px #0003;
+}
+
+#selectionToolsMenu[hidden] {
+  display: none;
+}
+
+#selectionToolsMenu > button {
+  flex: none;
+  width: auto;
+  min-width: 32px;
+  height: 30px;
+  margin: 0;
+  padding: 0 7px;
+  border-radius: 5px;
+  white-space: nowrap;
   font: 600 11px/1 system-ui, sans-serif;
+}
+
+#selectionToolsMenu > button:focus-visible,
+#selectionToolsButton:focus-visible {
+  outline: 2px solid var(--focus-ring-color, #3b82f6);
+  outline-offset: -2px;
 }
 
 #exportSvgButton::before,
