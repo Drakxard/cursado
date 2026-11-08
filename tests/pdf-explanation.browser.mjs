@@ -204,12 +204,14 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     assert.equal(await page.frameLocator('.pdf-explanation-result iframe').locator('body').getAttribute('data-graph-engine'), 'd3')
     assert.equal(generations, 1)
     await page.getByRole("button", { name: "Salir de la explicación" }).click()
+    // Editing/keyboard focus can scroll the viewer; persistence concerns the
+    // position within the PDF page, not its earlier viewport coordinates.
+    const savedPosition = await note.evaluate(element => ({ left: element.style.left, top: element.style.top }))
     await page.reload()
     await initialize()
     await note.waitFor()
-    const restored = await note.boundingBox()
-    assert.ok(Math.abs(restored.x - after.x) < 3)
-    assert.ok(Math.abs(restored.y - after.y) < 3)
+    const restored = await note.evaluate(element => ({ left: element.style.left, top: element.style.top }))
+    assert.deepEqual(restored, savedPosition)
     await note.click()
     await page.locator(".pdf-explanation-result iframe").waitFor()
     assert.equal(generations, 1)
