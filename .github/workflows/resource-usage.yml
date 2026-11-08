@@ -43,6 +43,16 @@ jobs:
       - name: Compilar la aplicación de producción
         if: ${{ !cancelled() }}
         run: npm run build
+      - name: Compilar la pizarra para medir selección vacía
+        if: ${{ !cancelled() }}
+        run: pnpm --filter @komuboard/client-web build
+        working-directory: pizarra-sync
+        env:
+          VITE_WORKER_HOST: 127.0.0.1:8787
+      - name: Pico al abrir y seleccionar el fondo vacío
+        if: ${{ !cancelled() }}
+        run: pnpm exec playwright test --config playwright.selection.config.ts
+        working-directory: pizarra-sync
       - name: Medir Inicio y Materia durante dos minutos cada uno
         if: ${{ !cancelled() }}
         shell: bash
@@ -61,4 +71,6 @@ jobs:
           name: memoria-y-explicaciones
           path: |
             test-results/
+            pizarra-sync/selection-results/
+            pizarra-sync/selection-report/
             ${{ runner.temp }}/cursado-memory.log

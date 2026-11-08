@@ -311,6 +311,8 @@ export class BoardCanvas {
   private marquee: Konva.Rect | null = null;
   private marqueeStart: { x: number; y: number } | null = null;
   private marqueeAdditive = false;
+  private marqueeFrame = 0;
+  private marqueePoint: { x: number; y: number } | null = null;
   /** Active while dragging a multi-node selection as one unit (strokes + text + connectors together).
    *  Coordinates the three per-type move subsystems; `start` is the grab point for the shared delta. */
   private groupMoving = false;
@@ -2392,7 +2394,14 @@ export class BoardCanvas {
   }
   private updateMarquee(): void {
     if (!this.marquee || !this.marqueeStart) return;
-    const p = this.point();
+    this.marqueePoint = this.point();
+    if (this.marqueeFrame) return;
+    this.marqueeFrame = requestAnimationFrame(() => { this.marqueeFrame = 0; this.flushMarquee(); });
+  }
+  private flushMarquee(): void {
+    if (!this.marquee || !this.marqueeStart || !this.marqueePoint) return;
+    const p = this.marqueePoint;
+    this.marqueePoint = null;
     const s = this.marqueeStart;
     const box: Rect = {
       x: Math.min(p.x, s.x),
@@ -2406,6 +2415,9 @@ export class BoardCanvas {
   }
   private endMarquee(): void {
     if (!this.marquee) return;
+    if (this.marqueeFrame) cancelAnimationFrame(this.marqueeFrame);
+    this.marqueeFrame = 0;
+    this.flushMarquee(); // settle the last pointer event even if it arrived before a frame
     const box: Rect = {
       x: this.marquee.x(),
       y: this.marquee.y(),
@@ -2418,17 +2430,19 @@ export class BoardCanvas {
   private applyMarquee(box: Rect): void {
     // Strokes are text-layer objects now (ADR-0009 P3) → marquee-selected via selectInBox below, not
     // the Konva hit graph.
-    this.textLayer.selectInBox(box, this.marqueeAdditive); // text/strokes aren't Konva nodes — select separately
-    this.selectConnectorsInBox(box); // connectors aren't Konva nodes — test their polyline bbox
+    const textChanged = this.textLayer.selectInBox(box, this.marqueeAdditive, false);
+    const connectorsChanged = this.selectConnectorsInBox(box);
     // Both subsystems are settled now — re-evaluate the transform box vs the union group box and
     // redraw the selection chrome for the resulting marquee selection.
-    this.reattachTransformer();
+    if (textChanged || connectorsChanged) {
+      this.refreshConnectorSelection();
+      this.reattachTransformer();
+    } else if (!this.marquee) this.publishSelection();
   }
 
   /** Add connectors whose polyline bounding box intersects the marquee (world coords). */
-  private selectConnectorsInBox(box: Rect): void {
-    if (!this.marqueeAdditive)
-      for (const id of [...this.selectedConnectors]) this.selectedConnectors.delete(id);
+  private selectConnectorsInBox(box: Rect): boolean {
+    const next = this.marqueeAdditive ? new Set(this.selectedConnectors) : new Set<string>();
     if (box.width >= 2 || box.height >= 2) {
       for (const id of this.connectorIds) {
         const m = this.objects.get(id);
@@ -2446,14 +2460,18 @@ export class BoardCanvas {
           maxY = Math.max(maxY, pts[i + 1]!);
         }
         const bb = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-        if (rectsIntersect(box, bb)) this.selectedConnectors.add(id);
+        if (rectsIntersect(box, bb)) next.add(id);
       }
     }
-    this.refreshConnectorSelection();
-    this.notifySelection();
-    this.publishSelection();
+    if (next.size === this.selectedConnectors.size && [...next].every(id => this.selectedConnectors.has(id))) return false;
+    this.selectedConnectors.clear();
+    for (const id of next) this.selectedConnectors.add(id);
+    return true;
   }
   private cancelMarquee(): void {
+    if (this.marqueeFrame) cancelAnimationFrame(this.marqueeFrame);
+    this.marqueeFrame = 0;
+    this.marqueePoint = null;
     this.marquee?.destroy();
     this.marquee = null;
     this.marqueeStart = null;
@@ -3115,6 +3133,7 @@ export class BoardCanvas {
 
   destroy(): void {
     this.lifetime.abort();
+    this.cancelMarquee();
     this.undoManager.destroy();
     this.viewport.destroy();
     this.textLayer.destroy();

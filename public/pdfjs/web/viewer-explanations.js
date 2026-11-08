@@ -904,7 +904,9 @@ window.initPdfExplanations = function ({ app, query, ensureWorkspaceRootHandle, 
       } finally {
         clearInterval(ticker); loadingIndicator.hidden = true; form.removeAttribute("aria-busy");
         debug.finishedAt = new Date().toISOString();
-        try { window.downloadPdfExplanationAttempt(debug); } catch (error) { console.error("[Verlo] Descarga de diagnóstico", error); }
+        if (debug.outcome !== 'exito') {
+          try { window.downloadPdfExplanationAttempt(debug); } catch (error) { console.error("[Verlo] Descarga de diagnóstico", error); }
+        }
         generating = false; submit.disabled = false; input.disabled = false; removeRegion.disabled = false;
         modelSelect.disabled = !modelSelect.value; refresh.disabled = false;
         specialtySelect.disabled = false; orientationSelect.disabled = false;
