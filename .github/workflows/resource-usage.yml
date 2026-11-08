@@ -31,6 +31,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: pizarra-sync
       - run: npx playwright install --with-deps chromium
+      - name: Instalar Chromium de la pizarra
+        run: pnpm exec playwright install --with-deps chromium
+        working-directory: pizarra-sync
       - run: npm run build:pdf-explanation-ui
       - run: npm run typecheck
       - run: pnpm --filter @komuboard/client-web typecheck
