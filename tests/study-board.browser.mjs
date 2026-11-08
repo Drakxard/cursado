@@ -105,6 +105,39 @@ async function send(page, type, data = {}) {
   }, { type, data })
 }
 
+test('study pages keep unsaved edits protected until the local checkpoint finishes', { timeout: 60000 }, async t => {
+  const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
+  const context = await browser.newContext(); await fixture(context)
+  const page = await context.newPage()
+  await page.goto(origin + '/study-fixture?board=target'); await loaded(page)
+  await expect.poll(() => page.evaluate(() => window.debugEvents.includes('study-board:ready'))).toBe(true)
+  if (await page.getByRole('button', { name: 'Aceptar', exact: true }).isVisible()) await page.getByRole('button', { name: 'Aceptar', exact: true }).click()
+  await page.evaluate(() => {
+    const original = FileSystemFileHandle.prototype.createWritable
+    const blocked = new Promise(resolve => { window.releaseCheckpoint = resolve })
+    FileSystemFileHandle.prototype.createWritable = async function (...args) {
+      const writer = await original.apply(this, args)
+      if (this.name === 'target.json') {
+        const close = writer.close.bind(writer)
+        writer.close = async () => { window.checkpointBlocked = true; await blocked; return close() }
+      }
+      return writer
+    }
+  })
+  await engine(page).evaluate(() => window.__komuboard.doc.getMap('metadata').set('save-regression', 'keep this edit'))
+  await page.waitForFunction(() => window.checkpointBlocked)
+  const unloadAllowed = () => page.evaluate(() => window.dispatchEvent(new Event('beforeunload', { cancelable: true })))
+  assert.equal(await unloadAllowed(), false, 'the parent prevents leaving while the file is being written')
+  assert.equal(await engine(page).evaluate(() => window.dispatchEvent(new Event('beforeunload', { cancelable: true }))), false, 'the editor waits for the persistence acknowledgment')
+  await page.getByRole('button', { name: 'Volver a Estudio', exact: true }).click()
+  assert.ok(engine(page), 'closing keeps the editor mounted until saving completes')
+  await page.evaluate(() => window.releaseCheckpoint())
+  await expect(page.getByRole('button', { name: 'Reabrir', exact: true })).toBeVisible()
+  assert.equal(await unloadAllowed(), true)
+  await page.getByRole('button', { name: 'Reabrir', exact: true }).click(); await loaded(page)
+  assert.equal(await engine(page).evaluate(() => window.__komuboard.doc.getMap('metadata').get('save-regression')), 'keep this edit')
+})
+
 test('Study integration: review by type, retained PDF, imports, links, two-client sync and cancellation', { timeout: 150000 }, async t => {
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : 'chrome' }); t.after(() => browser.close())
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); await fixture(context)

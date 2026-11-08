@@ -10,13 +10,13 @@ test('a saved graph HTML is upgraded offline using its data without executing it
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   await page.route('https://import.test/**', async route => {
-    if (new URL(route.request().url()).pathname.endsWith('.js')) return route.fulfill({ body: await readFile('public/pdfjs/web/viewer-explanation-import.js'), contentType: 'text/javascript' })
+    if (new URL(route.request().url()).pathname.endsWith('.js')) return route.fulfill({ body: await readFile('public/pdfjs/web/' + new URL(route.request().url()).pathname.split('/').at(-1)), contentType: 'text/javascript' })
     return route.fulfill({ body: '<!doctype html><html><body style="margin:0"><iframe sandbox="allow-scripts" style="display:block;border:0;width:100vw;height:100vh"></iframe></body></html>', contentType: 'text/html' })
   })
   try {
     await page.goto('https://import.test/')
     const source = '<!doctype html><html><head><style>body{background:black}#scene{min-width:1600px}</style></head><body><div id="stage"><svg id="scene"></svg></div>' +
-      '<script id="graph-data" type="application/json">' + JSON.stringify(graphFixture) + '</script><script>window.oldGraphPlayerRan=true</script></body></html>'
+      '<script id="graph-state" type="application/json">{"step":0,"pins":{"0":["E"]}}</script><script id="graph-data" type="application/json">' + JSON.stringify(graphFixture) + '</script><script>window.oldGraphPlayerRan=true</script></body></html>'
     const html = await page.evaluate(async source => {
       const path = '/viewer-explanation-import.js'
       const module = await import(/* webpackIgnore: true */ path)
@@ -29,6 +29,7 @@ test('a saved graph HTML is upgraded offline using its data without executing it
     await frame.locator('body[data-graph-engine="d3"]').waitFor()
     assert.equal(await frame.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)')
     assert.equal(await frame.locator('#title').textContent(), graphFixture.titulo)
+    assert.equal(await frame.locator('[data-node-id="E"]').getAttribute('data-state'), 'destacado')
     assert.ok((await frame.locator('#stage').boundingBox())!.y < 12, 'the map starts at the top without title panels')
     await frame.getByRole('button', { name: 'Siguiente', exact: true }).click()
     assert.ok((await frame.locator('#counter').textContent())!.includes('2'))
@@ -44,7 +45,7 @@ test("imported AVL compiles Tailwind offline and fits the PDF iframe at differen
   page.on("pageerror", error => errors.push(error.message))
   page.on("console", message => { if (message.text().includes("Content Security Policy")) violations.push(message.text()) })
   await page.route("https://import.test/**", async route => {
-    if (new URL(route.request().url()).pathname.endsWith(".js")) return route.fulfill({ body: await readFile("public/pdfjs/web/viewer-explanation-import.js"), contentType: "text/javascript" })
+    if (new URL(route.request().url()).pathname.endsWith(".js")) return route.fulfill({ body: await readFile('public/pdfjs/web/' + new URL(route.request().url()).pathname.split('/').at(-1)), contentType: "text/javascript" })
     return route.fulfill({ body: '<!doctype html><html><body style="margin:0"><iframe sandbox="allow-scripts" style="display:block;border:0;width:100vw;height:100vh"></iframe></body></html>', contentType: "text/html" })
   })
   try {

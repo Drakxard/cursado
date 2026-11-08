@@ -2613,8 +2613,8 @@ export class TextLayer {
     }
   }
   /** Add every text box intersecting a world-space marquee box to the selection. */
-  selectInBox(box: WorldRect, additive: boolean): void {
-    if (!additive) this.selected.clear();
+  selectInBox(box: WorldRect, additive: boolean, notify = true): boolean {
+    const next = additive ? new Set(this.selected) : new Set<string>();
     for (const [id, size] of this.sizes) {
       const m = this.objects.get(id);
       const obj = m ? readObject(m) : null;
@@ -2642,12 +2642,16 @@ export class TextLayer {
         top = obj.y;
       }
       if (rectsIntersect(box, { x: left, y: top, width: size.w, height: size.h })) {
-        this.selected.add(id);
+        next.add(id);
       }
     }
-    for (const id of expandGroups(this.opts.doc, this.selected)) this.selected.add(id); // whole groups
+    for (const id of expandGroups(this.opts.doc, next)) next.add(id); // whole groups
+    if (next.size === this.selected.size && [...next].every(id => this.selected.has(id))) return false;
+    this.selected.clear();
+    for (const id of next) this.selected.add(id);
     this.refreshSelectionChrome();
-    this.opts.onSelectionChange?.();
+    if (notify) this.opts.onSelectionChange?.();
+    return true;
   }
   deleteSelected(): void {
     if (!this.selected.size) return;

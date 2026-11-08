@@ -1,4 +1,5 @@
 import { AZURE_SYNC_FILE, AZURE_WORKSPACE_DIRECTORIES, AZURE_UPLOAD_CHUNK_SIZE, azureBlockId, azureWorkspaceId, azureWorkspacePath } from "../azure-workspace.ts"
+import { hashBlob } from './blob-hash.ts'
 
 export type AzureSyncStatus = { configured: boolean; connected?: boolean; account?: string; container?: string; target?: string; error?: string }
 export type AzureSyncSummary = { synced: number; pending: number; failed: number; errors: string[]; workspaceId: string; activePath?: string }
@@ -74,7 +75,7 @@ async function workspaceFiles(root: FileSystemDirectoryHandle) {
 }
 
 async function hash(blob: Blob) {
-  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())), byte => byte.toString(16).padStart(2, "0")).join("")
+  return hashBlob(blob)
 }
 
 async function responseJson(response: Response) {

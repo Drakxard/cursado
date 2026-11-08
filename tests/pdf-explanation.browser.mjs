@@ -19,6 +19,8 @@ let bytes = await pdf.save()
 test("PDF.js star generates from cached Datalab text; note drags, persists and reopens with Escape", async () => {
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
+  const downloads = []
+  page.on('download', download => downloads.push(download.suggestedFilename()))
   const promptConfig = await explanationSystemConfig('azure')
   const question = '¿Qué representa la derivada y cómo se interpreta su cambio en un ejemplo del apunte?'
   const customSystem = composeExplanationSystem(promptConfig.systemPromptBase, 'HTML interactivo paso a paso') + '\n\nExplicá con ejemplos de la materia.\n'
@@ -37,7 +39,7 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
       assert.equal(body.model, "gpt-5-mini")
       assert.equal(body.specialty, 'prog')
       assert.equal(body.orientation, 'auto')
-      assert.equal(body.transcription, "Una derivada mide el cambio de la función.")
+      assert.equal(body.transcription, generations === 0 ? "Una derivada mide el cambio de la función." : 'Solo este fragmento seleccionado')
       assert.equal(body.question, generations === 0 ? question : "Explicalo")
       if (generations === 0) assert.match(body.image, /^data:image\/jpeg;base64,/)
       else assert.equal(body.image, undefined)
@@ -138,11 +140,14 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.mouse.move(canvasBox.x + 230, canvasBox.y + 220, { steps: 8 })
     await page.mouse.up()
     assert.equal(await page.locator('.pdf-explanation-region').isVisible(), true)
-    const successfulDownload = page.waitForEvent("download")
     await page.locator("#pdf-explanation-question").press("Enter")
     await page.locator(".pdf-explanation-result iframe").waitFor()
+    await page.frameLocator('.pdf-explanation-result iframe').locator('body[data-graph-engine="d3"]').waitFor()
+    assert.deepEqual(downloads, [], 'successful generation must not download diagnostics automatically')
+    const successfulDownload = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Exportar HTML', exact: true }).click()
     const file = await successfulDownload
-    assert.ok(file.suggestedFilename().includes("pagina-1-exito"))
+    assert.ok(file.suggestedFilename().includes('verlo-pagina-1'))
     const downloadedHtml = await readFile(await file.path(), "utf8")
     assert.ok(downloadedHtml.includes('id="graph-data"'))
     const graphFrame = page.frameLocator('.pdf-explanation-result iframe')
@@ -151,7 +156,6 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await graphFrame.locator('[data-node-id="B"] .datum-value').first().waitFor()
     assert.ok((await graphFrame.locator('[data-node-id="B"]').textContent()).includes('pendiente'))
     assert.equal(await graphFrame.locator('[data-edge-id="A:B"]').getAttribute('marker-end'), 'url(#graph-arrow)')
-    assert.ok(downloadedHtml.includes("mostrar-explicacion"))
     const assertFullpage = async () => {
       const viewport = page.viewportSize()
       const box = await page.locator('.pdf-explanation-result iframe').boundingBox()
@@ -204,12 +208,14 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     assert.equal(await page.frameLocator('.pdf-explanation-result iframe').locator('body').getAttribute('data-graph-engine'), 'd3')
     assert.equal(generations, 1)
     await page.getByRole("button", { name: "Salir de la explicación" }).click()
+    // Editing/keyboard focus can scroll the viewer; persistence concerns the
+    // position within the PDF page, not its earlier viewport coordinates.
+    const savedPosition = await note.evaluate(element => ({ left: element.style.left, top: element.style.top }))
     await page.reload()
     await initialize()
     await note.waitFor()
-    const restored = await note.boundingBox()
-    assert.ok(Math.abs(restored.x - after.x) < 3)
-    assert.ok(Math.abs(restored.y - after.y) < 3)
+    const restored = await note.evaluate(element => ({ left: element.style.left, top: element.style.top }))
+    assert.deepEqual(restored, savedPosition)
     await note.click()
     await page.locator(".pdf-explanation-result iframe").waitFor()
     assert.equal(generations, 1)
@@ -243,6 +249,12 @@ test("PDF.js star generates from cached Datalab text; note drags, persists and r
     await page.evaluate(async () => {
       const manifests = await (await navigator.storage.getDirectory()).getDirectoryHandle("manifests")
       await manifests.removeEntry("subject-voice", { recursive: true })
+    })
+    await page.evaluate(() => {
+      const layer = document.querySelector('.page .textLayer')
+      const span = document.createElement('span'); span.textContent = 'Solo este fragmento seleccionado'; layer.append(span)
+      const range = document.createRange(); range.selectNodeContents(span)
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
     })
     await page.locator("#pdfExplanationButton").click()
     await page.locator("#pdf-explanation-question").press("Enter")
@@ -355,12 +367,15 @@ test("star starts Datalab before confirmation; Enter waits for that job and retr
   const browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
   let transcriptions = 0, generations = 0
+  let transcriptionStarted
+  const transcriptionObserved = new Promise(resolve => { transcriptionStarted = resolve })
   let release
   const pending = new Promise(resolve => { release = resolve })
   await page.route("https://prepare.test/**", async route => {
     const url = new URL(route.request().url())
     if (url.pathname === "/api/inscreen/datalab-transcribe") {
       transcriptions++
+      transcriptionStarted()
       await pending
       return route.fulfill({ json: { markdown: "Transcripción de la página actual." } })
     }
@@ -395,9 +410,8 @@ test("star starts Datalab before confirmation; Enter waits for that job and retr
     await page.goto("https://prepare.test/pdfjs/web/viewer.html?file=%2Fsample.pdf")
     await page.waitForFunction(() => window.PDFViewerApplication?.pdfViewer?.getPageView(0)?.annotationEditorLayer?.annotationEditorLayer, null, { timeout: 20_000 })
     await page.evaluate(() => window.initPdfExplanations({ app: window.PDFViewerApplication, query: {}, ensureWorkspaceRootHandle: async () => null, inscreenApiFetch: fetch, showToast: () => {} }))
-    const transcriptionRequest = page.waitForRequest("**/api/inscreen/datalab-transcribe")
     await page.locator("#pdfExplanationButton").click()
-    await transcriptionRequest
+    await transcriptionObserved
     assert.equal(transcriptions, 1)
     assert.equal(generations, 0)
     await page.locator("#pdf-explanation-question").press("Enter")
@@ -414,15 +428,13 @@ test("star starts Datalab before confirmation; Enter waits for that job and retr
     assert.ok(failureHtml.includes("429"))
     assert.ok(failureHtml.includes("respuesta-http"))
     assert.ok(failureHtml.includes("Transcripción de la página actual."))
-    const retriedDownload = page.waitForEvent("download")
+    const retryDownloads = []
+    page.on('download', download => retryDownloads.push(download.suggestedFilename()))
     await page.locator("#pdf-explanation-model").selectOption("free/b")
     await page.locator("#pdf-explanation-question").press("Enter")
     await page.locator(".pdf-explanation-result iframe").waitFor()
-    const retry = await retriedDownload
-    assert.ok(retry.suggestedFilename().includes("pagina-1-exito"))
-    const retryHtml = await readFile(await retry.path(), "utf8")
-    assert.ok(retryHtml.includes("tool-input-error"))
-    assert.ok(retryHtml.includes("free-test-model"))
+    await page.frameLocator('.pdf-explanation-result iframe').getByText('Explicación lista', { exact: true }).waitFor()
+    assert.deepEqual(retryDownloads, [], 'a recovered tool error with successful HTML must not download diagnostics')
     assert.equal(transcriptions, 1)
     assert.equal(generations, 2)
   } finally { release(); await browser.close() }

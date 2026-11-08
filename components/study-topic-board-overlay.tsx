@@ -69,6 +69,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const loadedReader = useRef<string | null>(null)
   const files = useRef<HTMLInputElement>(null), saveQueue = useRef<Promise<unknown>>(Promise.resolve()), positions = useRef(new Map<string, string>())
   const saveError = useRef<unknown>(null)
+  const dirtyRevision = useRef(0), persistedRevision = useRef(0)
   const pendingClose = useRef<(() => void) | null>(null)
   const publishing = useRef(new Set<string>())
   const localPdfs = useRef(new Set<string>())
@@ -178,7 +179,13 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
           else if (report && current?.record.status !== 'accepted') void save(() => saveStudyBoard(rootHandle, boardId, { status: 'accepted', report })).catch(() => {})
           focusBoard(); void refreshTasks()
         }
-        if (data.type === 'study-board:checkpoint' && typeof data.draft === 'string') void save(() => saveStudyBoard(rootHandle, boardId, { draft: data.draft, report: data.report, imported: !!data.imported })).catch(() => {})
+        if (data.type === 'study-board:checkpoint' && typeof data.draft === 'string') {
+          const revision = Number.isInteger(data.revision) ? data.revision : dirtyRevision.current
+          void save(() => saveStudyBoard(rootHandle, boardId, { draft: data.draft, report: data.report, imported: !!data.imported })).then(() => {
+            persistedRevision.current = Math.max(persistedRevision.current, revision)
+            send('saved', { revision })
+          }).catch(() => {})
+        }
         if (data.type === 'study-board:closed') void saveQueue.current.then(() => { if (saveError.current) { setClosing(false); return }; const action = pendingClose.current; pendingClose.current = null; setClosing(false); action?.() })
         if (data.type === 'study-board:error') { setError(data.error || 'No se pudo abrir la pizarra.'); setClosing(false) }
         if (data.type === 'study-board:migration-errors') { setReview(null); setError(migrationErrorSummary(data.report.errors || [])); setStatus('') }
@@ -193,7 +200,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
         if (data.type === 'study-board:open-pinned') { const pin = live.current.pins.at(-1); if (pin) openReader(pin.reference) }
         if (data.type === 'study-board:menu') setMenu(value => !value)
         if (data.type === 'study-board:files') send('import-files', { files: data.files })
-        if (data.type === 'study-board:changed') void refreshTasks()
+        if (data.type === 'study-board:changed') { dirtyRevision.current = data.revision ?? dirtyRevision.current + 1; void refreshTasks() }
         if (data.type === 'study-board:open') {
           const study = data.study as StudyAttachment
           if (study?.kind === 'pdf') { const reference = boardPdfReference(study.reference); if (reference) openReader(reference) }
@@ -231,8 +238,13 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     const stopRefresh = startVisibleTask(refreshTasks, 5000)
     const refresh = () => void refreshTasks()
     window.addEventListener('message', receive); window.addEventListener('keydown', key); window.addEventListener('focus', refresh); window.addEventListener('cursado-workspace-saved', refresh)
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (dirtyRevision.current > persistedRevision.current || saveError.current) { send('checkpoint'); event.preventDefault(); event.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', beforeUnload)
     return () => {
       stopRefresh()
+      window.removeEventListener('beforeunload', beforeUnload)
       window.removeEventListener('message', receive); window.removeEventListener('keydown', key); window.removeEventListener('focus', refresh); window.removeEventListener('cursado-workspace-saved', refresh)
     }
   }, [session, boardId, rootHandle])

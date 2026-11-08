@@ -1,6 +1,7 @@
 "use client"
 
 import { loadPdfLib } from "./text-to-pdf"
+import { hashBlob } from './blob-hash.ts'
 import { PDF_BATCH_BYTES, PDF_BATCH_PAGES } from "../subject-pdf-search"
 
 type SplitDocument = {
@@ -40,6 +41,5 @@ export async function* splitPdfBatches(file: File, signal: AbortSignal): AsyncGe
 }
 
 export async function pdfHash(file: File) {
-  const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
-  return Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, "0")).join("")
+  return hashBlob(file)
 }

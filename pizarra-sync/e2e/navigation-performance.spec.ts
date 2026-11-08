@@ -1,5 +1,5 @@
 import { expect, test, type TestInfo } from '@playwright/test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { connectPeer, uniqueRoom } from './helpers';
 
@@ -9,6 +9,90 @@ async function artifact(info: TestInfo, name: string, value: unknown) {
   await writeFile(filename, JSON.stringify(value, null, 2));
   await info.attach(name, { path: filename, contentType: 'application/json' });
 }
+
+test('blank background selection avoids repeated chrome rebuilds and retains bounded memory', async ({ browser }, info) => {
+  const reports = [];
+  for (const deviceScaleFactor of [1, 2]) {
+    const context = await browser.newContext({ viewport: { width: 1366, height: 768 }, deviceScaleFactor });
+    try {
+      await context.addInitScript(() => { localStorage.setItem('komuboard-identity-nudged', '1'); (window as any).__komuboardAutoFit = false; });
+      const page = await context.newPage(), cdp = await context.newCDPSession(page), system = await browser.newBrowserCDPSession();
+      await cdp.send('Performance.enable');
+      const samples: any[] = [];
+      let sampling = true;
+      const sampler = (async () => {
+        while (sampling) {
+          const metrics = Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(item => [item.name, item.value]));
+          const renderers = (await system.send('SystemInfo.getProcessInfo')).processInfo.filter(process => process.type === 'renderer');
+          const rss = process.platform === 'linux' ? (await Promise.all(renderers.map(async process => {
+            const status = await readFile(`/proc/${process.id}/status`, 'utf8').catch(() => '');
+            return Number(status.match(/^VmRSS:\s+(\d+)/m)?.[1] || 0) * 1024;
+          }))).reduce((a, b) => a + b, 0) : null;
+          samples.push({ at: Date.now(), heap: metrics.JSHeapUsedSize, rss });
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      })();
+      try {
+        await page.goto(`/?room=${uniqueRoom('blank-selection')}`);
+        await page.waitForFunction(() => (window as any).__komuboard?.provider?.wsconnected);
+        await page.evaluate(() => {
+          const { doc, canvas } = (window as any).__komuboard, objects = doc.getMap('objects'), MapType = objects.constructor, item = new MapType();
+          doc.transact(() => {
+            for (const [key, value] of Object.entries({ id: 'pdf-card', type: 'text', x: -160, y: -20, width: 320, fontSize: 20, fontFamily: 'Inter', bg: '#eff6ff', runs: [{ text: '1.1_a_3.3.pdf' }] })) item.set(key, value);
+            objects.set('pdf-card', item); doc.getArray('order').push(['pdf-card']);
+          });
+          canvas.resetZoom();
+        });
+        await page.getByText('1.1_a_3.3.pdf', { exact: true }).waitFor();
+        await page.waitForTimeout(300);
+        const retainedBefore = await cdp.send('Runtime.getHeapUsage');
+        await page.evaluate(() => {
+          const { canvas } = (window as any).__komuboard, layer = canvas.textLayer;
+          const counts = (window as any).selectionCounts = { chrome: 0, scans: 0 };
+          const chrome = layer.refreshSelectionChrome.bind(layer), scan = canvas.applyMarquee.bind(canvas);
+          layer.refreshSelectionChrome = (...args: any[]) => { counts.chrome++; return chrome(...args); };
+          canvas.applyMarquee = (...args: any[]) => { counts.scans++; return scan(...args); };
+        });
+        // Many pointer events in a single frame must settle only the latest rectangle.
+        await page.mouse.move(270, 200); await page.mouse.down();
+        const burst = await page.evaluate(async () => {
+          const target = document.querySelector('#board .konvajs-content')!, counts = (window as any).selectionCounts;
+          const initial = { ...counts };
+          for (let i = 0; i < 600; i++) target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, pointerType: 'mouse', buttons: 1, clientX: 280 + i % 100, clientY: 210 + i % 60 }));
+          await new Promise(resolve => requestAnimationFrame(resolve));
+          return { chrome: counts.chrome - initial.chrome, scans: counts.scans - initial.scans };
+        });
+        await page.mouse.up();
+        expect(burst.scans).toBeLessThanOrEqual(1);
+        expect(burst.chrome).toBe(0);
+        for (let i = 0; i < 12; i++) {
+          await page.mouse.move(270, 200); await page.mouse.down();
+          await page.mouse.move(440, 290, { steps: 30 }); await page.mouse.up();
+        }
+        expect(await page.evaluate(() => (window as any).__komuboard.canvas.hasSelection())).toBe(false);
+        const afterDrag = await cdp.send('Runtime.getHeapUsage');
+        await page.waitForTimeout(10_000);
+        await cdp.send('HeapProfiler.collectGarbage');
+        const retainedAfter = await cdp.send('Runtime.getHeapUsage');
+        const bounds = await page.getByText('1.1_a_3.3.pdf', { exact: true }).boundingBox();
+        // Releasing before the next frame must still select the final target.
+        await page.mouse.move(bounds!.x - 20, bounds!.y - 20); await page.mouse.down();
+        await page.evaluate(bounds => {
+          const target = document.querySelector('#board .konvajs-content')!;
+          target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, pointerType: 'mouse', buttons: 1, clientX: bounds!.x + bounds!.width + 20, clientY: bounds!.y + bounds!.height + 20 }));
+          window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, pointerType: 'mouse' }));
+        }, bounds);
+        await page.mouse.up();
+        expect(await page.evaluate(() => (window as any).__komuboard.canvas.textLayer.selectedIds())).toContain('pdf-card');
+        expect(retainedAfter.usedSize - retainedBefore.usedSize).toBeLessThan(16 * 1024 * 1024);
+        const report = { deviceScaleFactor, burst, retainedBefore, afterDrag, retainedAfter, peakRss: Math.max(...samples.map(sample => sample.rss || 0)), peakHeap: Math.max(...samples.map(sample => sample.heap || 0)), samples };
+        reports.push(report);
+        console.log(JSON.stringify({ deviceScaleFactor, burst, peakRssMiB: report.peakRss / 1048576, peakHeapMiB: report.peakHeap / 1048576 }));
+      } finally { sampling = false; await sampler; await system.detach(); }
+    } finally { await context.close(); }
+  }
+  await artifact(info, 'blank-selection-memory.json', reports);
+});
 
 // Runtime hooks are deliberately inspected here; production has no benchmark branches.
 // Timing metrics diagnose responsiveness. Work counters provide deterministic regression gates.

@@ -1420,7 +1420,7 @@ document.addEventListener("click", (e) => {
 const connBanner = createConnectionBanner();
 store.subscribe((state) => {
   topbar?.setStatus(state.status);
-  if (!connectionRefused) connBanner.update(state.status); // a deliberate refusal owns the UI instead
+  if (!connectionRefused && !new URLSearchParams(location.search).has('topicBoard')) connBanner.update(state.status);
 });
 
 // When the room DO *deliberately* refuses us (full room / rate-limited flood) it closes with a 4xxx

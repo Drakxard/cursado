@@ -1,6 +1,3 @@
-import { compile } from "tailwindcss"
-import theme from "tailwindcss/theme.css"
-import preflight from "tailwindcss/preflight.css"
 import { graphPresentationHtml } from '../pdf-explanation-graph-html.ts'
 
 const slideStyles = `
@@ -27,10 +24,14 @@ export async function preparePdfExplanationHtml(html: string): Promise<string> {
   if (graphData && doc.querySelector('#stage #scene')) {
     const graph = JSON.parse(graphData.textContent || 'null')
     const options = JSON.parse(doc.querySelector('#graph-options')?.textContent || '{}')
-    if (graph?.plantilla === 'pantilla1_grafos') return graphPresentationHtml(graph, {
+    if (graph?.plantilla === 'pantilla1_grafos') {
+      const rendered = graphPresentationHtml(graph, {
       specialty: options.specialty === 'math' ? 'math' : 'prog',
       orientation: options.orientation === 'horizontal' || options.orientation === 'vertical' ? options.orientation : 'auto',
-    })
+      })
+      const state = doc.getElementById('graph-state')?.textContent
+      return state ? rendered.replace('<script id="graph-data"', `<script id="graph-state" type="application/json">${JSON.stringify(JSON.parse(state)).replace(/</g, '\\u003c')}</script><script id="graph-data"`) : rendered
+    }
   }
   const tailwind = [...doc.querySelectorAll<HTMLScriptElement>("script[src]")].filter(script => {
     try { return new URL(script.src).hostname === "cdn.tailwindcss.com" } catch { return false }
@@ -38,10 +39,11 @@ export async function preparePdfExplanationHtml(html: string): Promise<string> {
   if (tailwind.length) {
     // Scan script strings too: slide players often construct their class lists.
     const candidates = [...new Set(html.match(/[A-Za-z0-9_!@#%.[\]():/,+~=-]+/g) ?? [])].filter(value => value.length <= 200)
-    const compiler = await compile(`${theme}\n${preflight}\n@tailwind utilities;`)
+    // Keep the compiler out of graph viewers and load it only for Tailwind imports.
+    const { compileExplanationTailwind } = await import(/* webpackIgnore: true */ './viewer-explanation-tailwind.js')
     const css = doc.createElement("style")
     css.dataset.pdfImportedTailwind = ""
-    css.textContent = compiler.build(candidates).replace(/<\/style/gi, "<\\/style")
+    css.textContent = (await compileExplanationTailwind(candidates)).replace(/<\/style/gi, "<\\/style")
     // Utilities precede authored styles, matching the original CDN ordering.
     doc.head.prepend(css)
     tailwind.forEach(script => script.remove())

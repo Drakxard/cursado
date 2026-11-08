@@ -82,7 +82,7 @@ export async function explanationSystemConfig(provider: "azure" | "gateway", spe
   const graphExample = encodeExample(specialty === 'math' ? mathExample : example)
   const systemPromptBase = [COMMON_EXPLANATION_INSTRUCTIONS,
     "FORMATO pantilla1_grafos (aplicar solo si elegís esta plantilla)", GRAPH_PRESENTATION_INSTRUCTIONS,
-    "CONSTRUCCIÓN: primero identificá los elementos; después fijá IDs estables; luego describí cada estado completo y las conexiones de ese paso. Finalmente agregá comentarios que expliquen el cambio. Comprobá referencias y celdas antes de responder.",
+    "CONSTRUCCIÓN: primero identificá los elementos; después fijá IDs estables; luego describí cada estado completo y las conexiones de ese paso. Agregá comentarios solo cuando aporten información nueva; usá comentarios:[] cuando el nodo ya explique la idea. Comprobá referencias y celdas antes de responder.",
     provider === "azure" ? 'TRANSPORTE AZURE: envolvé el formato elegido en {"lesson":...}. En pantilla1_grafos, posiciones debe ser un array de {id,fila,columna,estado}, nunca un mapa.' : "TRANSPORTE GATEWAY: devolvé el objeto del formato elegido directamente. posiciones es un mapa por ID.",
     "EJEMPLO COMPLETO DE pantilla1_grafos (formato de este proveedor; adaptá contenido y cantidad de pasos al apunte):", JSON.stringify(graphExample),
     'EJEMPLO GENERAL DE PROCESO (datos visibles, flechas y cambio de estado; adaptar al tema):', JSON.stringify(encodeExample(processExample)),
