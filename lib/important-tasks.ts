@@ -4,6 +4,7 @@ export type ImportantTask = {
   cooperation?: { shareId: string; deliveryId: string }
   id: string
   text: string
+  alias?: string
   startDate: string
   dueDate: string
   url: string
@@ -38,6 +39,7 @@ export async function readImportantTasks(root: FileSystemDirectoryHandle, requir
   const data = JSON.parse(text)
   if (data.version !== 1 || !Array.isArray(data.tasks) || !data.tasks.every((task: ImportantTask) =>
     task && typeof task.id === "string" && typeof task.text === "string" &&
+    (task.alias === undefined || typeof task.alias === "string") &&
     /^\d{4}-\d{2}-\d{2}$/.test(task.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate) &&
     typeof task.url === "string" && Array.isArray(task.topics) && task.topics.every(topic => typeof topic === "string") &&
     (task.cooperation === undefined || (!!task.cooperation && /^[a-f0-9-]{36}$/.test(task.cooperation.shareId) && /^[a-f0-9-]{36}$/.test(task.cooperation.deliveryId))) &&

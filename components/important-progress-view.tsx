@@ -5,7 +5,8 @@ import { isNativeReadOnly } from '@/lib/native-workspace'
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from "react"
 import { Button } from "@/components/progress-original/button"
 import { Input } from "@/components/progress-original/input"
-import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X, Plus } from "lucide-react"
+import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X, Plus, ChartNoAxesGantt } from "lucide-react"
+import { ImportantTimeline } from "@/components/important-timeline"
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { setStudyBoardRouteHint } from '@/lib/study-location'
 import { getWeekNumberForDate } from '@/lib/subject-utils'
@@ -230,6 +231,7 @@ interface CalendarEvent {
 }
 
 interface TaskItem {
+  alias?: string
   cooperation?: ImportantTask["cooperation"]
   id: string
   text: string
@@ -278,6 +280,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
   const [eventIndex, setEventIndex] = useState(0)
   const [eventZoom, setEventZoom] = useState(2)
   const [isCalendarMode, setIsCalendarMode] = useState(Boolean(initialCalendarTaskId))
+  const [isTimelineMode, setIsTimelineMode] = useState(false)
   const [calendarDate, setCalendarDate] = useState(new Date())
   const [calendarMarks, setCalendarMarks] = useState<CalendarMarks>({})
   const [markDraft, setMarkDraft] = useState<{ date: string; name: string } | null>(null)
@@ -322,7 +325,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
       }
       setTables([{ title: "Importantes", tasks: tasks.map(task => {
         const progress = importantTaskProgress(task)
-        return { cooperation: task.cooperation, id: task.id, text: task.text, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
+        return { cooperation: task.cooperation, id: task.id, text: task.text, alias: task.alias, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
       }).sort(compareTaskDaysRemaining) }])
       loaded.current = true
       setIsLoading(false)
@@ -345,7 +348,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
       due.setDate(due.getDate() + (task.days ?? task.denominator - task.numerator))
       const start = new Date(due)
       start.setDate(start.getDate() - task.denominator)
-      return { cooperation: task.cooperation, id: task.id, text: task.text, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [], topicBoardIds: task.topicBoardIds ?? [] }
+      return { cooperation: task.cooperation, id: task.id, text: task.text, alias: task.alias, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [], topicBoardIds: task.topicBoardIds ?? [] }
     })
     const previous = baseline.current
     baseline.current = tasks
@@ -432,6 +435,13 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
       if (!active || selectedTopicBoard || deleteTarget) return
       if (event.altKey || event.metaKey) return
       if ((event.target as HTMLElement)?.closest("input, textarea, select, [contenteditable=true]")) return
+      if (isTimelineMode) {
+        if (event.key === "Escape" || event.key === "ArrowLeft") {
+          event.preventDefault()
+          setIsTimelineMode(false)
+        }
+        return
+      }
       if (event.key.toLowerCase() === "c" && !editingId) {
         event.preventDefault()
         setCalendarSelection(null)
@@ -519,7 +529,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, onBack, active, selectedTopicBoard, deleteTarget, initialCalendarTaskId])
+  }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, isTimelineMode, onBack, active, selectedTopicBoard, deleteTarget, initialCalendarTaskId])
 
   const currentTable = tables[currentTableIndex]
   const getProgressPercentage = (numerator: number, denominator: number) => {
@@ -803,12 +813,19 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
         </AlertDialogContent>
       </AlertDialog>
       {storageError && <p role="alert" className="text-red-600">{storageError}</p>}
-      <div className="max-w-4xl mx-auto">
+      <div className={`${isTimelineMode ? "max-w-7xl" : "max-w-4xl"} mx-auto`}>
+        <div className="relative pr-24">
         <h1
           className={`text-3xl font-bold mb-8 text-center transition-all duration-300 ${isTransitioning ? "opacity-0 transform scale-95" : "opacity-100 transform scale-100"}`}
         >
           {currentTable.title}
         </h1>
+        <Button type="button" variant="ghost" className="absolute right-0 top-0" aria-label={isTimelineMode ? "Volver a las tarjetas" : "Ver líneas de eventos importantes"} title={isTimelineMode ? "Volver a las tarjetas" : "Ver líneas de eventos importantes"} onClick={() => setIsTimelineMode(value => !value)}>
+          {isTimelineMode ? <><ChevronLeft className="h-5 w-5" /><span>Volver</span></> : <ChartNoAxesGantt className="h-5 w-5" />}
+        </Button>
+        </div>
+
+        {isTimelineMode ? (isLoading ? <p role="status">Cargando eventos…</p> : <ImportantTimeline tasks={currentTable.tasks} readOnly={isNativeReadOnly()} onAlias={(id, alias) => changeTask(id, { alias })} />) : <>
 
         <div
           className={`space-y-3 transition-all duration-300 ${isTransitioning ? "opacity-0 transform translate-x-4" : "opacity-100 transform translate-x-0"}`}
@@ -975,6 +992,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
             </Button>
           </div>
         )}
+        </>}
 
         {toast && (
           <div

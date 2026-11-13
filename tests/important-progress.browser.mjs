@@ -19,7 +19,7 @@ async function importantUiBundle() {
         async getFileHandle(name, options) {
           if (!files.has(name) && !options?.create) throw new DOMException("Missing", "NotFoundError");
           return { async getFile() { return new File([files.get(name)], name) },
-            async createWritable() { let text; return { async write(value) { text = value }, async close() { files.set(name, text); window.saved = text; sessionStorage.setItem("important-files", JSON.stringify([...files])) } } } };
+            async createWritable() { if (window.importantWriteError) throw new Error("No se pudo guardar el alias"); let text; return { async write(value) { text = value }, async close() { files.set(name, text); if (name === "importantes.json") window.saved = text; sessionStorage.setItem("important-files", JSON.stringify([...files])) } } } };
         }
       };
       window.workspace = { rootHandle: directory, isReady: true };
@@ -32,6 +32,107 @@ async function importantUiBundle() {
     } }],
   })
 }
+
+test('timeline groups dates, interpolates intervals, focuses only the line and persists aliases', { timeout: 60000 }, async t => {
+  const bundle = await importantUiBundle()
+  const stylesheet = await postcss([tailwindcss()]).process(await readFile('app/globals.css', 'utf8'), { from: 'app/globals.css' })
+  const theme = await readFile('components/progress-original/theme.css', 'utf8')
+  const browser = await chromium.launch({ channel: 'chrome', headless: true })
+  t.after(() => browser.close())
+  const page = await browser.newPage({ viewport: { width: 1366, height: 768 }, hasTouch: true })
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.route('https://timeline.test/**', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }))
+  const enter = async () => {
+    await page.goto('https://timeline.test/')
+    await page.clock.install({ time: new Date(2026, 10, 12, 12) })
+    await page.evaluate(() => {
+      window.seedTasks = [1, 5, 5, 17, 24].map((days, index) => ({ id: `event-${index}`, text: `Evento original ${index}`, startDate: '2026-11-01', dueDate: `2026-${days === 24 ? '12-06' : `11-${12 + days}`}`, url: '', topics: [] }))
+    })
+    await page.addStyleTag({ content: stylesheet.css + theme })
+    await page.addScriptTag({ content: bundle.outputFiles[0].text })
+    await page.getByRole('heading', { name: 'Estudio', exact: true }).waitFor()
+    await page.keyboard.press('ArrowRight')
+    await page.getByRole('button', { name: 'Evento original 0', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Ver líneas de eventos importantes' }).click()
+  }
+  await enter()
+  assert.equal(await page.locator('[data-timeline-group="5"] button').count(), 2)
+  assert.equal(await page.locator('[data-timeline-label="0"]').textContent(), 'Hoy')
+  assert.equal(await page.locator('[data-timeline-label="1"]').textContent(), 'Mañana')
+  const track = page.locator('[data-timeline-track]'), bounds = await track.boundingBox()
+  await page.mouse.move(bounds.x + bounds.width * 0.625, bounds.y + 15)
+  assert.equal(await page.locator('[data-timeline-day]').textContent(), '11 días')
+  assert.equal(await page.locator('[data-timeline-label="1"]').evaluate(el => el.style.opacity), '0.3')
+  assert.equal(await page.locator('[data-timeline-group="5"]').evaluate(el => getComputedStyle(el).opacity), '1')
+  assert.equal(await page.locator('[data-timeline-highlight]').evaluate(el => el.style.left), '50%')
+  await page.mouse.move(0, 0)
+  assert.equal(await page.locator('[data-timeline-highlight]').count(), 0)
+  await page.getByRole('button', { name: 'Evento original 1', exact: true }).click()
+  const alias = page.getByRole('textbox', { name: 'Alias de Evento original 1' })
+  await alias.fill('Cancelado')
+  await alias.press('Escape')
+  assert.equal(await page.getByRole('textbox').count(), 0)
+  await page.getByRole('button', { name: 'Evento original 1', exact: true }).click()
+  await alias.fill('P1')
+  await alias.press('Enter')
+  await page.waitForFunction(() => JSON.parse(window.saved).tasks.some(task => task.alias === 'P1' && task.text === 'Evento original 1'))
+  await page.getByRole('button', { name: 'Volver a las tarjetas' }).click()
+  await page.getByRole('button', { name: 'Evento original 1', exact: true }).waitFor()
+  await enter()
+  await page.getByRole('button', { name: 'P1', exact: true }).waitFor()
+  const reloadedTrack = await track.boundingBox()
+  await page.touchscreen.tap(reloadedTrack.x + reloadedTrack.width * 0.625, reloadedTrack.y + 15)
+  assert.equal(await page.locator('[data-timeline-day]').textContent(), '11 días')
+  await mkdir('test-results', { recursive: true })
+  await page.screenshot({ path: 'test-results/important-timeline-wide.png' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+  assert.equal(await page.locator('[data-important-timeline]').evaluate(el => el.scrollWidth > el.clientWidth), true)
+  await track.dispatchEvent('pointerdown', { pointerId: 1, pointerType: 'mouse', clientX: (await track.boundingBox()).x, clientY: (await track.boundingBox()).y + 15 })
+  assert.equal(await page.locator('[data-timeline-day]').textContent(), '0 días')
+  await page.getByRole('button', { name: 'P1', exact: true }).click()
+  await alias.fill('')
+  await page.getByRole('button', { name: 'Guardar', exact: true }).click()
+  await page.waitForFunction(() => JSON.parse(window.saved).tasks.every(task => !task.alias))
+  await page.getByRole('button', { name: 'Evento original 1', exact: true }).waitFor()
+  await page.evaluate(() => { window.importantWriteError = true })
+  await page.getByRole('button', { name: 'Evento original 1', exact: true }).click()
+  await alias.fill('Error de guardado')
+  await alias.press('Enter')
+  await page.getByRole('alert').filter({ hasText: 'No se pudo guardar el alias' }).waitFor()
+  await page.keyboard.press('Escape')
+  assert.equal(await page.locator('[data-important-timeline]').count(), 0)
+  await page.evaluate(() => { window.CursadoNative = {} })
+  await page.getByRole('button', { name: 'Ver líneas de eventos importantes' }).click()
+  assert.equal(await page.getByRole('button', { name: 'Error de guardado', exact: true }).isDisabled(), true)
+  assert.deepEqual(errors, [])
+})
+
+test('timeline handles no events and a single today group without an intermediate interval', { timeout: 60000 }, async t => {
+  const bundle = await build({
+    stdin: { contents: `
+      import React from "react";
+      import { createRoot } from "react-dom/client";
+      import { ImportantTimeline } from "./components/important-timeline";
+      const root = createRoot(document.getElementById("root"));
+      window.renderTimeline = tasks => root.render(<ImportantTimeline tasks={tasks} readOnly={true} onAlias={() => { throw new Error("Read only") }} />);
+      window.renderTimeline([]);
+    `, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, format: 'iife', jsx: 'automatic',
+  })
+  const browser = await chromium.launch({ channel: 'chrome', headless: true })
+  t.after(() => browser.close())
+  const page = await browser.newPage()
+  await page.setContent('<div id="root"></div>')
+  await page.addScriptTag({ content: bundle.outputFiles[0].text })
+  await page.getByRole('status').filter({ hasText: 'No hay eventos importantes' }).waitFor()
+  const name = 'Nombre original completo de un evento importante para hoy'
+  await page.evaluate(name => window.renderTimeline([{ id: 'today', text: name, days: 0, numerator: 1, denominator: 1 }]), name)
+  assert.equal(await page.getByRole('button', { name, exact: true }).isDisabled(), true)
+  assert.equal(await page.locator('[data-timeline-label]').textContent(), 'Hoy')
+  await page.locator('[data-timeline-track]').dispatchEvent('pointermove', { clientX: 100 })
+  assert.equal(await page.locator('[data-timeline-day]').count(), 0)
+})
 
 test('calendar day hold opens a compact name field, Enter marks the day and the hover label survives reopening', { timeout: 60000 }, async t => {
   const result = await importantUiBundle()
@@ -139,7 +240,7 @@ test("Important UI saves tasks and deletes topics only after a hold, without lin
   const chip = page.getByRole("button", { name: "Tema Unidad 1. Abrir pizarra. Mantener presionado para borrar", exact: true, includeHidden: true })
   await chip.click()
   await page.getByRole("dialog", { name: "Pizarra de Parcial · Unidad 1" }).waitFor()
-  await page.getByRole("button", { name: "Volver a Temas", exact: true }).click()
+  await page.getByRole("button", { name: "Volver a Estudio", exact: true }).and(page.getByTitle("Volver a Estudio", { exact: true })).click()
   assert.equal(await chip.count(), 1)
   await page.waitForFunction(() => JSON.parse(window.saved || '{}').tasks?.[0]?.topics?.length === 1)
   assert.equal(await page.getByText("Plus +", {exact:true}).count(), 0)
@@ -232,7 +333,7 @@ test("Important rows stay in place until leaving and reentering, including after
   // A board overlay is still part of this visit to Important tasks.
   await rows.first().getByRole("button", { name: /Tema Tema\. Abrir pizarra/ }).click()
   await page.getByRole("dialog").waitFor()
-  await page.getByRole("button", { name: "Volver a Temas", exact: true }).click()
+  await page.getByRole("button", { name: "Volver a Estudio", exact: true }).and(page.getByTitle("Volver a Estudio", { exact: true })).click()
   assert.deepEqual(await order(), ["BD", "EO", "Igual", "P3", "Nueva"])
   await page.locator("h1").filter({ hasText: "Importantes" }).click()
   await page.keyboard.press("ArrowLeft")

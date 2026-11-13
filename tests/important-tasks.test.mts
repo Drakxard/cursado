@@ -36,3 +36,14 @@ test("deadline progress uses calendar days and caps elapsed progress", () => {
   assert.equal(importantTaskProgress(task, new Date(2026, 9, 22)).percentage, 100)
   assert.equal(importantTaskProgress(task, new Date(2026, 9, 9)).percentage, 0)
 })
+
+test("timeline aliases persist independently of the original name and can be removed", async () => {
+  const { root, files } = folderFixture()
+  await writeImportantTasks(root, [{ ...task, alias: "P1" }])
+  assert.equal((await readImportantTasks(root))[0].alias, "P1")
+  assert.equal((await readImportantTasks(root))[0].text, "Parcial")
+  await writeImportantTasks(root, [{ ...task, alias: undefined }])
+  assert.equal((await readImportantTasks(root))[0].alias, undefined)
+  files.set("progreso/importantes.json", new Blob([JSON.stringify({ version: 1, tasks: [{ ...task, alias: 123 }] })]))
+  await assert.rejects(readImportantTasks(root), /formato válido/)
+})
