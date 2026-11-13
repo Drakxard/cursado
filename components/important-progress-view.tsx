@@ -5,7 +5,7 @@ import { isNativeReadOnly } from '@/lib/native-workspace'
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from "react"
 import { Button } from "@/components/progress-original/button"
 import { Input } from "@/components/progress-original/input"
-import { ChevronLeft, ChevronRight, Flame, Sun, TreePine, X, Plus, ChartNoAxesGantt } from "lucide-react"
+import { CalendarDays, ChevronLeft, ChevronRight, Flame, Sun, TreePine, X, Plus, ChartNoAxesGantt } from "lucide-react"
 import { ImportantTimeline } from "@/components/important-timeline"
 import { TopicBoardOverlay } from "@/components/topic-board-overlay"
 import { setStudyBoardRouteHint } from '@/lib/study-location'
@@ -814,14 +814,14 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
       </AlertDialog>
       {storageError && <p role="alert" className="text-red-600">{storageError}</p>}
       <div className={`${isTimelineMode ? "max-w-7xl" : "max-w-4xl"} mx-auto`}>
-        <div className="relative pr-24">
+        <div className="relative pr-24 max-w-4xl mx-auto">
         <h1
           className={`text-3xl font-bold mb-8 text-center transition-all duration-300 ${isTransitioning ? "opacity-0 transform scale-95" : "opacity-100 transform scale-100"}`}
         >
           {currentTable.title}
         </h1>
-        <Button type="button" variant="ghost" className="absolute right-0 top-0" aria-label={isTimelineMode ? "Volver a las tarjetas" : "Ver líneas de eventos importantes"} title={isTimelineMode ? "Volver a las tarjetas" : "Ver líneas de eventos importantes"} onClick={() => setIsTimelineMode(value => !value)}>
-          {isTimelineMode ? <><ChevronLeft className="h-5 w-5" /><span>Volver</span></> : <ChartNoAxesGantt className="h-5 w-5" />}
+        <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0" aria-pressed={isTimelineMode} aria-label={isTimelineMode ? "Volver a las tarjetas" : "Ver líneas de eventos importantes"} title={isTimelineMode ? "Volver a las tarjetas" : "Ver líneas de eventos importantes"} onClick={() => setIsTimelineMode(value => !value)}>
+          {isTimelineMode ? <CalendarDays className="h-5 w-5" /> : <ChartNoAxesGantt className="h-5 w-5" />}
         </Button>
         </div>
 

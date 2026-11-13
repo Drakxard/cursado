@@ -26,7 +26,7 @@ export function ImportantTimeline({ tasks, readOnly, onAlias }: {
     const position = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width))
     const segment = Math.min(segments - 1, Math.floor(position * segments))
     const start = points[segment][0], end = points[segment + 1][0]
-    setFocus({ segment, position, day: Math.round(start + (end - start) * (position * segments - segment)) })
+    setFocus({ segment, position, day: end - start })
   }
   if (!tasks.length) return <p role="status" className="py-16 text-center text-muted-foreground">No hay eventos importantes para mostrar.</p>
   return <section aria-label="Línea de eventos importantes" className="overflow-x-auto py-12" data-important-timeline onTouchStart={event => event.stopPropagation()}>
