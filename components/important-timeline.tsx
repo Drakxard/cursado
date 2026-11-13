@@ -6,6 +6,11 @@ import { Input } from "@/components/progress-original/input"
 
 type TimelineTask = { id: string; text: string; alias?: string; days?: number; numerator: number; denominator: number }
 const dayLabel = (day: number) => day === 0 ? "Hoy" : day === 1 ? "Mañana" : `${day} días`
+const dateLabel = (day: number) => {
+  const date = new Date()
+  date.setDate(date.getDate() + day)
+  return date.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" }).replace(",", "")
+}
 
 export function ImportantTimeline({ tasks, readOnly, onAlias }: {
   tasks: TimelineTask[]; readOnly: boolean; onAlias: (id: string, alias: string | undefined) => void
@@ -55,7 +60,7 @@ export function ImportantTimeline({ tasks, readOnly, onAlias }: {
             <span role="status" data-timeline-day className="absolute left-1/2 top-16 -translate-x-1/2 whitespace-nowrap rounded bg-orange-500 px-2 py-1 text-sm text-white">{focus.day === 1 ? "1 día" : `${focus.day} días`}</span>
           </div>}
         </div>
-        {points.map(([day], index) => <span key={day} data-timeline-label={day} className="pointer-events-none absolute top-8 -translate-x-1/2 whitespace-nowrap text-lg text-foreground" style={{ left: `${segments ? index / segments * 100 : 0}%`, opacity: focus ? 0.3 : 1 }}>{dayLabel(day)}</span>)}
+        {points.map(([day], index) => <span key={day} data-timeline-label={day} title={dateLabel(day)} className="absolute top-8 -translate-x-1/2 whitespace-nowrap text-lg text-foreground" style={{ left: `${segments ? index / segments * 100 : 0}%`, opacity: focus ? 0.3 : 1 }}>{dayLabel(day)}</span>)}
       </div>
     </div>
   </section>
