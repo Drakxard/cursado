@@ -976,8 +976,6 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
                     )}
                   </div>
 
-                  {!task.archivedAt && <Button type="button" variant="ghost" size="sm" data-workspace-write={isNativeReadOnly() || undefined} aria-label={`Archivar ${task.text || "importante"}`} onClick={() => archiveTask(task.id)}>Archivar</Button>}
-
                   {addingTopicId === task.id ? <Input
                     autoFocus
                     value={topicInputs[task.id] || ""}
