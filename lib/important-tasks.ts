@@ -5,11 +5,20 @@ export type ImportantTask = {
   id: string
   text: string
   alias?: string
+  archivedAt?: string
   startDate: string
   dueDate: string
   url: string
   topics: string[]
   topicBoardIds?: string[]
+}
+
+export function archiveExpiredImportantTask(task: ImportantTask, today = new Date()): ImportantTask {
+  if (task.archivedAt) return task
+  const [year, month, date] = task.dueDate.split("-").map(Number)
+  const now = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+  if (now - Date.UTC(year, month - 1, date) < 2 * 86400000) return task
+  return { ...task, archivedAt: today.toISOString() }
 }
 
 export function importantTaskProgress(task: ImportantTask, today = new Date()) {
@@ -40,6 +49,7 @@ export async function readImportantTasks(root: FileSystemDirectoryHandle, requir
   if (data.version !== 1 || !Array.isArray(data.tasks) || !data.tasks.every((task: ImportantTask) =>
     task && typeof task.id === "string" && typeof task.text === "string" &&
     (task.alias === undefined || typeof task.alias === "string") &&
+    (task.archivedAt === undefined || (typeof task.archivedAt === "string" && Number.isFinite(Date.parse(task.archivedAt)))) &&
     /^\d{4}-\d{2}-\d{2}$/.test(task.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate) &&
     typeof task.url === "string" && Array.isArray(task.topics) && task.topics.every(topic => typeof topic === "string") &&
     (task.cooperation === undefined || (!!task.cooperation && /^[a-f0-9-]{36}$/.test(task.cooperation.shareId) && /^[a-f0-9-]{36}$/.test(task.cooperation.deliveryId))) &&

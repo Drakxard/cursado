@@ -1,9 +1,22 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { importantTaskProgress, readImportantTasks, writeImportantTasks, type ImportantTask } from "../lib/important-tasks.ts"
+import { archiveExpiredImportantTask, importantTaskProgress, readImportantTasks, writeImportantTasks, type ImportantTask } from "../lib/important-tasks.ts"
 import { folderFixture } from "./helpers/synthesis-folder-fixture.mts"
 
 const task: ImportantTask = { id: "one", text: "Parcial", startDate: "2026-10-10", dueDate: "2026-10-20", url: "https://example.com", topics: ["Unidad 1"] }
+
+test("important tasks archive after two calendar days at zero, preserving their deadline and boards", async () => {
+  const linked = { ...task, topicBoardIds: ["board-one"] }
+  assert.equal(archiveExpiredImportantTask(linked, new Date(2026, 9, 20)), linked)
+  assert.equal(archiveExpiredImportantTask(linked, new Date(2026, 9, 21, 23, 59)), linked)
+  const archived = archiveExpiredImportantTask(linked, new Date(2026, 9, 22))
+  assert.ok(archived.archivedAt)
+  assert.deepEqual({ ...archived, archivedAt: undefined }, { ...linked, archivedAt: undefined })
+  assert.equal(archiveExpiredImportantTask(archived, new Date(2026, 9, 25)), archived)
+  const { root } = folderFixture()
+  await writeImportantTasks(root, [archived])
+  assert.deepEqual(await readImportantTasks(root), [archived])
+})
 
 test("important tasks persist all fields in the authorized workspace folder", async () => {
   const { root, files } = folderFixture()

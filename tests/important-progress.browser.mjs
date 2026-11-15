@@ -33,6 +33,49 @@ async function importantUiBundle() {
   })
 }
 
+test('manual and automatic archives persist with original dates and topic boards', { timeout: 60000 }, async t => {
+  const bundle = await importantUiBundle()
+  const browser = await chromium.launch({ channel: 'chrome', headless: true })
+  t.after(() => browser.close())
+  const page = await browser.newPage()
+  await page.route('https://archive.test/**', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }))
+  await page.goto('https://archive.test/')
+  await page.clock.install({ time: new Date(2026, 10, 15, 12) })
+  await page.evaluate(() => {
+    window.seedTasks = [
+      { id: 'old', text: 'Vencido', startDate: '2026-11-01', dueDate: '2026-11-13', url: '', topics: ['Unidad 1'], topicBoardIds: ['board-one'] },
+      { id: 'zero', text: 'Ayer', startDate: '2026-11-01', dueDate: '2026-11-14', url: '', topics: [] },
+      { id: 'future', text: 'Futuro', startDate: '2026-11-01', dueDate: '2026-11-20', url: '', topics: [] },
+    ]
+  })
+  const open = async () => {
+    await page.addScriptTag({ content: bundle.outputFiles[0].text })
+    await page.getByRole('heading', { name: 'Estudio', exact: true }).waitFor()
+    await page.keyboard.press('ArrowRight')
+  }
+  await open()
+  await page.getByRole('button', { name: 'Archivados (1)', exact: true }).waitFor()
+  assert.equal(await page.getByRole('group', { name: 'Fila Vencido', exact: true }).count(), 0)
+  await page.waitForFunction(() => JSON.parse(window.saved).tasks.find(task => task.id === 'zero').dueDate === '2026-11-14')
+  await page.getByRole('button', { name: 'Archivar Futuro', exact: true }).click()
+  await page.getByRole('button', { name: 'Archivados (2)', exact: true }).click()
+  await page.getByRole('group', { name: 'Fila Vencido', exact: true }).waitFor()
+  await page.getByRole('group', { name: 'Fila Futuro', exact: true }).waitFor()
+  await page.waitForFunction(() => JSON.parse(window.saved).tasks.find(task => task.id === 'future').archivedAt)
+  await page.reload()
+  await open()
+  await page.getByRole('button', { name: 'Archivados (2)', exact: true }).waitFor()
+  await page.clock.setSystemTime(new Date(2026, 10, 16, 12))
+  await page.clock.runFor(30000)
+  await page.getByRole('button', { name: 'Archivados (3)', exact: true }).click()
+  await page.getByRole('group', { name: 'Fila Ayer', exact: true }).waitFor()
+  await page.waitForFunction(() => JSON.parse(window.saved).tasks.find(task => task.id === 'zero').archivedAt)
+  const saved = await page.evaluate(() => JSON.parse(window.saved).tasks)
+  assert.equal(saved.find(task => task.id === 'old').dueDate, '2026-11-13')
+  assert.deepEqual(saved.find(task => task.id === 'old').topicBoardIds, ['board-one'])
+  assert.equal(saved.length, 3)
+})
+
 test('timeline groups dates, shows interval durations, keeps the view toggle in place and persists aliases', { timeout: 60000 }, async t => {
   const bundle = await importantUiBundle()
   const stylesheet = await postcss([tailwindcss()]).process(await readFile('app/globals.css', 'utf8'), { from: 'app/globals.css' })
@@ -309,6 +352,7 @@ test("Important rows stay in place until leaving and reentering, including after
   const page = await browser.newPage()
   await page.route("https://study.test/**", route => route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' }))
   await page.goto("https://study.test/")
+  await page.clock.install({ time: new Date(2026, 10, 1, 12) })
   await page.evaluate(() => {
     const key = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
     window.seedTasks = [["P3", 23], ["EO", 21], ["BD", 19], ["Igual", 21]].map(([text, days]) => {
@@ -383,6 +427,7 @@ test("Important topic buttons match the wide layout and wrap without overflow on
   const page = await browser.newPage({ viewport: { width: 1366, height: 768 } })
   await page.route("https://study.test/**", route => route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' }))
   await page.goto("https://study.test/")
+  await page.clock.install({ time: new Date(2026, 10, 5, 12) })
   await page.evaluate(() => {
     window.seedTasks = [{ id: "bd", text: "Base de Datos", startDate: "2026-10-17", dueDate: "2026-11-05", url: "", topics: ["u4", "u5", "u6"] }]
   })

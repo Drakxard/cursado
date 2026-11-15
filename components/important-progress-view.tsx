@@ -232,6 +232,9 @@ interface CalendarEvent {
 
 interface TaskItem {
   alias?: string
+  archivedAt?: string
+  startDate?: string
+  dueDate?: string
   cooperation?: ImportantTask["cooperation"]
   id: string
   text: string
@@ -253,7 +256,7 @@ interface Table {
   tasks: TaskItem[]
 }
 
-import { importantCountdownStyle, importantTaskProgress, readImportantTasks, writeImportantTasks, type ImportantTask } from "@/lib/important-tasks"
+import { archiveExpiredImportantTask, importantCountdownStyle, importantTaskProgress, readImportantTasks, writeImportantTasks, type ImportantTask } from "@/lib/important-tasks"
 import { useLocalWorkspace } from "@/components/local-workspace-provider"
 import { readCalendarMarks, writeCalendarMark, type CalendarMarks } from '@/lib/calendar-marks'
 
@@ -261,6 +264,7 @@ import { readCalendarMarks, writeCalendarMark, type CalendarMarks } from '@/lib/
 export default function ImportantProgressView({ active, onBack, initialCalendarTaskId }: { active: boolean; onBack: () => void; initialCalendarTaskId?: string }) {
   const currentTableIndex = 0
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
   const [editText, setEditText] = useState("")
   const isTransitioning = false
   const [isLoading, setIsLoading] = useState(true)
@@ -323,9 +327,10 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
         const task=tasks.find(task=>task.id===initialCalendarTaskId)
         if(task){const [year,month,day]=task.dueDate.split('-').map(Number);setCalendarDate(new Date(year,month-1,day))}
       }
-      setTables([{ title: "Importantes", tasks: tasks.map(task => {
+      setTables([{ title: "Importantes", tasks: tasks.map(original => {
+        const task = archiveExpiredImportantTask(original)
         const progress = importantTaskProgress(task)
-        return { cooperation: task.cooperation, id: task.id, text: task.text, alias: task.alias, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, url: task.url, topics: task.topics, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
+        return { ...task, numerator: progress.elapsed, denominator: progress.total, days: progress.remaining, topicBoardIds: task.topicBoardIds ?? task.topics.map(() => crypto.randomUUID()) }
       }).sort(compareTaskDaysRemaining) }])
       loaded.current = true
       setIsLoading(false)
@@ -341,6 +346,27 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
     })
   }, [active])
   useEffect(() => {
+    if (!active) return
+    const refresh = () => {
+      if (!loaded.current) return
+      setTables(previous => {
+        let changed = false
+        const tasks = previous[0].tasks.map(task => {
+          if (!task.dueDate || !task.startDate) return task
+          const stored = archiveExpiredImportantTask(task as ImportantTask)
+          const progress = importantTaskProgress(stored)
+          if (stored.archivedAt === task.archivedAt && progress.remaining === task.days) return task
+          changed = true
+          return { ...task, archivedAt: stored.archivedAt, days: progress.remaining, numerator: progress.elapsed, denominator: progress.total }
+        })
+        return changed ? [{ ...previous[0], tasks }] : previous
+      })
+    }
+    const timer = setInterval(refresh, 30000)
+    window.addEventListener("focus", refresh)
+    return () => { clearInterval(timer); window.removeEventListener("focus", refresh) }
+  }, [active])
+  useEffect(() => {
     if (isNativeReadOnly() || !loaded.current || !rootHandle) return
     const today = normalizeDate(new Date())
     const tasks = tables[0].tasks.map(task => {
@@ -348,7 +374,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
       due.setDate(due.getDate() + (task.days ?? task.denominator - task.numerator))
       const start = new Date(due)
       start.setDate(start.getDate() - task.denominator)
-      return { cooperation: task.cooperation, id: task.id, text: task.text, alias: task.alias, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [], topicBoardIds: task.topicBoardIds ?? [] }
+      return { cooperation: task.cooperation, id: task.id, text: task.text, alias: task.alias, archivedAt: task.archivedAt, startDate: task.startDate ?? formatDateForStorage(start), dueDate: task.dueDate ?? formatDateForStorage(due), url: task.url ?? "", topics: task.topics ?? [], topicBoardIds: task.topicBoardIds ?? [] }
     })
     const previous = baseline.current
     baseline.current = tasks
@@ -356,7 +382,14 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
   }, [tables, rootHandle])
   const changeTask = (id: string, patch: Partial<TaskItem>) => { if (!isNativeReadOnly()) setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, ...patch } : task) }]) }
   const saveTask = async (id: string) => { changeTask(id, { text: editText }); setEditingId(null); setEditText("") }
-  const addImportantTask = () => setTables(prev => [{ ...prev[0], tasks: [...prev[0].tasks, { id: crypto.randomUUID(), text: "", days: 7, numerator: 0, denominator: 7, topics: [] }] }])
+  const addImportantTask = () => {
+    setShowArchived(false)
+    const today = new Date()
+    const due = new Date(today)
+    due.setDate(due.getDate() + 7)
+    setTables(prev => [{ ...prev[0], tasks: [...prev[0].tasks, { id: crypto.randomUUID(), text: "", startDate: formatDateForStorage(today), dueDate: formatDateForStorage(due), days: 7, numerator: 0, denominator: 7, topics: [] }] }])
+  }
+  const archiveTask = (id: string) => changeTask(id, { archivedAt: new Date().toISOString() })
   const removeImportantTask = (id: string) => setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.filter(task => task.id !== id) }])
   const addTopic = (id: string, topic: string) => {
     if (topic.trim()) setTables(prev => [{ ...prev[0], tasks: prev[0].tasks.map(task => task.id === id ? { ...task, topics: [...(task.topics ?? []), topic.trim()], topicBoardIds: [...(task.topicBoardIds ?? []), crypto.randomUUID()] } : task) }])
@@ -368,7 +401,9 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
     if (!task) return
     const days = computeDaysUntil(date)
     const denominator = Math.max(task.denominator, days, 1)
-    changeTask(task.id, { days, denominator, numerator: denominator - days })
+    const start = new Date(date)
+    start.setDate(start.getDate() - denominator)
+    changeTask(task.id, { days, denominator, numerator: denominator - days, startDate: formatDateForStorage(start), dueDate: formatDateForStorage(date) })
     setCalendarSelection(null)
     setIsCalendarMode(false)
   }
@@ -376,12 +411,11 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
     const events: CalendarEvent[] = []
 
     const importantTableIndex = 0
-    const importantTasks = tables[0].tasks
+    const importantTasks = tables[0].tasks.filter(task => !task.archivedAt)
     const today = new Date()
     importantTasks.forEach((task) => {
       if (task.days !== undefined && task.days >= 0) {
-        const due = new Date(today)
-        due.setDate(due.getDate() + (task.days || 0))
+        const due = parseDateInput(task.dueDate) ?? new Date(today.getFullYear(), today.getMonth(), today.getDate() + (task.days || 0))
         events.push({
           date: due,
           label: `${task.text} (${task.days}d)`,
@@ -406,7 +440,9 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
     if (!task) return null
 
     let dueDate: Date | null = null
-    if (table.title === "Importantes" && typeof task.days === "number") {
+    if (task.dueDate) {
+      dueDate = parseDateInput(task.dueDate)
+    } else if (table.title === "Importantes" && typeof task.days === "number") {
       const base = new Date()
       base.setHours(0, 0, 0, 0)
       base.setDate(base.getDate() + task.days)
@@ -475,7 +511,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
         } else {
           const tasks = tables
             .flatMap((table, tableIndex) =>
-              table.tasks.map((task) => ({
+              table.tasks.filter(task => !task.archivedAt).map((task) => ({
                 task,
                 tableTitle: table.title,
                 tableIndex,
@@ -531,7 +567,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [isEventMode, editingId, tables, eventTasks, isCalendarMode, isTimelineMode, onBack, active, selectedTopicBoard, deleteTarget, initialCalendarTaskId])
 
-  const currentTable = tables[currentTableIndex]
+  const currentTable = { ...tables[currentTableIndex], tasks: tables[currentTableIndex].tasks.filter(task => Boolean(task.archivedAt) === showArchived) }
   const getProgressPercentage = (numerator: number, denominator: number) => {
     if (denominator === 0) return 0
     return Math.min((numerator / denominator) * 100, 100)
@@ -799,6 +835,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            {deleteTarget?.kind === "task" && !showArchived && <AlertDialogAction onClick={() => { archiveTask(deleteTarget.taskId); setDeleteTarget(null) }}>Archivar</AlertDialogAction>}
             <AlertDialogAction onClick={() => {
               if (!deleteTarget) return
               if (deleteTarget.kind === "task") removeImportantTask(deleteTarget.taskId)
@@ -818,7 +855,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
         <h1
           className={`text-3xl font-bold mb-8 text-center transition-all duration-300 ${isTransitioning ? "opacity-0 transform scale-95" : "opacity-100 transform scale-100"}`}
         >
-          {currentTable.title}
+          {showArchived ? "Importantes archivados" : currentTable.title}
         </h1>
         <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0" aria-pressed={isTimelineMode} aria-label={isTimelineMode ? "Volver a las tarjetas" : "Ver líneas de eventos importantes"} title={isTimelineMode ? "Volver a las tarjetas" : "Ver líneas de eventos importantes"} onClick={() => setIsTimelineMode(value => !value)}>
           {isTimelineMode ? <CalendarDays className="h-5 w-5" /> : <ChartNoAxesGantt className="h-5 w-5" />}
@@ -830,6 +867,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
         <div
           className={`space-y-3 transition-all duration-300 ${isTransitioning ? "opacity-0 transform translate-x-4" : "opacity-100 transform translate-x-0"}`}
         >
+          {!currentTable.tasks.length && <p role="status" className="py-8 text-center text-muted-foreground">{showArchived ? "No hay importantes archivados." : "No hay importantes activos."}</p>}
           {currentTable.tasks.map((task) => {
             const daysRemaining =
               typeof task.days === "number"
@@ -859,8 +897,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
 
                     if (currentTable.title === "Importantes") {
                       if (typeof task.days === "number") {
-                        const dueDate = new Date(today)
-                        dueDate.setDate(dueDate.getDate() + task.days)
+                        const dueDate = parseDateInput(task.dueDate) ?? new Date(today.getFullYear(), today.getMonth(), today.getDate() + task.days)
                         initialDate = new Date(
                           dueDate.getFullYear(),
                           dueDate.getMonth(),
@@ -939,6 +976,8 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
                     )}
                   </div>
 
+                  {!task.archivedAt && <Button type="button" variant="ghost" size="sm" data-workspace-write={isNativeReadOnly() || undefined} aria-label={`Archivar ${task.text || "importante"}`} onClick={() => archiveTask(task.id)}>Archivar</Button>}
+
                   {addingTopicId === task.id ? <Input
                     autoFocus
                     value={topicInputs[task.id] || ""}
@@ -971,8 +1010,7 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
                     <TopicChip key={task.topicBoardIds?.[index] ?? index} topic={topic} boardId={task.topicBoardIds?.[index]} onRemove={() => setDeleteTarget({ kind: "topic", taskId: task.id, boardId: task.topicBoardIds?.[index] ?? "", label: topic })} onOpen={() => {
                       const boardId = task.topicBoardIds?.[index]
                       if (boardId) {
-                        const due = normalizeDate(new Date())
-                        due.setDate(due.getDate() + (task.days ?? task.denominator - task.numerator))
+                        const due = parseDateInput(task.dueDate) ?? new Date()
                         setStudyBoardRouteHint(boardId, { subject: task.text, week: String(getWeekNumberForDate(due)), name: topic })
                         setSelectedTopicBoard({ boardId, name: `${task.text} · ${topic}` })
                       }
@@ -984,15 +1022,18 @@ export default function ImportantProgressView({ active, onBack, initialCalendarT
             )
           })}
         </div>
+        </>}
 
         {currentTable.title === "Importantes" && (
-          <div className="flex justify-center mt-8">
+          <div className="flex justify-center gap-3 mt-8">
             <Button data-workspace-write={isNativeReadOnly() || undefined} onClick={addImportantTask} className="bg-blue-500 hover:bg-blue-600">
               Agregar
             </Button>
+            <Button type="button" variant="outline" aria-pressed={showArchived} onClick={() => setShowArchived(value => !value)}>
+              {showArchived ? "Ver activos" : `Archivados (${tables[0].tasks.filter(task => task.archivedAt).length})`}
+            </Button>
           </div>
         )}
-        </>}
 
         {toast && (
           <div
