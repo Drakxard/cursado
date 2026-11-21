@@ -55,6 +55,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   document.body.classList.add('study-embedded')
   document.getElementById('board')!.dataset.studyGrid = 'true'
   document.querySelector('komu-draw-bar')?.enableStudy()
+  document.querySelector('komu-shape-menu')?.enableStudy()
   document.querySelectorAll<HTMLElement>('komu-tool-dock [data-tool]').forEach(button => button.dataset.tipPos = 'top')
   document.querySelector('komu-tool-dock [data-tool="image"]')?.remove()
   let initialized = false, busy = false, report: MigrationReport | undefined, checkpointTimer: ReturnType<typeof setTimeout> | undefined

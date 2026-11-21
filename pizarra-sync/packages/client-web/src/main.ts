@@ -219,6 +219,7 @@ if(room.startsWith('study-')) for(const element of app.querySelectorAll('komu-to
 const boardEl = document.getElementById("board");
 if (!boardEl) throw new Error("#board missing");
 const createPageCanvas = (): BoardCanvas => new BoardCanvas({
+  study: embeddedStudy,
   container: boardEl,
   doc: ydoc,
   awareness: provider.awareness,
@@ -230,7 +231,7 @@ const createPageCanvas = (): BoardCanvas => new BoardCanvas({
   // After drawing / placing a sticky / placing a shape, collapse the mobile mini-sheet to reclaim
   // canvas space (desktop has no collapse — the sheets are floating panels).
   onPlaced: () => {
-    if (mobileMql.matches) sheetForTool(currentTool)?.classList.add("collapsed");
+    if (!embeddedStudy && mobileMql.matches) sheetForTool(currentTool)?.classList.add("collapsed");
   },
   // A placed emoji becomes the most-recent (front of the 5, i.e. top-of-wheel going clockwise).
   onStampPlaced: (src) => {
@@ -512,6 +513,7 @@ const sheetForTool = (tool: ToolId): Element | null =>
 const ALL_SHEETS = [drawBarEl, stickyBarEl, shapeMenuEl, stampWheelEl, insertSheet.el];
 // Apply a tool to the canvas + sheet visibility (does NOT touch the dock highlight).
 function applyTool(tool: ToolId): void {
+  shapeMenuEl?.closeColorPicker();
   currentTool = tool;
   if (embeddedStudy && drawBarEl) drawBarEl.erasing = tool === 'eraser';
   if (tool !== "shapes") shapePanelEl?.close(); // the shapes library only lives with its tool
@@ -820,12 +822,14 @@ app?.addEventListener("shape-change", (e) => {
   else return;
   if (d.source === "panel") {
     shapeMenuEl?.setArmed(kind, d.label && d.icon ? { label: d.label, icon: d.icon } : undefined);
-    if (mobileMql.matches) shapePanelEl?.close(); // phones: a pick closes the sheet
+    if (embeddedStudy || mobileMql.matches) shapePanelEl?.close(); // a pick returns to the compact menu
   } else if (shapePanelEl) {
     shapePanelEl.armed = kind; // a menu pick → the panel's highlight follows
   }
+  if (embeddedStudy) selectTool('shapes');
   refreshInsertActive();
 });
+app?.addEventListener('shape-color', event => canvas.setShapeColor((event as CustomEvent<{ color: string }>).detail.color));
 // "More shapes" opens the shapes library panel, which replaces the small menu while open; closing
 // it (X / Escape / a pick on phones / a tool switch) hands the sheet back to the Shapes tool.
 function openShapePanel(): void {
@@ -1699,6 +1703,7 @@ window.addEventListener('message', event => {
     canvas = createPageCanvas();
     canvas.setColor(preferences.color); canvas.setWidth(preferences.width); canvas.setStyle(preferences.style);
     canvas.setStickyColor(preferences.sticky);
+    canvas.setShapeColor(preferences.shapeColor);
     canvas.setShape(preferences.shape, preferences.custom || undefined);
     if (preferences.connector) canvas.setConnector(preferences.connector);
     if (preferences.stamp) canvas.setStamp(preferences.stamp);

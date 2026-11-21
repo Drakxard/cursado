@@ -6,7 +6,9 @@
 // user can see what a tap will place. Light DOM. Sibling of <komu-draw-bar>. On mobile it's a mini
 // bottom-sheet (drag-to-collapse) like the draw bar — see mobile-sheet.ts.
 
-import { shapeDef, type ConnectorKind } from "@komuboard/shared";
+import { shapeDef, shapeIconSvg, type ConnectorKind } from "@komuboard/shared";
+import './color-picker';
+import type { CoColorPicker } from './color-picker';
 
 import { applyTranslations, onLocaleChange, t } from "./i18n";
 import { ensureSheetHandle, wireSheetHandle } from "./mobile-sheet";
@@ -62,11 +64,6 @@ const SHAPE_ITEMS: readonly ShapeItem[] = [
   { kind: "triangle", key: "shape.triangle", svg: '<path d="M12 5 20 19H4z"/>' },
 ];
 
-const MENU_KINDS = new Set<string>([
-  ...LINE_ITEMS.map((i) => i.kind),
-  ...SHAPE_ITEMS.map((i) => i.kind),
-]);
-
 // "More shapes": a square, a circle, a triangle, and a plus.
 const MORE_SVG =
   '<rect x="3" y="3" width="7.5" height="7.5" rx="1.2"/><circle cx="17.2" cy="6.8" r="3.8"/><path d="M6.8 13.5 3 20.5h7.5z"/><path d="M17.2 13.5v7M13.7 17h7"/>';
@@ -82,6 +79,84 @@ export class CoShapeMenu extends HTMLElement {
   #value: ShapeChoice = "rectangle";
   #armed: ArmedMeta | null = null;
   #wired = false;
+  #study = false;
+  #color = '#8950ff';
+  #picker: CoColorPicker | null = null;
+  #lifetime = new AbortController();
+
+  enableStudy(): void {
+    if (this.#study) return;
+    this.#study = true;
+    const more = this.querySelector<HTMLElement>('.sm-more')!;
+    for (const kind of ['triangleDown', 'pill', 'cylinder']) {
+      const def = shapeDef(kind);
+      if (!def) continue;
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'sm-item'; button.dataset.kind = kind;
+      button.setAttribute('role', 'menuitemradio'); button.setAttribute('data-i18n-aria', `shape.${kind}`);
+      button.innerHTML = shapeIconSvg(def, 'sm-ico');
+      more.before(button);
+    }
+    const scroll = document.createElement('div'); scroll.className = 'study-shape-scroll';
+    for (const kind of ['elbow', 'block', 'arrow', 'line', 'rectangle', 'ellipse', 'rhombus', 'triangle', 'triangleDown', 'pill', 'cylinder']) {
+      const button = this.querySelector(`.sm-item[data-kind="${kind}"]`); if (button) scroll.append(button);
+    }
+    const ellipse = scroll.querySelector('[data-kind="ellipse"] .sm-ico');
+    if (ellipse) ellipse.innerHTML = '<circle cx="12" cy="12" r="8"/>';
+    more.before(scroll);
+    const flow = document.createElement('button'); flow.type = 'button'; flow.className = 'sm-item study-flow';
+    flow.dataset.act = 'more'; flow.setAttribute('role', 'menuitem'); flow.setAttribute('data-i18n-aria', 'shapes.flowchart');
+    flow.dataset.tip = t('shapes.flowchart'); flow.dataset.tipPos = 'top';
+    flow.innerHTML = smIco('<rect x="9" y="2" width="6" height="6"/><rect x="2" y="16" width="6" height="6"/><rect x="16" y="16" width="6" height="6"/><path d="M12 8v4M5 16v-4h14v4"/>');
+    scroll.append(flow);
+    const color = document.createElement('button'); color.type = 'button'; color.className = 'study-shape-color';
+    color.setAttribute('role', 'menuitem'); color.setAttribute('aria-label', t('common.color'));
+    color.setAttribute('aria-expanded', 'false'); color.innerHTML = '<span></span><small aria-hidden="true">⌄</small>';
+    color.style.setProperty('--shape-color', this.#color);
+    this.prepend(color);
+    color.onclick = () => {
+      if (this.#picker && !this.#picker.classList.contains('hidden')) { this.closeColorPicker(); return; }
+      if (!this.#picker) {
+        this.#picker = document.createElement('komu-color-picker'); document.body.append(this.#picker);
+        this.#picker.addEventListener('color-change', event => {
+          this.#color = (event as CustomEvent<{ color: string }>).detail.color;
+          color.style.setProperty('--shape-color', this.#color);
+          this.dispatchEvent(new CustomEvent('shape-color', { detail: { color: this.#color }, bubbles: true }));
+        });
+      }
+      this.#picker.value = this.#color; this.#picker.classList.remove('hidden');
+      const rect = color.getBoundingClientRect();
+      this.#picker.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - this.#picker.offsetWidth - 8))}px`;
+      this.#picker.style.top = `${Math.max(8, rect.top - this.#picker.offsetHeight - 10)}px`;
+      color.setAttribute('aria-expanded', 'true');
+      this.#picker.querySelector<HTMLElement>('input,button')?.focus();
+    };
+    document.addEventListener('pointerdown', event => {
+      if (!this.#picker?.contains(event.target as Node) && !color.contains(event.target as Node)) this.closeColorPicker();
+    }, { signal: this.#lifetime.signal });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && this.#picker && !this.#picker.classList.contains('hidden')) {
+        event.preventDefault(); event.stopImmediatePropagation(); this.closeColorPicker(); color.focus();
+      }
+    }, { capture: true, signal: this.#lifetime.signal });
+    applyTranslations(this);
+    this.querySelectorAll<HTMLElement>('.sm-item[data-kind]').forEach(button => {
+      button.dataset.tip = button.getAttribute('aria-label') || ''; button.dataset.tipPos = 'top';
+    });
+    this.#sync();
+    this.dispatchEvent(new CustomEvent('shape-color', { detail: { color: this.#color }, bubbles: true }));
+  }
+
+  closeColorPicker(): void {
+    this.#picker?.classList.add('hidden');
+    this.querySelector('.study-shape-color')?.setAttribute('aria-expanded', 'false');
+  }
+
+  disconnectedCallback(): void { this.#lifetime.abort(); this.#picker?.remove(); }
+
+  #listed(kind: string): boolean {
+    return [...this.querySelectorAll<HTMLElement>('.sm-item[data-kind]')].some(button => button.dataset.kind === kind);
+  }
 
   connectedCallback(): void {
     this.classList.add("shape-menu", "mini-sheet");
@@ -132,7 +207,7 @@ export class CoShapeMenu extends HTMLElement {
    *  More row and paints `meta`'s icon + name into it. */
   setArmed(kind: ShapeChoice, meta?: ArmedMeta): void {
     this.#value = kind;
-    this.#armed = !MENU_KINDS.has(kind) && meta ? meta : null;
+    this.#armed = !this.#listed(kind) && meta ? meta : null;
     this.#sync();
   }
 
@@ -144,7 +219,7 @@ export class CoShapeMenu extends HTMLElement {
     }
     const more = this.querySelector<HTMLElement>(".sm-more");
     if (!more) return;
-    const armed = !MENU_KINDS.has(this.#value);
+    const armed = !this.#listed(this.#value);
     more.classList.toggle("on", armed);
     const ico = more.querySelector<HTMLElement>(".sm-more-ico");
     const label = more.querySelector<HTMLElement>(".sm-label");
@@ -162,6 +237,12 @@ export class CoShapeMenu extends HTMLElement {
       label.setAttribute("data-i18n", "shapes.more");
       label.textContent = t("shapes.more");
       more.setAttribute("aria-label", t("shapes.more"));
+    }
+    if (this.#study) {
+      const icon = this.querySelector('.sm-item.on .sm-ico') || ico.querySelector('svg');
+      const dock = document.querySelector<HTMLElement>('komu-tool-dock [data-tool="shapes"]');
+      if (dock && icon) { dock.innerHTML = icon.outerHTML; dock.dataset.shape = this.#value; }
+      label.textContent = t('shapes.more'); more.setAttribute('aria-label', t('shapes.more'));
     }
   }
 }

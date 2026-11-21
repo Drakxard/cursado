@@ -42,7 +42,7 @@ jobs:
           STUDY_BOARD_WORKER_HOST: 127.0.0.1:8787
       - run: npx playwright install --with-deps chromium
       - name: Apertura, dibujo, PDF, navegacion y colaboracion
-        run: node scripts/test-study-board.mjs --test-name-pattern="study figjam|Study integration|diagram chooser|study pages keep|PDF names|library navigation"
+        run: node scripts/test-study-board.mjs --test-name-pattern="study compact palettes|study figjam|Shapes stay active|Study integration|diagram chooser|study pages keep|PDF names|library navigation"
         env:
           STUDY_TEST_BUILT: '1'
           STUDY_TEST_TRACE: '1'
