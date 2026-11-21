@@ -62,7 +62,7 @@ export class CoDrawBar extends HTMLElement {
   enableStudy(): void {
     if (this.#study) return;
     this.#study = true;
-    if (this.#color === '#0e1116') this.#color = this.#penColors[0];
+    if (this.#color === '#0e1116') this.#color = this.#penColors[0]!;
     this.querySelector('[data-brush="pen"]')!.innerHTML = studyPenArt();
     this.querySelector('[data-brush="highlighter"]')!.innerHTML = studyPenArt(true);
     const eraser = document.createElement('button');
@@ -85,8 +85,17 @@ export class CoDrawBar extends HTMLElement {
   #renderStudyColors(): void {
     if (!this.#study) return;
     const colors = this.#brush === 'pen' ? this.#penColors : this.#highlightColors;
-    this.querySelector('.study-ink-colors')!.innerHTML = colors.map(color =>
-      `<button type="button" class="sw${color === this.#color ? ' on' : ''}" data-color="${color}" style="--sw:${color}" aria-label="${tColor(COLOR_NAMES[color.toUpperCase()], color)}" aria-pressed="${color === this.#color}"></button>`).join('');
+    const palette = this.querySelector<HTMLElement>('.study-ink-colors')!;
+    if (palette.dataset.brush !== this.#brush) {
+      palette.dataset.brush = this.#brush;
+      palette.innerHTML = colors.map(color =>
+        `<button type="button" class="sw" data-color="${color}" style="--sw:${color}" aria-label="${tColor(COLOR_NAMES[color.toUpperCase()], color)}"></button>`).join('');
+    }
+    palette.querySelectorAll<HTMLElement>('[data-color]').forEach(button => {
+      const active = button.dataset.color === this.#color;
+      button.classList.toggle('on', active); button.setAttribute('aria-pressed', String(active));
+    });
+    this.querySelector('[data-pop="color"]')?.classList.toggle('study-custom', !colors.includes(this.#color));
     this.style.setProperty('--study-ink', this.#color);
     const dock = document.querySelector<HTMLElement>('komu-tool-dock');
     dock?.style.setProperty('--study-ink', this.#color);
@@ -168,7 +177,7 @@ export class CoDrawBar extends HTMLElement {
     if (this.#study && b !== this.#brush) {
       const previous = this.#brush === 'pen' ? this.#penColors : this.#highlightColors;
       const index = previous.indexOf(this.#color);
-      if (index >= 0) this.#color = (b === 'pen' ? this.#penColors : this.#highlightColors)[index];
+      if (index >= 0) this.#color = (b === 'pen' ? this.#penColors : this.#highlightColors)[index]!;
     }
     this.#brush = b;
     this.#syncBrush();

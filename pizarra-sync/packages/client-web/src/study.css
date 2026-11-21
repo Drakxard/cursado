@@ -65,6 +65,7 @@
 .study-embedded .draw-bar [data-pop="style"]{order:4;margin-right:8px}
 .study-embedded .draw-bar .study-ink-colors{order:5;display:flex;align-items:center;gap:12px;border-left:1px solid var(--border);padding-left:10px}
 .study-embedded .draw-bar [data-pop="color"]{order:6;margin-left:6px}
+.study-embedded .draw-bar .study-custom .db-dot{outline:2px solid #9747ff;outline-offset:3px}
 .study-embedded .draw-bar .db-dot{width:18px;height:18px;background:conic-gradient(red,#ff0,#0f0,#0ff,#00f,#f0f,red)!important;border-radius:50%}
 .study-embedded .study-ink-colors .sw{width:17px;height:17px;min-width:17px;border:1px solid #0002;border-radius:50%;background:var(--sw);padding:0}
 .study-embedded .study-ink-colors .sw.on{outline:2px solid #9747ff;outline-offset:3px;box-shadow:0 0 0 2px var(--surface)}
