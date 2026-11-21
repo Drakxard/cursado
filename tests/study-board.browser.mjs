@@ -1063,7 +1063,11 @@ test('study figjam dock, ink controls and live Shift preserve geometry, collabor
   assert.equal((await strokes(frame)).length, 1)
   assert.equal(await draft(), null)
   await send(page, 'checkpoint')
-  await expect.poll(() => page.evaluate(async () => (await window.read('progreso/pizarra-sync/figjam.json')).draft?.length > 0)).toBe(true)
+  await expect.poll(() => page.evaluate(async () => {
+    // The second tab may atomically replace the checkpoint between getFile and text().
+    try { return (await window.read('progreso/pizarra-sync/figjam.json')).draft?.length > 0 }
+    catch (error) { if (error.name === 'NotReadableError') return false; throw error }
+  })).toBe(true)
   await peer.close()
   await page.reload(); await loaded(page)
   frame = engine(page)
