@@ -500,7 +500,7 @@ const onPageSelection = (count: number) => {
 canvas.setSelectionListener(onPageSelection);
 // Each of these tools owns a mobile mini-sheet (draw bar / sticky palette / shape menu).
 const sheetForTool = (tool: ToolId): Element | null =>
-  tool === "pen"
+  (tool === "pen" || (embeddedStudy && tool === "eraser"))
     ? drawBarEl
     : tool === "sticky"
       ? stickyBarEl
@@ -513,6 +513,7 @@ const ALL_SHEETS = [drawBarEl, stickyBarEl, shapeMenuEl, stampWheelEl, insertShe
 // Apply a tool to the canvas + sheet visibility (does NOT touch the dock highlight).
 function applyTool(tool: ToolId): void {
   currentTool = tool;
+  if (embeddedStudy && drawBarEl) drawBarEl.erasing = tool === 'eraser';
   if (tool !== "shapes") shapePanelEl?.close(); // the shapes library only lives with its tool
   canvas.setTool(tool);
   updateSelectionBar(); // a non-select tool hides the action bar; returning to select may show it

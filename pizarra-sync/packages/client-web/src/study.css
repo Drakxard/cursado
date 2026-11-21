@@ -37,6 +37,9 @@
 .study-embedded #topbar .brand,.study-embedded #topbar .room-pill{display:none}
 .study-embedded #topbar{left:300px;width:calc(100% - 312px);pointer-events:none;background:transparent;border:0;box-shadow:none}
 .study-embedded #topbar button,.study-embedded #topbar komu-avatar-presence-row{pointer-events:auto}
+.study-embedded #topbar{left:auto;right:12px;width:auto;max-width:calc(100% - 310px)}
+.study-embedded #topbar .tb-history{display:none}
+.study-embedded #topbar .btn-share{width:38px;height:38px;padding:9px;border-radius:10px;background:#4169ff;color:white}
 
 /* Study's bottom dock: the canvas retains ownership of every tool and shortcut. */
 .study-embedded{--accent:#9747ff;--accent-ink:#fff;--study-lavender:#e5cdff}

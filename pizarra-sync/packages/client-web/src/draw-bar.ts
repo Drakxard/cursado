@@ -56,6 +56,8 @@ export class CoDrawBar extends HTMLElement {
   #anchor: HTMLElement | null = null;
   #wired = false;
   #study = false;
+  #erasing = false;
+  set erasing(value: boolean) { this.#erasing = value; this.#syncBrush(); }
   #penColors = ["#202020", "#f24822", "#ff9a3c", "#ffcd38", "#59cf70", "#3ea8ff", "#8950ff", "#ffffff"];
   #highlightColors = ["#aaa", "#ff99f0", "#ffbb70", "#fff12b", "#a3ff47", "#75f5ee", "#ba99ff", "#ffffff"];
 
@@ -66,7 +68,7 @@ export class CoDrawBar extends HTMLElement {
     this.querySelector('[data-brush="pen"]')!.innerHTML = studyPenArt();
     this.querySelector('[data-brush="highlighter"]')!.innerHTML = studyPenArt(true);
     const eraser = document.createElement('button');
-    eraser.type = 'button'; eraser.className = 'db-btn'; eraser.setAttribute('aria-label', t('tool.eraser'));
+    eraser.type = 'button'; eraser.className = 'db-btn'; eraser.dataset.brush = 'eraser'; eraser.setAttribute('aria-label', t('tool.eraser'));
     eraser.innerHTML = icon('eraser');
     eraser.onclick = () => document.querySelector<HTMLButtonElement>('komu-tool-dock [data-tool="eraser"]')?.click();
     this.querySelector('[data-pop="style"]')!.before(eraser);
@@ -149,7 +151,9 @@ export class CoDrawBar extends HTMLElement {
       if (!btn) return;
       const brush = btn.getAttribute("data-brush");
       const pop = btn.getAttribute("data-pop");
+      if (brush === 'eraser') return; // its own handler selects the existing eraser tool
       if (brush) {
+        if (this.#study && this.#erasing) document.querySelector<HTMLButtonElement>('komu-tool-dock [data-tool="pen"]')?.click();
         this.#setBrush(brush as Brush);
         this.#closePop();
       } else if (pop) {
@@ -186,7 +190,7 @@ export class CoDrawBar extends HTMLElement {
   }
   #syncBrush(): void {
     this.querySelectorAll<HTMLElement>("[data-brush]").forEach((b) => {
-      const on = b.getAttribute("data-brush") === this.#brush;
+      const on = b.getAttribute("data-brush") === (this.#erasing ? 'eraser' : this.#brush);
       b.classList.toggle("active", on);
       b.setAttribute("aria-pressed", String(on));
     });

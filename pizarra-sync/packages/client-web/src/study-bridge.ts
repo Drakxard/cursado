@@ -212,6 +212,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (data.type === 'study-board:saved' && Number.isInteger(data.revision)) savedRevision = Math.max(savedRevision, Math.min(revision, data.revision))
     if (data.type === 'study-board:night-images' && ['auto', 'original', 'invert'].includes(data.mode)) { document.documentElement.dataset.nightImages = data.mode; localStorage.setItem('study-night-images', data.mode) }
     if (data.type === 'study-board:toggle-theme') document.querySelector<HTMLElement>('[data-theme-toggle]')?.click()
+    if (data.type === 'study-board:history' && ['undo', 'redo', 'reset-view'].includes(data.action)) document.querySelector<HTMLButtonElement>(`#topbar [data-act="${data.action}"]`)?.click()
     if (data.type === 'study-board:tool' && ['sticky', 'text', 'shapes', 'stamp', 'eraser'].includes(data.tool)) document.querySelector<HTMLButtonElement>(`komu-tool-dock [data-tool="${data.tool}"]`)?.click()
     if(data.type === 'study-board:pdf-published') {
       const map = objectsMap(doc).get(data.id), study = map?.get('study') as any
