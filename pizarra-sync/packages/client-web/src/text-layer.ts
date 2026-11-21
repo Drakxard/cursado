@@ -1928,12 +1928,13 @@ export class TextLayer {
       "center",
     );
   }
-  /** Show/move a translucent placement preview of a shape, centred on the world point. */
+  /** Preview a shape at its default size or within the drag's world-space bounds. */
   showShapeGhost(
     world: { x: number; y: number },
     kind: ShapeKind,
     fill: string,
     custom?: CustomShape,
+    bounds?: { x: number; y: number; width: number; height: number },
   ): void {
     if (this.edit) return this.hideStickyGhost();
     const g = this.ensureGhost();
@@ -1943,13 +1944,13 @@ export class TextLayer {
     const [w, h] = placedShapeSize(kind);
     this.layout(
       g,
-      world.x - w / 2,
-      world.y - h / 2,
-      w,
+      bounds?.x ?? world.x - w / 2,
+      bounds?.y ?? world.y - h / 2,
+      bounds?.width ?? w,
       DEFAULT_TEXT_SIZE,
       DEFAULT_TEXT_FONT,
       "center",
-      h,
+      bounds?.height ?? h,
     );
   }
   hideStickyGhost(): void {
@@ -2025,7 +2026,7 @@ export class TextLayer {
     });
   }
 
-  /** Shapes tool: drop a new shape box (fixed width×height) centred on the point + open for a label.
+  /** Shapes tool: drop a new shape at the default size or drag bounds + open for a label.
    *  Always CREATES (FigJam-style) — placing over an existing object stacks a new shape on top rather
    *  than dropping into that object's text (or no-op'ing over a non-editable stamp/stroke). */
   shapeAt(
@@ -2033,15 +2034,16 @@ export class TextLayer {
     kind: ShapeKind,
     fill: string,
     custom?: CustomShape,
+    bounds?: { x: number; y: number; width: number; height: number },
   ): void {
     if (this.edit) this.commit();
     const [w, h] = placedShapeSize(kind);
     const session: Omit<EditSession, "el" | "editable"> = {
       id: null,
-      x: world.x - w / 2,
-      y: world.y - h / 2,
-      width: w,
-      height: h,
+      x: bounds?.x ?? world.x - w / 2,
+      y: bounds?.y ?? world.y - h / 2,
+      width: bounds?.width ?? w,
+      height: bounds?.height ?? h,
       fontSize: DEFAULT_TEXT_SIZE,
       fontFamily: DEFAULT_TEXT_FONT,
       align: "center",

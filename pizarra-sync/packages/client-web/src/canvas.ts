@@ -303,6 +303,12 @@ export class BoardCanvas {
   /** The shape/line kind the "Shapes and lines" tool draws next (driven by the shape menu/panel). */
   private currentShape: ShapeKind = "rectangle";
   private shapeColor = DEFAULT_SHAPE_FILL;
+  private shapePlacement: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    canResize: boolean;
+    moved: boolean;
+  } | null = null;
   /** The armed custom shape's geometry (only while currentShape === "custom"). */
   private currentShapeCustom: CustomShape | null = null;
   /** True while setTool is baking an open editor → suppresses the commit's auto-revert-to-select. */
@@ -523,6 +529,7 @@ export class BoardCanvas {
   }
 
   setTool(tool: ToolId): void {
+    this.shapePlacement = null;
     if (tool !== "pen" && this.drawing) this.cancelPenGesture();
     this.textLayer.finishCameraMotion();
     if (this.tool === "select" && tool !== "select") {
@@ -858,13 +865,21 @@ export class BoardCanvas {
       const p = this.point();
       this.publishCursor(p);
       if (this.tool === "sticky") this.textLayer.showStickyGhost(p, this.stickyColor); // placement preview
-      if (this.tool === "shapes" && !this.currentConnector)
+      if (this.tool === "shapes" && !this.currentConnector) {
+        const placement = this.shapePlacement;
+        if (placement) {
+          placement.end = p;
+          if (Math.hypot(p.x - placement.start.x, p.y - placement.start.y) > this.textLayer.tapSlop())
+            placement.moved = true;
+        }
         this.textLayer.showShapeGhost(
           p,
           this.currentShape,
           this.shapeColor,
           this.currentShapeCustom ?? undefined,
+          this.shapePlacementBounds(),
         );
+      }
       if (this.tool === "text") {
         // I-beam over an existing text box (click to edit it); the default cursor over empty board.
         this.stage.container().style.cursor = this.textLayer.hitTest(p) ? "text" : CURSOR_URL;
@@ -1183,16 +1198,49 @@ export class BoardCanvas {
   }
 
   private bindShapes(): void {
-    this.bindTapPlace("shapes", (at) => {
-      if (this.currentConnector) return; // connector mode draws on drag (bindConnectors), not tap-place
+    const cancel = (): void => {
+      if (!this.shapePlacement) return;
+      this.shapePlacement = null;
+      this.textLayer.hideStickyGhost();
+    };
+    this.stage.on("pointerdown", (event) => {
+      if (this.tool !== "shapes" || this.currentConnector || (event.evt as PointerEvent).button !== 0) return;
+      const start = this.point();
+      this.textLayer.commit();
+      this.shapePlacement = { start, end: start, canResize: !this.textLayer.hitTest(start), moved: false };
+      const pointer = event.evt as PointerEvent;
+      if (pointer.target instanceof Element) pointer.target.setPointerCapture(pointer.pointerId);
+    });
+    this.stage.on("pointerup", () => {
+      const placement = this.shapePlacement;
+      if (!placement) return;
+      const bounds = this.shapePlacementBounds();
+      this.shapePlacement = null;
+      this.textLayer.hideStickyGhost();
+      if (this.tool !== "shapes" || this.currentConnector || (placement.moved && !bounds)) return;
       this.textLayer.shapeAt(
-        at,
+        placement.start,
         this.currentShape,
         this.shapeColor,
         this.currentShapeCustom ?? undefined,
+        bounds,
       );
       this.opts.onPlaced?.(); // collapse the mobile shape sheet while you type the label
     });
+    this.stage.on("pointercancel pointerleave", cancel);
+    window.addEventListener("blur", cancel, { signal: this.lifetime.signal });
+  }
+
+  private shapePlacementBounds(): { x: number; y: number; width: number; height: number } | undefined {
+    const placement = this.shapePlacement;
+    if (!placement?.canResize || !placement.moved) return undefined;
+    const { start, end } = placement;
+    return {
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      width: Math.max(1, Math.abs(end.x - start.x)),
+      height: Math.max(1, Math.abs(end.y - start.y)),
+    };
   }
 
   // ---- connectors (lines / arrows, optionally bound to a shape side) ----
