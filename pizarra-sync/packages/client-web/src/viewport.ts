@@ -244,34 +244,38 @@ export class ViewportController {
   }
 
   private bindWheel(): void {
-    this.stage.on("wheel", (e) => {
-      e.evt.preventDefault();
-      this.stopZoomAnim();
-      // Wheel scrolls vertically; Ctrl+wheel (also emitted by trackpad pinch)
-      // zooms around the pointer. Both paths use screen pixels after normalization.
-      const unit = e.evt.deltaMode === 1 ? 16 : e.evt.deltaMode === 2 ? this.stage.height() : 1;
-      const delta = e.evt.deltaY * unit;
-      if (!Number.isFinite(delta) || delta === 0) return;
-      if (!e.evt.ctrlKey) {
-        this.stage.position({ x: this.stage.x(), y: this.stage.y() - delta });
-        this.afterTransform(true);
-        return;
-      }
-      const oldScale = this.stage.scaleX();
-      const pointer = this.stage.getPointerPosition();
-      if (!pointer) return;
-      const origin = {
-        x: (pointer.x - this.stage.x()) / oldScale,
-        y: (pointer.y - this.stage.y()) / oldScale,
-      };
-      const newScale = this.clamp(oldScale * Math.exp(-Math.max(-100, Math.min(100, delta)) * .002));
-      this.stage.scale({ x: newScale, y: newScale });
-      this.stage.position({
-        x: pointer.x - origin.x * newScale,
-        y: pointer.y - origin.y * newScale,
-      });
+    this.stage.on("wheel", (e) => this.handleWheel(e.evt));
+  }
+
+  /** The canvas and its floating toolbars share exactly the same wheel navigation. */
+  handleWheel(event: WheelEvent): void {
+    event.preventDefault();
+    this.stopZoomAnim();
+    // Wheel scrolls vertically; Ctrl+wheel (also emitted by trackpad pinch)
+    // zooms around the pointer. Both paths use screen pixels after normalization.
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? this.stage.height() : 1;
+    const delta = event.deltaY * unit;
+    if (!Number.isFinite(delta) || delta === 0) return;
+    if (!event.ctrlKey) {
+      this.stage.position({ x: this.stage.x(), y: this.stage.y() - delta });
       this.afterTransform(true);
+      return;
+    }
+    const oldScale = this.stage.scaleX();
+    this.stage.setPointersPositions(event);
+    const pointer = this.stage.getPointerPosition();
+    if (!pointer) return;
+    const origin = {
+      x: (pointer.x - this.stage.x()) / oldScale,
+      y: (pointer.y - this.stage.y()) / oldScale,
+    };
+    const newScale = this.clamp(oldScale * Math.exp(-Math.max(-100, Math.min(100, delta)) * .002));
+    this.stage.scale({ x: newScale, y: newScale });
+    this.stage.position({
+      x: pointer.x - origin.x * newScale,
+      y: pointer.y - origin.y * newScale,
     });
+    this.afterTransform(true);
   }
 
   destroy(): void {

@@ -53,6 +53,20 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     return dispose
   }
   document.body.classList.add('study-embedded')
+  onDocument('wheel', event => {
+    const target = event.target instanceof Element ? event.target : null
+    const bar = target?.closest('.dock,.draw-bar,.sticky-bar,.shape-menu,.zoombar,.text-bar')
+    if (!bar) return
+    // Let genuinely scrollable menus consume their own vertical wheel movement.
+    for (let node = target; node; node = node.parentElement) {
+      const overflow = getComputedStyle(node).overflowY
+      if (/(auto|scroll)/.test(overflow) && node.scrollHeight > node.clientHeight &&
+        (event.deltaY < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)) return
+      if (node === bar) break
+    }
+    event.stopPropagation()
+    canvas.handleViewportWheel(event)
+  }, { capture: true, passive: false })
   document.getElementById('board')!.dataset.studyGrid = 'true'
   document.querySelector('komu-draw-bar')?.enableStudy()
   document.querySelector('komu-shape-menu')?.enableStudy()
@@ -214,6 +228,8 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (data.type === 'study-board:saved' && Number.isInteger(data.revision)) savedRevision = Math.max(savedRevision, Math.min(revision, data.revision))
     if (data.type === 'study-board:night-images' && ['auto', 'original', 'invert'].includes(data.mode)) { document.documentElement.dataset.nightImages = data.mode; localStorage.setItem('study-night-images', data.mode) }
     if (data.type === 'study-board:toggle-theme') document.querySelector<HTMLElement>('[data-theme-toggle]')?.click()
+    if (data.type === 'study-board:wheel' && [data.deltaY, data.clientX, data.clientY].every(Number.isFinite))
+      canvas.handleViewportWheel(new WheelEvent('wheel', { deltaY: data.deltaY, deltaMode: data.deltaMode, clientX: data.clientX, clientY: data.clientY, ctrlKey: !!data.ctrlKey }))
     if (data.type === 'study-board:history' && ['undo', 'redo', 'reset-view'].includes(data.action)) document.querySelector<HTMLButtonElement>(`#topbar [data-act="${data.action}"]`)?.click()
     if (data.type === 'study-board:tool' && ['sticky', 'text', 'shapes', 'stamp', 'eraser'].includes(data.tool)) document.querySelector<HTMLButtonElement>(`komu-tool-dock [data-tool="${data.tool}"]`)?.click()
     if(data.type === 'study-board:pdf-published') {

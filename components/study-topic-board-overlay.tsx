@@ -108,6 +108,24 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const live = useRef({ initial, pins, reader, readerVisible, review, attachment })
   live.current = { initial, pins, reader, readerVisible, review, attachment }
   const send = (type: string, data: Record<string, unknown> = {}) => frame.current?.contentWindow?.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin)
+  useEffect(() => {
+    if (!ready || readerVisible) return
+    const wheel = (event: WheelEvent) => {
+      const target = event.target instanceof Element ? event.target : null
+      const bar = target?.closest('.study-page-toolbar') || (target && addMenu.current?.contains(target) ? addMenu.current : null)
+      const bounds = frame.current?.getBoundingClientRect()
+      if (!target || !bar || !bounds) return
+      for (let node: Element | null = target; node; node = node.parentElement) {
+        if (/(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight &&
+          (event.deltaY < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)) return
+        if (node === bar) break
+      }
+      event.preventDefault()
+      send('wheel', { deltaY: event.deltaY, deltaMode: event.deltaMode, clientX: event.clientX - bounds.left, clientY: event.clientY - bounds.top, ctrlKey: event.ctrlKey })
+    }
+    document.addEventListener('wheel', wheel, { capture: true, passive: false })
+    return () => document.removeEventListener('wheel', wheel, true)
+  }, [ready, readerVisible, boardId, session])
   const save = (work: () => Promise<unknown>) => {
     const result = saveQueue.current.then(work)
     saveQueue.current = result.then(value => { saveError.current = null; return value }, reason => { saveError.current = reason; setError(String(reason)) })

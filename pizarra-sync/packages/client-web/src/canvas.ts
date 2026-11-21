@@ -669,6 +669,9 @@ export class BoardCanvas {
   getZoomPercent(): number {
     return this.viewport.getZoomPercent();
   }
+  handleViewportWheel(event: WheelEvent): void {
+    this.viewport.handleWheel(event);
+  }
   zoomBy(factor: number): void {
     this.viewport.zoomBy(factor);
   }
