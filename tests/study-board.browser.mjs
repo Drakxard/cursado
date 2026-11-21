@@ -230,7 +230,7 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   })
   await expect(engine(page).locator('[data-study=important] .study-card-label')).toHaveText(/^\d+d$/)
   await engine(page).getByRole('button', { name: 'Agregar a la pizarra' }).click()
-  await page.getByRole('button', { name: 'Link YouTube', exact: true }).click()
+  await page.getByRole('button', { name: 'Link Youtube', exact: true }).click()
   await page.getByRole('textbox', { name: 'Link YouTube' }).fill('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
   await page.getByRole('button', { name: 'Agregar', exact: true }).click()
   await expect.poll(() => engine(peer).evaluate(() => [...window.__komuboard.doc.getMap('objects').values()].filter(map => map.get('study')?.kind === 'youtube').length)).toBe(1)
