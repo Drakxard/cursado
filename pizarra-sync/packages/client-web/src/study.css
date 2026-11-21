@@ -43,7 +43,9 @@
 
 /* Study's bottom dock: the canvas retains ownership of every tool and shortcut. */
 .study-embedded{--accent:#9747ff;--accent-ink:#fff;--study-lavender:#e5cdff}
+:root[data-theme="light"] .study-embedded{--paper:#fafafa;--grid:#bfc0c2}
 .study-embedded #app .sheet-wrap{display:contents}
+.study-embedded #app .mini-sheet.hidden{display:none!important}
 .study-embedded #app .dock{position:absolute;left:50%;right:auto;top:auto;bottom:calc(12px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);flex-direction:row;align-items:center;gap:4px;padding:6px 8px;height:52px;width:max-content;margin:0;max-width:calc(100% - 24px);border-radius:17px;box-sizing:border-box;z-index:45;box-shadow:0 2px 7px #00000018;border:1px solid var(--border);background:var(--surface)}
 .study-embedded .dock .tool{width:40px;height:38px;flex-shrink:0;border-radius:7px;color:var(--ink)}
 .study-embedded .dock .tool.active{color:white;background:#9747ff}
