@@ -1039,6 +1039,8 @@ test('study figjam dock, ink controls and live Shift preserve geometry, collabor
   assert.equal(points[1], points[3])
   await page.mouse.move(420, 520, { steps: 4 })
   await expect.poll(async () => { const p = (await draft())?.points; return p && p[0] === p[2] }).toBe(true)
+  // Awareness is throttled; a repeated Shift press publishes the final pointer sample immediately.
+  await page.keyboard.down('Shift')
   points = (await draft()).points
   await page.keyboard.up('Shift')
   await expect.poll(async () => (await draft())?.points).toEqual(points)
