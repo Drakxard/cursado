@@ -109,6 +109,43 @@ async function setup(t, initialFiles = {}) {
   return page
 }
 
+test('a stalled folder lookup stays quiet and offers a simple recovery after timeout', async t => {
+  const page = await setup(t)
+  await page.addInitScript(() => {
+    const open = indexedDB.open.bind(indexedDB)
+    let stalled = false
+    indexedDB.open = (...args) => {
+      if (args[0] === 'local-workspace' && !stalled) {
+        stalled = true
+        return {}
+      }
+      return open(...args)
+    }
+  })
+  await page.reload()
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.getByRole('heading', { name: 'Sin acceso a la carpeta' }).waitFor({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Cambiar carpeta', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Apunte' }).waitFor()
+})
+
+test('a stored folder is reused, and revoked permission offers recovery on entry', async t => {
+  const page = await setup(t)
+  await page.reload()
+  await page.getByRole('textbox', { name: 'Apunte' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Seleccionar carpeta', exact: true }).count(), 0)
+  await page.addInitScript(() => {
+    window.fixtureRoot.queryPermission = async () => 'prompt'
+    window.fixtureRoot.requestPermission = async () => {
+      window.fixtureRoot.queryPermission = async () => 'granted'
+      return 'granted'
+    }
+  })
+  await page.reload()
+  await page.getByRole('button', { name: 'Recuperar permiso', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Apunte' }).waitFor()
+})
+
 test('pipe shortcut opens a compact editor without unmounting the wheel and saves every requested credential encrypted', async t => {
   const page = await setup(t)
   await page.getByRole('textbox', { name: 'Apunte' }).fill('Borrador')

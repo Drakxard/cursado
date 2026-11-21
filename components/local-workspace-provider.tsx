@@ -70,7 +70,6 @@ const LocalWorkspaceContext = createContext<LocalWorkspaceContextValue | null>(n
 
 function WorkspaceModal({
   bootState,
-  error,
   canRecover,
   onRecover,
   onSelect,
@@ -81,59 +80,30 @@ function WorkspaceModal({
   onRecover: () => Promise<void>
   onSelect: () => Promise<void>
 }) {
-  const isChecking = bootState === "checking"
   const isRecovering = bootState === "recover"
   const isUnsupported = bootState === "unsupported"
+  if (bootState === "checking") return null
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/25 px-6 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl">
-        <p className="text-xs uppercase tracking-[0.28em] text-sky-700">Modo local</p>
-        <h2 className="mt-3 text-2xl font-semibold">
-          {isChecking
-            ? "Recuperando carpeta local"
-            : isRecovering
-              ? "Recuperar carpeta de trabajo"
-              : "Elegi la carpeta de trabajo"}
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/15 px-5">
+      <div role="dialog" aria-modal="true" aria-labelledby="workspace-title" className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 text-slate-900 shadow-lg">
+        <h2 id="workspace-title" className="text-base font-medium">
+          {isUnsupported ? "Navegador no compatible" : isRecovering ? "Sin acceso a la carpeta" : "Selecciona tu carpeta"}
         </h2>
-        <p className="mt-3 text-sm text-slate-600">
-          {isChecking
-            ? "Comprobando si ya existe una carpeta local guardada y si conserva permisos de lectura y escritura."
-            : isRecovering
-              ? "Ya hay una carpeta guardada. Recupera el permiso del navegador para continuar sin volver a elegirla."
-              : "La app va a guardar y reutilizar una carpeta raiz local. Dentro de esa carpeta se crean o reutilizan automaticamente las subcarpetas `cronograma/`, `teoria/`, `practica/`, `audio/` y `manifests/`."}
+        <p className="mt-2 text-sm text-slate-600">
+          {isUnsupported ? "Abre Cursado en Chrome o Edge." : isRecovering ? "Recupera el permiso o elige otra carpeta." : "Elige d?nde guardar tus materiales."}
         </p>
-        {isUnsupported ? (
-          <p className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Este modo necesita un navegador Chromium con File System Access API.
-          </p>
-        ) : null}
-        {error ? (
-          <p className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
-        ) : null}
-        <div className="mt-6 flex flex-wrap gap-3">
-          {isRecovering ? (
-            <button
-              type="button"
-              onClick={() => void onRecover()}
-              disabled={isChecking || isUnsupported || !canRecover}
-              className="inline-flex h-11 items-center justify-center rounded-2xl bg-sky-500 px-5 text-sm font-medium text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
-            >
+        <div className="mt-4 flex flex-wrap gap-2">
+          {isRecovering && canRecover ? (
+            <button type="button" onClick={() => void onRecover()} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white">
               Recuperar permiso
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={() => void onSelect()}
-            disabled={isChecking || isUnsupported || !supportsWorkspacePicker()}
-            className={
-              isRecovering
-                ? "inline-flex h-11 items-center justify-center rounded-2xl border border-slate-300 px-5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                : "inline-flex h-11 items-center justify-center rounded-2xl bg-sky-500 px-5 text-sm font-medium text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
-            }
-          >
-            {isChecking ? "Comprobando..." : isRecovering ? "Cambiar carpeta" : "Seleccionar carpeta"}
-          </button>
+          {!isUnsupported ? (
+            <button type="button" onClick={() => void onSelect()} disabled={!supportsWorkspacePicker()} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">
+              {isRecovering ? "Cambiar carpeta" : "Seleccionar carpeta"}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -447,6 +417,14 @@ export function LocalWorkspaceProvider({
     setBootState("checking")
     setError("")
 
+    const timeout = window.setTimeout(() => {
+      cancelled = true
+      setReadyWorkspaceHandle(null)
+      setRootHandle(null)
+      setError("La recuperación de la carpeta tardó demasiado. Puedes recuperar el permiso o seleccionar otra carpeta.")
+      setBootState("recover")
+    }, 20_000)
+
     const bootstrap = async () => {
       if (!supportsWorkspacePicker()) {
         if (cancelled) return
@@ -470,6 +448,7 @@ export function LocalWorkspaceProvider({
         setStoredHandle(storedHandle)
 
         const permission = await queryWorkspacePermission(storedHandle)
+        if (cancelled) return
         if (permission !== "granted") {
           if (cancelled) return
           setReadyWorkspaceHandle(null)
@@ -484,6 +463,7 @@ export function LocalWorkspaceProvider({
         if (cancelled) return
         const unlocked = await unlockWorkspaceServices(storedHandle)
         const services = await loadServicesFile(storedHandle)
+        if (cancelled) return
         if (services) setServicesFileMessage(`User.Services ${unlocked.error ? "cargado con observaciones" : "verificado"} · ${new Date(services.validatedAt || services.savedAt).toLocaleString()}`)
         if (!unlocked.ok || unlocked.error) setError(unlocked.error)
         if (isInscreenConfigurationSkipped()) setReadyInscreenConfigToken("")
@@ -499,10 +479,11 @@ export function LocalWorkspaceProvider({
       }
     }
 
-    void bootstrap()
+    void bootstrap().finally(() => window.clearTimeout(timeout))
 
     return () => {
       cancelled = true
+      window.clearTimeout(timeout)
     }
   }, [enabled])
 
@@ -960,7 +941,7 @@ export function LocalWorkspaceProvider({
           onFinish={finishInscreenConfiguration}
         />
       ) : null}
-      {enabled && bootState !== "ready" && bootState !== "checking" && bootState !== "configure" ? (
+      {enabled && bootState !== "ready" && bootState !== "configure" ? (
         <WorkspaceModal
           bootState={bootState}
           error={error}

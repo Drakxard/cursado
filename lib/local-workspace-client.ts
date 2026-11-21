@@ -100,6 +100,11 @@ export async function removeServicesFile(rootHandle: FileSystemDirectoryHandle) 
 function openWorkspaceDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = window.indexedDB.open(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION)
+    let expired = false
+    const timeout = window.setTimeout(() => {
+      expired = true
+      reject(new Error("El navegador no pudo abrir la carpeta guardada a tiempo. Cierra otras pestañas de Cursado e intenta de nuevo."))
+    }, 10_000)
 
     request.onupgradeneeded = () => {
       const database = request.result
@@ -108,8 +113,20 @@ function openWorkspaceDb() {
       }
     }
 
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error("No se pudo abrir IndexedDB."))
+    request.onsuccess = () => {
+      window.clearTimeout(timeout)
+      if (expired) request.result.close()
+      else resolve(request.result)
+    }
+    request.onerror = () => {
+      window.clearTimeout(timeout)
+      reject(request.error ?? new Error("No se pudo abrir IndexedDB."))
+    }
+    request.onblocked = () => {
+      window.clearTimeout(timeout)
+      expired = true
+      reject(new Error("Otra pestaña está bloqueando el acceso a la carpeta guardada. Cierra las otras pestañas de Cursado e intenta de nuevo."))
+    }
   })
 }
 
@@ -120,12 +137,13 @@ async function withStore<T>(mode: IDBTransactionMode, handler: (store: IDBObject
     return await new Promise<T>((resolve, reject) => {
       const transaction = database.transaction(WORKSPACE_STORE_NAME, mode)
       const store = transaction.objectStore(WORKSPACE_STORE_NAME)
-
+      let result: T
+      transaction.oncomplete = () => resolve(result)
+      transaction.onerror = () => reject(transaction.error ?? new Error("No se pudo completar la transaccion."))
+      transaction.onabort = () => reject(transaction.error ?? new Error("La transaccion fue abortada."))
       Promise.resolve(handler(store))
-        .then((result) => {
-          transaction.oncomplete = () => resolve(result as T)
-          transaction.onerror = () => reject(transaction.error ?? new Error("No se pudo completar la transaccion."))
-          transaction.onabort = () => reject(transaction.error ?? new Error("La transaccion fue abortada."))
+        .then((value) => {
+          result = value as T
         })
         .catch(reject)
     })
