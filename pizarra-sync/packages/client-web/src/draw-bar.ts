@@ -88,8 +88,8 @@ export class CoDrawBar extends HTMLElement {
     if (!this.#study) return;
     const colors = this.#brush === 'pen' ? this.#penColors : this.#highlightColors;
     const palette = this.querySelector<HTMLElement>('.study-ink-colors')!;
-    if (palette.dataset.brush !== this.#brush) {
-      palette.dataset.brush = this.#brush;
+    if (palette.dataset.paletteBrush !== this.#brush) {
+      palette.dataset.paletteBrush = this.#brush;
       palette.innerHTML = colors.map(color =>
         `<button type="button" class="sw" data-color="${color}" style="--sw:${color}" aria-label="${tColor(COLOR_NAMES[color.toUpperCase()], color)}"></button>`).join('');
     }
