@@ -56,6 +56,37 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const [initial, setInitial] = useState<Awaited<ReturnType<typeof openStudyBoard>> | null>(null)
   const [ready, setReady] = useState(false), [error, setError] = useState(''), [status, setStatus] = useState('')
   const [menu, setMenu] = useState(false), [split, setSplit] = useState(false), [urlInput, setUrlInput] = useState(false), [url, setUrl] = useState('')
+  const addMenu = useRef<HTMLDivElement>(null)
+  const [menuPosition, setMenuPosition] = useState({ left: 8, bottom: 76, maxHeight: 240 })
+  const positionAddMenu = () => {
+    const button = frame.current?.contentDocument?.querySelector('.study-plus')?.getBoundingClientRect()
+    const bounds = frame.current?.getBoundingClientRect()
+    if (!button || !bounds) return;
+    const top = bounds.top + button.top
+    setMenuPosition({ left: Math.max(8, Math.min(bounds.left + button.right - 192, window.innerWidth - 200)), bottom: window.innerHeight - top + 8, maxHeight: Math.max(80, top - 16) })
+  }
+  useEffect(() => {
+    if (!menu) return;
+    addMenu.current?.querySelector('button')?.focus({ preventScroll: true })
+    const child = frame.current?.contentWindow
+    const dismiss = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest?.('.study-plus')) return;
+      if (!addMenu.current?.contains(event.target as Node)) setMenu(false)
+    }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setMenu(false); frame.current?.focus() } }
+    window.addEventListener('resize', positionAddMenu)
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape)
+    child?.addEventListener('pointerdown', dismiss)
+    child?.addEventListener('keydown', escape)
+    return () => {
+      window.removeEventListener('resize', positionAddMenu)
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape)
+      child?.removeEventListener('pointerdown', dismiss)
+      child?.removeEventListener('keydown', escape)
+    }
+  }, [menu])
   const [pins, setPins] = useState<Pin[]>([]), [reader, setReader] = useState<BoardPdfReference | null>(null), [readerVisible, setReaderVisible] = useState(false)
   const [review, setReview] = useState<MigrationReport | null>(null), [attachment, setAttachment] = useState<{ id: string; study: StudyAttachment } | null>(null)
   const [closing, setClosing] = useState(false)
@@ -198,7 +229,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
         if (data.type === 'study-board:pin' && typeof data.id === 'string') send('pin', { id: data.id })
         if (data.type === 'study-board:toggle-pdf') togglePdf()
         if (data.type === 'study-board:open-pinned') { const pin = live.current.pins.at(-1); if (pin) openReader(pin.reference) }
-        if (data.type === 'study-board:menu') setMenu(value => !value)
+        if (data.type === 'study-board:menu') { positionAddMenu(); setMenu(value => !value) }
         if (data.type === 'study-board:files') send('import-files', { files: data.files })
         if (data.type === 'study-board:changed') { dirtyRevision.current = data.revision ?? dirtyRevision.current + 1; void refreshTasks() }
         if (data.type === 'study-board:open') {
@@ -293,12 +324,9 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     </div>
     {(!readerVisible || readerLoading) && <button aria-label={backLabel} title={backLabel} disabled={closing} onClick={() => close()} style={{ background: boardTheme === 'dark' ? '#191e27' : '#fff', color: boardTheme === 'dark' ? '#edf0f5' : '#374151', borderColor: boardTheme === 'dark' ? '#343c49' : '#e5e7eb', boxShadow: '0 1px 3px #00000014' }} className="absolute left-0 top-3 z-20 flex h-11 w-11 items-center justify-center rounded-xl border text-xl">{closing ? '…' : '←'}</button>}
     {!readerVisible && <StudyBoardPages rootHandle={rootHandle} rootId={pagesRootId} boardId={boardId} disabled={!ready || closing} onSelect={page => close(() => onPage(page))} onDuplicate={action => close(() => { void action().catch(reason => { setClosing(false); setError(String(reason)) }) })} theme={boardTheme} onImages={mode => send('night-images', { mode })} onTheme={() => send('toggle-theme')} />}
-    {menu && <div role="dialog" aria-label="Agregar a la pizarra" style={{ bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))', left: '50%', transform: 'translateX(-50%)', maxHeight: 'calc(100dvh - 150px)', overflowY: 'auto', background: boardTheme === 'dark' ? '#191e27' : '#fff', color: boardTheme === 'dark' ? '#edf0f5' : '#202020' }} className="absolute z-30 flex flex-col gap-1 rounded-xl border p-2 shadow-lg">
-      <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { setDiagramEdit(null); setDiagrams(true); setMenu(false) }}>Diagramas</button>
-      {([['undo', 'Deshacer'], ['redo', 'Rehacer'], ['reset-view', 'Ajustar vista']] as const).map(([action, label]) => <button key={action} className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { send('history', { action }); setMenu(false); focusBoard() }}>{label}</button>)}
-      {([['sticky', 'Nota adhesiva'], ['text', 'Texto'], ['shapes', 'Figuras'], ['stamp', 'Sellos'], ['eraser', 'Borrador']] as const).map(([tool, label]) => <button key={tool} className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { send('tool', { tool }); setMenu(false); focusBoard() }}>{label}</button>)}
-      <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { files.current?.click(); setMenu(false) }}>Agregar material</button>
-      <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { setUrlInput(true); setMenu(false) }}>Link YouTube</button>
+    {menu && <div ref={addMenu} role="dialog" aria-label="Agregar a la pizarra" style={{ position: 'fixed', ...menuPosition, width: 192, boxSizing: 'border-box', maxWidth: 'calc(100vw - 16px)', overflowY: 'auto', background: boardTheme === 'dark' ? '#191e27' : '#fff', color: boardTheme === 'dark' ? '#edf0f5' : '#202020' }} className="absolute z-30 flex flex-col gap-1 rounded-xl border p-2 shadow-lg">
+      <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { files.current?.click(); setMenu(false) }}>Agrega material</button>
+      <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { setUrlInput(true); setMenu(false) }}>Link Youtube</button>
       <button className="rounded px-4 py-2 text-left hover:bg-slate-100" onClick={() => { setSplit(true); setAttachment(null); setMenu(false) }}>Biblioteca</button>
     </div>}
     {urlInput && <form onSubmit={addVideo} className="absolute bottom-16 left-16 z-30 flex max-w-[85vw] gap-1 rounded-lg border bg-white p-2 shadow"><input autoFocus type="url" aria-label="Link YouTube" placeholder="Link de YouTube" value={url} onChange={event => setUrl(event.target.value)} className="min-w-0 rounded border px-2" /><button type="submit">Agregar</button><button type="button" aria-label="Cerrar enlace" onClick={() => setUrlInput(false)}>×</button></form>}

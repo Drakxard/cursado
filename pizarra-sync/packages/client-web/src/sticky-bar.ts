@@ -58,7 +58,8 @@ export class CoStickyBar extends HTMLElement {
   #sync(): void {
     const cur = this.#color.toLowerCase();
     for (const sw of this.querySelectorAll<HTMLElement>(".sw")) {
-      sw.classList.toggle("on", (sw.getAttribute("data-color") ?? "").toLowerCase() === cur);
+      const active = (sw.getAttribute("data-color") ?? "").toLowerCase() === cur;
+      sw.classList.toggle("on", active); sw.setAttribute('aria-pressed', String(active));
     }
   }
 }

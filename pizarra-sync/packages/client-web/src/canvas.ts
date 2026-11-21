@@ -83,6 +83,7 @@ export interface CanvasOptions {
   onStampPlaced?: (src: string) => void;
   /** localStorage key for persisting this board's camera (pan/zoom) across reloads; omitted = none. */
   viewKey?: string;
+  study?: boolean;
 }
 
 const CURSOR_HZ = 30;
@@ -301,6 +302,7 @@ export class BoardCanvas {
   private stickyColor: string = DEFAULT_STICKY_COLOR;
   /** The shape/line kind the "Shapes and lines" tool draws next (driven by the shape menu/panel). */
   private currentShape: ShapeKind = "rectangle";
+  private shapeColor = DEFAULT_SHAPE_FILL;
   /** The armed custom shape's geometry (only while currentShape === "custom"). */
   private currentShapeCustom: CustomShape | null = null;
   /** True while setTool is baking an open editor → suppresses the commit's auto-revert-to-select. */
@@ -583,6 +585,7 @@ export class BoardCanvas {
     this.currentConnector = kind;
     this.textLayer.setConnectorMode(true); // show every shape's connector dots while drawing
   }
+  setShapeColor(color: string): void { this.shapeColor = color; }
   /** The stamp/sticker the next canvas tap places (`mark:<name>` | `emoji:<codepoint>`). */
   setStamp(src: string): void {
     this.currentStamp = src;
@@ -859,7 +862,7 @@ export class BoardCanvas {
         this.textLayer.showShapeGhost(
           p,
           this.currentShape,
-          DEFAULT_SHAPE_FILL,
+          this.shapeColor,
           this.currentShapeCustom ?? undefined,
         );
       if (this.tool === "text") {
@@ -1074,6 +1077,19 @@ export class BoardCanvas {
 
   private bindText(): void {
     this.bindTapPlace("text", (at, client) => this.textLayer.editOrCreate(at, false, client));
+    this.stage.on('dblclick', event => {
+      if (!this.opts.study || this.tool !== 'select') return;
+      const pointer = event.evt as MouseEvent;
+      if (pointer.button !== 0 || pointer.shiftKey || pointer.ctrlKey || pointer.metaKey || pointer.altKey) return;
+      const target = pointer.target;
+      if (target instanceof Element && target.closest('button,input,textarea,[contenteditable],.komu-text,.komu-image,[data-study]')) return;
+      const at = this.point();
+      if (this.textLayer.hitTest(at)) return;
+      this.cancelMarquee();
+      this.clearSelection();
+      if (this.opts.requestTool) this.opts.requestTool('text'); else this.setTool('text');
+      this.textLayer.editOrCreate(at, false, { x: pointer.clientX, y: pointer.clientY });
+    });
   }
 
   private bindSticky(): void {
@@ -1172,7 +1188,7 @@ export class BoardCanvas {
       this.textLayer.shapeAt(
         at,
         this.currentShape,
-        DEFAULT_SHAPE_FILL,
+        this.shapeColor,
         this.currentShapeCustom ?? undefined,
       );
       this.opts.onPlaced?.(); // collapse the mobile shape sheet while you type the label
@@ -1296,7 +1312,7 @@ export class BoardCanvas {
       kind: this.currentConnector ?? "arrow",
       from,
       to,
-      color: DEFAULT_CONNECTOR_COLOR,
+      color: this.opts.study ? this.shapeColor : DEFAULT_CONNECTOR_COLOR,
       width: DEFAULT_CONNECTOR_WIDTH,
       style: "solid",
       startCap: caps.startCap,
@@ -3151,7 +3167,7 @@ export class BoardCanvas {
   }
 
   studyToolPreferences() {
-    return { color: this.color, width: this.widthPx, style: this.style, sticky: this.stickyColor, shape: this.currentShape, custom: this.currentShapeCustom, stamp: this.currentStamp, connector: this.currentConnector };
+    return { color: this.color, width: this.widthPx, style: this.style, sticky: this.stickyColor, shape: this.currentShape, shapeColor: this.shapeColor, custom: this.currentShapeCustom, stamp: this.currentStamp, connector: this.currentConnector };
   }
 
   destroy(): void {
