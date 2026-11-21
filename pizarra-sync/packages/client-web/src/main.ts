@@ -91,7 +91,8 @@ const storedTheme = (): Theme | null => {
 const applyTheme = (t: Theme): void => {
   document.documentElement.dataset.theme = t;
 };
-let theme: Theme = storedTheme() ?? systemTheme();
+const embeddedStudy = new URLSearchParams(location.search).has('topicBoard') && window.parent !== window;
+let theme: Theme = storedTheme() ?? (embeddedStudy ? "light" : systemTheme());
 applyTheme(theme);
 
 // --------------------------------------------------------------------------
@@ -1236,7 +1237,7 @@ syncSettings();
 
 // Follow the OS theme until the user picks one explicitly (then the stored pref wins).
 darkMedia.addEventListener("change", () => {
-  if (storedTheme()) return;
+  if (storedTheme() || embeddedStudy) return;
   theme = systemTheme();
   applyTheme(theme);
   syncSettings();

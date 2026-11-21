@@ -1,4 +1,5 @@
 import Konva from "konva";
+import { PenGesture } from "./pen-gesture";
 import * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import {
@@ -307,7 +308,8 @@ export class BoardCanvas {
   private widthPx = 8;
   private style: StrokeStyle = "solid";
   private opacity = 1; // fixed default — the pen panel has no opacity control yet
-  private drawing: { id: string; points: number[] } | null = null;
+  private drawing: { id: string; points: number[]; gesture: PenGesture } | null = null;
+  private penShift = false;
   private marquee: Konva.Rect | null = null;
   private marqueeStart: { x: number; y: number } | null = null;
   private marqueeAdditive = false;
@@ -372,6 +374,7 @@ export class BoardCanvas {
   }
   /** Window listeners kept as fields so destroy() can detach them (else they leak / fire on a dead stage). */
   private readonly onWindowBlur = (): void => {
+    this.cancelPenGesture();
     this.stopHandPan();
     this.opts.awareness.setLocalStateField("cursor", null);
   };
@@ -518,6 +521,7 @@ export class BoardCanvas {
   }
 
   setTool(tool: ToolId): void {
+    if (tool !== "pen" && this.drawing) this.cancelPenGesture();
     this.textLayer.finishCameraMotion();
     if (this.tool === "select" && tool !== "select") {
       this.clearSelection();
@@ -804,6 +808,25 @@ export class BoardCanvas {
   }
 
   // ---- pen / drawing ----
+  private cancelPenGesture(): void {
+    this.drawing = null;
+    this.penShift = false;
+    this.textLayer.removeInkDraft("local");
+    this.opts.awareness.setLocalStateField("draw", null);
+  }
+  private previewPen(force = false): void {
+    if (!this.drawing) return;
+    this.drawing.points = this.drawing.gesture.points(this.penShift);
+    this.textLayer.upsertInkDraft("local", this.draftStroke(this.drawing));
+    const now = Date.now();
+    if (force || now - this.lastDrawSent >= 1000 / CURSOR_HZ) {
+      this.lastDrawSent = now;
+      const stroke = this.draftStroke(this.drawing);
+      this.opts.awareness.setLocalStateField("draw", {
+        ...stroke, points: downsamplePoints(stroke.points, MAX_PREVIEW_VERTS),
+      });
+    }
+  }
   /** The live StrokeObject for an in-progress draft preview, using the current pen style. */
   private draftStroke(d: { id: string; points: number[] }): StrokeObject {
     return {
@@ -818,15 +841,17 @@ export class BoardCanvas {
     };
   }
   private bindPointer(): void {
-    this.stage.on("pointerdown", () => {
+    this.stage.on("pointerdown", (e) => {
       if (this.tool !== "pen") return;
+      if ((e.evt as PointerEvent).button !== 0) return;
       const p = this.point();
-      this.drawing = { id: randomId("st"), points: [p.x, p.y] };
+      this.penShift = (e.evt as PointerEvent).shiftKey;
+      this.drawing = { id: randomId("st"), points: [p.x, p.y], gesture: new PenGesture(p.x, p.y) };
       // In-progress preview is a transient DOM <svg> on top of everything (ADR-0009 Phase 3 Step 6).
       this.textLayer.upsertInkDraft("local", this.draftStroke(this.drawing));
     });
 
-    this.stage.on("pointermove", () => {
+    this.stage.on("pointermove", (e) => {
       const p = this.point();
       this.publishCursor(p);
       if (this.tool === "sticky") this.textLayer.showStickyGhost(p, this.stickyColor); // placement preview
@@ -843,27 +868,17 @@ export class BoardCanvas {
       }
       if (this.tool === "stamp") this.updateStampGhost(p);
       if (!this.drawing) return;
-      this.drawing.points.push(p.x, p.y);
-      this.textLayer.upsertInkDraft("local", this.draftStroke(this.drawing));
+      this.drawing.gesture.move(p.x, p.y);
+      this.penShift = (e.evt as PointerEvent).shiftKey;
+      this.previewPen();
       // Stream the in-progress stroke to peers (throttled like cursors). It's ephemeral —
       // addStroke commits the finished stroke on finish(), so no doc/undo churn mid-draw.
-      const now = Date.now();
-      if (now - this.lastDrawSent >= 1000 / CURSOR_HZ) {
-        this.lastDrawSent = now;
-        this.opts.awareness.setLocalStateField("draw", {
-          id: this.drawing.id,
-          points: downsamplePoints(this.drawing.points, MAX_PREVIEW_VERTS),
-          color: this.color,
-          width: this.widthPx,
-          style: this.style,
-          opacity: this.opacity,
-        });
-      }
     });
 
     const finish = (): void => {
       const d = this.drawing;
       this.drawing = null;
+      this.penShift = false;
       if (!d) return;
       this.textLayer.removeInkDraft("local"); // drop the preview; the doc observer paints the committed svg
       if (d.points.length >= 4) {
@@ -885,6 +900,14 @@ export class BoardCanvas {
       this.opts.awareness.setLocalStateField("draw", null); // …then end the live preview
     };
     this.stage.on("pointerup", finish);
+    this.stage.on("pointercancel", () => this.cancelPenGesture());
+    const shift = (event: KeyboardEvent): void => {
+      if (event.key !== "Shift" || !this.drawing) return;
+      this.penShift = event.type === "keydown";
+      this.previewPen(true);
+    };
+    window.addEventListener("keydown", shift, { signal: this.lifetime.signal });
+    window.addEventListener("keyup", shift, { signal: this.lifetime.signal });
     this.stage.on("pointerleave", () => {
       finish(); // a connector/stroke dragged off the canvas edge still commits
       this.textLayer.hideStickyGhost(); // pointer left the canvas → drop the placement preview

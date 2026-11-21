@@ -37,3 +37,52 @@
 .study-embedded #topbar .brand,.study-embedded #topbar .room-pill{display:none}
 .study-embedded #topbar{left:300px;width:calc(100% - 312px);pointer-events:none;background:transparent;border:0;box-shadow:none}
 .study-embedded #topbar button,.study-embedded #topbar komu-avatar-presence-row{pointer-events:auto}
+
+/* Study's bottom dock: the canvas retains ownership of every tool and shortcut. */
+.study-embedded{--accent:#9747ff;--accent-ink:#fff;--study-lavender:#e5cdff}
+.study-embedded #app .sheet-wrap{display:contents}
+.study-embedded #app .dock{position:absolute;left:50%;right:auto;top:auto;bottom:calc(12px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);flex-direction:row;align-items:center;gap:4px;padding:6px 8px;height:52px;width:max-content;margin:0;max-width:calc(100% - 24px);border-radius:17px;box-sizing:border-box;z-index:45;box-shadow:0 2px 7px #00000018;border:1px solid var(--border);background:var(--surface)}
+.study-embedded .dock .tool{width:40px;height:38px;flex-shrink:0;border-radius:7px;color:var(--ink)}
+.study-embedded .dock .tool.active{color:white;background:#9747ff}
+.study-embedded .dock [data-tool="hand"]{margin-right:10px;position:relative}
+.study-embedded .dock [data-tool="hand"]:after{content:"";position:absolute;right:-7px;top:-6px;height:50px;border-right:1px solid var(--border)}
+.study-embedded .dock [data-tool="pen"]{width:56px;overflow:visible;background:transparent!important}
+.study-pen-art{width:32px;height:56px;filter:drop-shadow(0 2px 3px #0003);pointer-events:none}
+.study-embedded .dock .study-pen-art{height:60px;width:35px;transform:translateY(-9px);transition:transform .15s}
+.study-embedded .dock [data-tool="pen"].active .study-pen-art{transform:translateY(-13px)}
+.study-embedded .dock [data-tool="eraser"],.study-embedded .dock [data-tool="insert"],.study-embedded .study-diagrams{display:none!important}
+.study-embedded .dock .study-plus{display:grid!important;border-radius:50%;background:var(--surface-2);width:32px;height:32px;margin-left:4px;font-size:23px!important}
+.study-embedded #app .draw-bar{position:absolute;left:50%;right:auto;top:auto;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);margin:0;width:max-content;max-width:calc(100% - 24px);height:44px;max-height:none;min-height:0;overflow:visible;padding:5px 8px;border-radius:16px;box-sizing:border-box;z-index:44;box-shadow:0 2px 7px #00000018;background:var(--surface);border:1px solid var(--border);pointer-events:auto}
+.study-embedded #app .draw-bar.hidden{display:none}
+.study-embedded .draw-bar .sheet-handle{display:none}
+.study-embedded .draw-bar .db-tip{left:50%;top:auto;bottom:calc(100% + 10px);transform:translateX(-50%)}
+.study-embedded .draw-bar .db-tip:before{display:none}
+.study-embedded #app .draw-bar .db-row{display:flex;flex-direction:row;align-items:center;gap:4px;overflow:visible}
+.study-embedded .draw-bar .db-btn{width:29px;height:30px;min-width:29px;border-radius:5px;padding:3px}
+.study-embedded .draw-bar .db-btn.active{background:var(--study-lavender);color:#9747ff}
+.study-embedded .draw-bar .study-pen-art{height:29px;width:22px}
+.study-embedded .draw-bar [data-pop="width"]{order:3}
+.study-embedded .draw-bar [data-pop="style"]{order:4;margin-right:8px}
+.study-embedded .draw-bar .study-ink-colors{order:5;display:flex;align-items:center;gap:12px;border-left:1px solid var(--border);padding-left:10px}
+.study-embedded .draw-bar [data-pop="color"]{order:6;margin-left:6px}
+.study-embedded .draw-bar .db-dot{width:18px;height:18px;background:conic-gradient(red,#ff0,#0f0,#0ff,#00f,#f0f,red)!important;border-radius:50%}
+.study-embedded .study-ink-colors .sw{width:17px;height:17px;min-width:17px;border:1px solid #0002;border-radius:50%;background:var(--sw);padding:0}
+.study-embedded .study-ink-colors .sw.on{outline:2px solid #9747ff;outline-offset:3px;box-shadow:0 0 0 2px var(--surface)}
+.study-embedded .tool:focus-visible,.study-embedded .db-btn:focus-visible,.study-embedded .sw:focus-visible{outline:2px solid #9747ff;outline-offset:3px}
+.study-embedded #app :is(.sticky-bar,.shape-menu,.komu-shape-panel,.komu-stamp-wheel){left:50%;right:auto;margin:0;top:auto;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);max-height:calc(100dvh - 160px);max-width:calc(100% - 24px);overflow-y:auto;pointer-events:auto}
+.study-embedded #app .zoombar{bottom:calc(12px + env(safe-area-inset-bottom,0px));right:12px;left:auto}
+.study-embedded #app .zoombar{display:flex}
+.study-embedded #app .zoom-pill{display:none}
+@media(max-width:900px){.study-embedded #app .zoombar{bottom:calc(80px + env(safe-area-inset-bottom,0px))}}
+@media(max-width:600px){
+  .study-embedded #app .dock{gap:4px;height:54px}
+  .study-embedded .dock .tool{width:42px;height:40px}
+  .study-embedded .dock [data-group="insert"]{display:none!important}
+  .study-embedded #app .draw-bar{height:auto;padding:8px;width:calc(100% - 24px)}
+  .study-embedded #app .draw-bar .db-row{flex-wrap:wrap;justify-content:center;row-gap:10px}
+  .study-embedded .draw-bar .db-btn{width:36px;height:36px}
+  .study-embedded .draw-bar .study-ink-colors{gap:14px;border:0;padding:6px 4px}
+  .study-embedded .study-ink-colors .sw{width:22px;height:22px;min-width:22px}
+  .study-embedded #app:has(.draw-bar:not(.hidden)) .zoombar{bottom:calc(210px + env(safe-area-inset-bottom,0px))}
+}
+@media(prefers-reduced-motion:reduce){.study-embedded .study-pen-art{transition:none!important}}
