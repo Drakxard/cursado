@@ -11,5 +11,5 @@ interface FileSystemDirectoryHandle {
 }
 
 interface Window {
-  showDirectoryPicker(options?: { mode?: FileSystemPermissionMode }): Promise<FileSystemDirectoryHandle>
+  showDirectoryPicker(options?: { mode?: FileSystemPermissionMode; startIn?: FileSystemDirectoryHandle }): Promise<FileSystemDirectoryHandle>
 }

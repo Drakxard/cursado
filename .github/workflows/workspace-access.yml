@@ -1,0 +1,42 @@
+name: Acceso inicial a la carpeta
+
+on:
+  push:
+    paths:
+      - 'components/local-workspace-provider.tsx'
+      - 'lib/local-workspace-client.ts'
+      - 'types/file-system-access.d.ts'
+      - 'tests/services.browser.mjs'
+      - '.github/workflows/workspace-access.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace-access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            pizarraproyecto-main/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+        working-directory: pizarraproyecto-main
+      - run: npx playwright install --with-deps chromium
+      - name: Comprobar tipos
+        run: npm run typecheck
+      - name: Probar permiso inicial, recuperacion y servicios en Chromium
+        run: npm run test:services
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workspace-access-diagnostics
+          if-no-files-found: ignore
+          path: test-results/

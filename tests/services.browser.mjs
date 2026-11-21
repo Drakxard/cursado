@@ -72,7 +72,13 @@ async function setup(t, initialFiles = {}) {
       async *entries() {},
     })
     window.fixtureRoot = directory()
-    window.showDirectoryPicker = async () => window.fixtureRoot
+    window.showDirectoryPicker = async options => {
+      window.pickerCalls = (window.pickerCalls || 0) + 1
+      window.pickerWasActivated = navigator.userActivation.isActive
+      window.pickerStartedInSavedFolder = options?.startIn === window.fixtureRoot
+      window.fixtureRoot.queryPermission = async () => 'granted'
+      return window.fixtureRoot
+    }
     const put = IDBObjectStore.prototype.put, get = IDBObjectStore.prototype.get
     IDBObjectStore.prototype.put = function(value, ...rest) {
       return put.call(this, this.name === 'workspace' && value?.id === 'root-handle' ? { id: value.id, fixtureHandle: true } : value, ...rest)
@@ -124,7 +130,7 @@ test('a stalled folder lookup stays quiet and offers a simple recovery after tim
   })
   await page.reload()
   assert.equal(await page.getByRole('dialog').count(), 0)
-  await page.getByRole('heading', { name: 'Sin acceso a la carpeta' }).waitFor({ timeout: 15_000 })
+  await page.getByRole('heading', { name: 'Sin acceso a la carpeta' }).waitFor({ timeout: 2_000 })
   await page.getByRole('button', { name: 'Cambiar carpeta', exact: true }).click()
   await page.getByRole('textbox', { name: 'Apunte' }).waitFor()
 })
@@ -136,14 +142,47 @@ test('a stored folder is reused, and revoked permission offers recovery on entry
   assert.equal(await page.getByRole('button', { name: 'Seleccionar carpeta', exact: true }).count(), 0)
   await page.addInitScript(() => {
     window.fixtureRoot.queryPermission = async () => 'prompt'
-    window.fixtureRoot.requestPermission = async () => {
-      window.fixtureRoot.queryPermission = async () => 'granted'
-      return 'granted'
-    }
+    window.fixtureRoot.requestPermission = async () => { throw new Error('Stale handle cannot request permission') }
   })
   await page.reload()
   await page.getByRole('button', { name: 'Recuperar permiso', exact: true }).click()
   await page.getByRole('textbox', { name: 'Apunte' }).waitFor()
+  assert.equal(await page.evaluate(() => window.pickerCalls), 1)
+  assert.equal(await page.evaluate(() => window.pickerWasActivated), true)
+  assert.equal(await page.evaluate(() => window.pickerStartedInSavedFolder), true)
+})
+
+test('a hung permission check offers recovery promptly and the native picker runs on the click', async t => {
+  const page = await setup(t)
+  await page.addInitScript(() => {
+    window.fixtureRoot.queryPermission = () => new Promise(() => {})
+    window.fixtureRoot.requestPermission = () => new Promise(() => {})
+  })
+  await page.reload()
+  await page.getByRole('button', { name: 'Recuperar permiso', exact: true }).waitFor({ timeout: 2_000 })
+  await page.getByRole('button', { name: 'Recuperar permiso', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Apunte' }).waitFor({ timeout: 2_000 })
+  assert.equal(await page.evaluate(() => window.pickerWasActivated), true)
+})
+
+test('folder access stays usable when browser storage fails to save the selected handle', async t => {
+  const page = await setup(t)
+  await page.addInitScript(() => {
+    indexedDB.open = () => { throw new DOMException('Browser storage failed', 'UnknownError') }
+  })
+  await page.reload()
+  await page.getByRole('button', { name: 'Cambiar carpeta', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Apunte' }).waitFor({ timeout: 2_000 })
+})
+
+test('startup loads local service tokens without waiting for remote service validation', async t => {
+  const initial = JSON.stringify({ version: 1, inscreenToken: 'v1.old.tag.ciphertext', driveToken: '', seedFingerprint: 'old', savedAt: new Date().toISOString(), validatedAt: new Date().toISOString() })
+  const page = await setup(t, { 'User.Services': initial })
+  let statusCalls = 0
+  await page.route('**/api/inscreen/config/status', route => { statusCalls++; return route.abort() })
+  await page.reload()
+  await page.getByRole('textbox', { name: 'Apunte' }).waitFor({ timeout: 2_000 })
+  assert.equal(statusCalls, 0)
 })
 
 test('pipe shortcut opens a compact editor without unmounting the wheel and saves every requested credential encrypted', async t => {

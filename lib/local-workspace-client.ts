@@ -104,7 +104,7 @@ function openWorkspaceDb() {
     const timeout = window.setTimeout(() => {
       expired = true
       reject(new Error("El navegador no pudo abrir la carpeta guardada a tiempo. Cierra otras pestañas de Cursado e intenta de nuevo."))
-    }, 10_000)
+    }, 750)
 
     request.onupgradeneeded = () => {
       const database = request.result
@@ -116,7 +116,10 @@ function openWorkspaceDb() {
     request.onsuccess = () => {
       window.clearTimeout(timeout)
       if (expired) request.result.close()
-      else resolve(request.result)
+      else {
+        request.result.onversionchange = () => request.result.close()
+        resolve(request.result)
+      }
     }
     request.onerror = () => {
       window.clearTimeout(timeout)
@@ -138,14 +141,18 @@ async function withStore<T>(mode: IDBTransactionMode, handler: (store: IDBObject
       const transaction = database.transaction(WORKSPACE_STORE_NAME, mode)
       const store = transaction.objectStore(WORKSPACE_STORE_NAME)
       let result: T
-      transaction.oncomplete = () => resolve(result)
-      transaction.onerror = () => reject(transaction.error ?? new Error("No se pudo completar la transaccion."))
-      transaction.onabort = () => reject(transaction.error ?? new Error("La transaccion fue abortada."))
+      const timeout = window.setTimeout(() => {
+        reject(new Error("No se pudo recuperar la carpeta guardada. Selecciona la carpeta para continuar."))
+        try { transaction.abort() } catch {}
+      }, 750)
+      transaction.oncomplete = () => { window.clearTimeout(timeout); resolve(result) }
+      transaction.onerror = () => { window.clearTimeout(timeout); reject(transaction.error ?? new Error("No se pudo completar la transaccion.")) }
+      transaction.onabort = () => { window.clearTimeout(timeout); reject(transaction.error ?? new Error("La transaccion fue abortada.")) }
       Promise.resolve(handler(store))
         .then((value) => {
           result = value as T
         })
-        .catch(reject)
+        .catch(error => { window.clearTimeout(timeout); reject(error) })
     })
   } finally {
     database.close()
@@ -262,10 +269,16 @@ export function getReadyDriveConfigToken() { return readyDriveConfigToken }
 export function setReadyDriveConfigToken(value: string) { readyDriveConfigToken = String(value || "") }
 
 export async function queryWorkspacePermission(handle: FileSystemDirectoryHandle, mode: FileSystemPermissionMode = "readwrite") {
+  let timeout: ReturnType<typeof setTimeout> | undefined
   try {
-    return await handle.queryPermission({ mode })
+    return await Promise.race([
+      handle.queryPermission({ mode }),
+      new Promise<PermissionState>(resolve => { timeout = setTimeout(() => resolve("prompt"), 500) }),
+    ])
   } catch {
     return "prompt" as PermissionState
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
@@ -286,15 +299,13 @@ export async function ensureWorkspaceSubdirectories(rootHandle: FileSystemDirect
   )
 }
 
-export async function pickWorkspaceRootHandle() {
-  const handle = await window.showDirectoryPicker({ mode: "readwrite" })
-  const permission = await requestWorkspacePermission(handle, "readwrite")
-  if (permission !== "granted") {
-    throw new Error("Permiso denegado para la carpeta seleccionada.")
-  }
-
+export async function pickWorkspaceRootHandle(startIn?: FileSystemDirectoryHandle) {
+  // Invoke the native prompt directly in the click, before any asynchronous work.
+  // Selecting with readwrite already grants permission; do not request it twice.
+  const handle = await window.showDirectoryPicker({ mode: "readwrite", ...(startIn ? { startIn } : {}) })
   await ensureWorkspaceSubdirectories(handle)
-  await persistWorkspaceHandle(handle)
+  // A blocked browser database must not invalidate a folder the user just allowed.
+  try { await persistWorkspaceHandle(handle) } catch { cachedWorkspaceHandle = handle }
   setReadyWorkspaceHandle(handle)
   return handle
 }
