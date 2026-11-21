@@ -79,7 +79,10 @@
 .study-embedded #app .zoombar{bottom:calc(12px + env(safe-area-inset-bottom,0px));right:12px;left:auto}
 .study-embedded #app .zoombar{display:flex}
 .study-embedded #app .zoom-pill{display:none}
-@media(max-width:900px){.study-embedded #app .zoombar{bottom:calc(80px + env(safe-area-inset-bottom,0px))}}
+@media(max-width:900px){
+  .study-embedded #app .zoombar{bottom:calc(80px + env(safe-area-inset-bottom,0px))}
+  .study-embedded #app:has(.draw-bar:not(.hidden)) .zoombar{bottom:calc(136px + env(safe-area-inset-bottom,0px))}
+}
 @media(max-width:600px){
   .study-embedded #app .dock{gap:4px;height:54px}
   .study-embedded .dock .tool{width:42px;height:40px}
