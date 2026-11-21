@@ -1220,7 +1220,7 @@ export class BoardCanvas {
       const bounds = this.shapePlacementBounds();
       this.shapePlacement = null;
       this.textLayer.hideStickyGhost();
-      if (this.tool !== "shapes" || this.currentConnector || (placement.moved && !bounds)) return;
+      if (this.tool !== "shapes" || this.currentConnector || !bounds) return;
       this.textLayer.shapeAt(
         placement.start,
         this.currentShape,
