@@ -19,7 +19,6 @@ import {
   loadWorkspaceHandle,
   pickWorkspaceRootHandle,
   queryWorkspacePermission,
-  requestWorkspacePermission,
   persistServicesFile,
   removeLegacyServiceFiles,
   removeServicesFile,
@@ -70,6 +69,7 @@ const LocalWorkspaceContext = createContext<LocalWorkspaceContextValue | null>(n
 
 function WorkspaceModal({
   bootState,
+  error,
   canRecover,
   onRecover,
   onSelect,
@@ -91,8 +91,9 @@ function WorkspaceModal({
           {isUnsupported ? "Navegador no compatible" : isRecovering ? "Sin acceso a la carpeta" : "Selecciona tu carpeta"}
         </h2>
         <p className="mt-2 text-sm text-slate-600">
-          {isUnsupported ? "Abre Cursado en Chrome o Edge." : isRecovering ? "Recupera el permiso o elige otra carpeta." : "Elige d?nde guardar tus materiales."}
+          {isUnsupported ? "Abre Cursado en Chrome o Edge." : isRecovering ? "Recupera el permiso o elige otra carpeta." : "Elige la carpeta de tus materiales."}
         </p>
+        {error === "No se pudo abrir la carpeta. Intenta seleccionarla de nuevo." ? <p role="alert" className="mt-2 text-sm text-red-700">{error}</p> : null}
         <div className="mt-4 flex flex-wrap gap-2">
           {isRecovering && canRecover ? (
             <button type="button" onClick={() => void onRecover()} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white">
@@ -277,12 +278,13 @@ function ServicesPanel({ apis, drive, azure, summary, widgetSummary, servicesFil
   </Dialog>
 }
 
-async function unlockWorkspaceServices(handle: FileSystemDirectoryHandle): Promise<{ ok: boolean; missing?: boolean; error: string; migrated?: boolean }> {
-  await clearLegacyInscreenBrowserHalf()
+async function unlockWorkspaceServices(handle: FileSystemDirectoryHandle, validate = true): Promise<{ ok: boolean; missing?: boolean; error: string; migrated?: boolean }> {
+  if (validate) await clearLegacyInscreenBrowserHalf()
   const services = await loadServicesFile(handle)
   if (services) {
     setReadyInscreenConfigToken(services.inscreenToken)
     setReadyDriveConfigToken(services.driveToken)
+    if (!validate) return { ok: true, error: "" }
     const failures: string[] = []
     if (services.inscreenToken) {
       const response = await fetch("/api/inscreen/config/status", { cache: "no-store", headers: { "x-inscreen-config-token": services.inscreenToken } })
@@ -304,6 +306,9 @@ async function unlockWorkspaceServices(handle: FileSystemDirectoryHandle): Promi
     }
     return { ok: true, error: failures.join(" · ") }
   }
+
+  // Legacy service migration is an explicit Services action, not folder access.
+  if (!validate) return { ok: false, missing: true, error: "" }
 
   let inscreenToken = ""
   let driveToken = ""
@@ -461,10 +466,8 @@ export function LocalWorkspaceProvider({
 
         await ensureWorkspaceSubdirectories(storedHandle)
         if (cancelled) return
-        const unlocked = await unlockWorkspaceServices(storedHandle)
-        const services = await loadServicesFile(storedHandle)
+        const unlocked = await unlockWorkspaceServices(storedHandle, false).catch(() => ({ ok: false, error: "No se pudo leer User.Services." }))
         if (cancelled) return
-        if (services) setServicesFileMessage(`User.Services ${unlocked.error ? "cargado con observaciones" : "verificado"} · ${new Date(services.validatedAt || services.savedAt).toLocaleString()}`)
         if (!unlocked.ok || unlocked.error) setError(unlocked.error)
         if (isInscreenConfigurationSkipped()) setReadyInscreenConfigToken("")
         setReadyWorkspaceHandle(storedHandle)
@@ -589,17 +592,17 @@ export function LocalWorkspaceProvider({
     void processLocalWidgetTargetSyncQueue().then(setWidgetTargetSummary)
   }, [bootState, enabled, rootHandle])
 
-  const reselectWorkspace = async () => {
+  const reselectWorkspace = async (startIn?: FileSystemDirectoryHandle) => {
     try {
       setError("")
       setBootState("checking")
-      const handle = await pickWorkspaceRootHandle()
+      const handle = await pickWorkspaceRootHandle(startIn)
       setReadyWorkspaceHandle(null)
       setReadyInscreenConfigToken("")
       setRootHandle(handle)
       setStoredHandle(handle)
       setPermissionState("granted")
-      const unlocked = await unlockWorkspaceServices(handle)
+      const unlocked = await unlockWorkspaceServices(handle, false).catch(() => ({ ok: false, error: "No se pudo leer User.Services." }))
       if (!unlocked.ok || unlocked.error) setError(unlocked.error)
       setReadyWorkspaceHandle(handle)
       setBootState("ready")
@@ -609,47 +612,15 @@ export function LocalWorkspaceProvider({
       setReadyDriveConfigToken("")
       setRootHandle(null)
       setPermissionState("prompt")
-      setBootState(supportsWorkspacePicker() ? "prompt" : "unsupported")
-      setError(workspaceError instanceof Error ? workspaceError.message : "No se pudo seleccionar la carpeta local.")
+      setBootState(supportsWorkspacePicker() ? (storedHandle ? "recover" : "prompt") : "unsupported")
+      setError(workspaceError instanceof DOMException && workspaceError.name === "AbortError" ? "" : "No se pudo abrir la carpeta. Intenta seleccionarla de nuevo.")
     }
   }
 
   const recoverWorkspacePermission = async () => {
-    if (!storedHandle) {
-      setError("No hay una carpeta guardada para recuperar. Selecciona una carpeta.")
-      setBootState("prompt")
-      return
-    }
-
-    try {
-      setError("")
-      setBootState("checking")
-      const permission = await requestWorkspacePermission(storedHandle, "readwrite")
-      if (permission !== "granted") {
-        setReadyWorkspaceHandle(null)
-        setReadyInscreenConfigToken("")
-        setRootHandle(null)
-        setPermissionState(permission)
-        setBootState("recover")
-        setError("No se concedio permiso de lectura/escritura para la carpeta guardada.")
-        return
-      }
-
-      await ensureWorkspaceSubdirectories(storedHandle)
-      const unlocked = await unlockWorkspaceServices(storedHandle)
-      if (!unlocked.ok || unlocked.error) setError(unlocked.error)
-      if (isInscreenConfigurationSkipped()) setReadyInscreenConfigToken("")
-      setReadyWorkspaceHandle(storedHandle)
-      setRootHandle(storedHandle)
-      setPermissionState("granted")
-      setBootState("ready")
-    } catch (workspaceError) {
-      setReadyWorkspaceHandle(null)
-      setRootHandle(null)
-      setPermissionState("prompt")
-      setBootState("recover")
-      setError(workspaceError instanceof Error ? workspaceError.message : "No se pudo recuperar la carpeta local.")
-    }
+    // Re-authorize through Chrome's picker rather than a stale handle's silent
+    // requestPermission result. This call stays inside the original click.
+    await reselectWorkspace(storedHandle ?? undefined)
   }
 
   const nextConfigStep = () => {
@@ -947,7 +918,7 @@ export function LocalWorkspaceProvider({
           error={error}
           canRecover={Boolean(storedHandle)}
           onRecover={recoverWorkspacePermission}
-          onSelect={reselectWorkspace}
+          onSelect={() => reselectWorkspace()}
         />
       ) : null}
     </LocalWorkspaceContext.Provider>
