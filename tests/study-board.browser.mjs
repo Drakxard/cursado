@@ -1124,7 +1124,7 @@ test('study compact palettes and background double click keep placement direct a
   const count = (await objects()).length
   await page.mouse.dblclick(500, 200); await expect(editor).toBeFocused(); await page.keyboard.press('Escape')
   assert.equal((await objects()).length, count)
-  await page.mouse.dblclick(400, 250); await expect(editor).toBeFocused()
+  await frame.locator(`.komu-text[data-id="${text.id}"]`).dblclick(); await expect(editor).toBeFocused()
   await dock.locator('[data-tool="select"]').click()
   assert.equal((await objects()).length, count)
   await dock.locator('[data-tool="hand"]').click(); await page.mouse.dblclick(600, 200)
