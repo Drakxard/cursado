@@ -407,7 +407,9 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   diagrams.onclick = () => send('diagrams')
   const plus = document.querySelector<HTMLButtonElement>('.study-plus') || document.createElement('button'); plus.type = 'button'; plus.className = 'tool study-plus'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Agregar a la pizarra'); plus.onclick = () => send('menu')
   const dock = document.querySelector('komu-tool-dock')
-  diagrams.remove()
+  const stamp = dock?.querySelector('[data-tool="stamp"]')
+  if (stamp) stamp.before(diagrams)
+  else if (!diagrams.isConnected) dock?.append(diagrams)
   if (!plus.isConnected) dock?.append(plus)
   send('request-init')
   return dispose

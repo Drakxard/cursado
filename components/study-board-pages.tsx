@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { readWorkspaceJson, writeWorkspaceJson } from '@/lib/workspace-json'
 import { openStudyBoard, saveStudyBoard } from '@/lib/study-board-workspace'
 
-type Page = { boardId: string; name: string }
+type Page = { boardId: string; name: string; renamed?: boolean }
+const hasCustomName = (page: Page | undefined) => !!page && (page.renamed ?? !/^Page \d+(?: \(copia\))*$/.test(page.name))
 type Props = { rootHandle: FileSystemDirectoryHandle; rootId: string; boardId: string; disabled: boolean; onSelect: (page: Page) => void; onDuplicate: (action: () => Promise<void>) => void; onTheme: () => void; theme: string; onImages: (mode: string) => void }
 
 export function StudyBoardPages({ rootHandle, rootId, boardId, disabled, onSelect, onDuplicate, onTheme, theme, onImages }: Props) {
@@ -55,48 +56,42 @@ export function StudyBoardPages({ rootHandle, rootId, boardId, disabled, onSelec
     renameId.current = null
     setRenaming(null)
     const name = value.trim().slice(0, 80)
-    if (name && name !== pages.find(page => page.boardId === id)?.name) {
-      run(() => persist(pages.map(page => page.boardId === id ? { ...page, name } : page)))
+    if (name && (name !== pages.find(page => page.boardId === id)?.name || !pages.find(page => page.boardId === id)?.renamed)) {
+      run(() => persist(pages.map(page => page.boardId === id ? { ...page, name, renamed: true } : page)))
     }
   }
   const add = () => run(async () => {
-    const page = { boardId: crypto.randomUUID(), name: `Page ${pages.length + 1}` }
+    const page = { boardId: crypto.randomUUID(), name: `Page ${pages.length + 1}`, renamed: false }
     await openStudyBoard(rootHandle, page.boardId)
     await persist([...pages, page]); onSelect(page)
   })
   const duplicate = (source: Page) => onDuplicate(async () => {
     const original = await openStudyBoard(rootHandle, source.boardId)
-    const page = { boardId: crypto.randomUUID(), name: `${source.name} (copia)` }
+    const page = { boardId: crypto.randomUUID(), name: `${source.name} (copia)`, renamed: hasCustomName(source) }
     await openStudyBoard(rootHandle, page.boardId)
     await saveStudyBoard(rootHandle, page.boardId, { draft: original.record.draft, imported: original.record.imported, status: original.record.status, localPdfReferences: original.record.localPdfReferences })
     await persist([...pages, page]); onSelect(page)
   })
   return <div ref={panel} data-board-theme={theme} className="study-page-navigation absolute left-12 top-3 z-30 text-sm text-slate-800">
     <div className="study-page-toolbar">
-      <button type="button" role="switch" aria-checked={theme === 'dark'} title="Modo noche" aria-label="Modo noche" onClick={onTheme} className="study-theme-switch">
-        <span className="study-theme-thumb" />
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="study-theme-sun"><circle cx="12" cy="12" r="3.75" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="study-theme-moon"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z" /></svg>
+      <button type="button" role="switch" aria-checked={theme === 'dark'} title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'} aria-label="Modo noche" onClick={onTheme} className="study-theme-switch">
+        {theme === 'dark' ? <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="study-theme-moon"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z" /></svg> : <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="study-theme-sun"><circle cx="12" cy="12" r="3.75" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>}
       </button>
-      <button type="button" aria-expanded={open} aria-controls="study-pages-panel" disabled={disabled || busy || !pages.length} onClick={() => setOpen(value => !value)} className="study-page-trigger">
+      <button type="button" aria-label={`Páginas · ${current?.name || 'Page 1'}`} title={current?.name || 'Páginas'} aria-expanded={open} aria-controls="study-pages-panel" disabled={disabled || busy || !pages.length} onClick={() => setOpen(value => !value)} className="study-page-trigger">
         <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round"><path d="M7 5V3h14v15h-2" /><rect x="3" y="7" width="14" height="15" rx="1" /><text x="10" y="18" textAnchor="middle" fontSize="10" fontFamily="Arial, sans-serif" fill="currentColor" stroke="none">{pages.length || 1}</text></svg>
-        <span className="truncate">{current?.name || 'Page 1'}</span>
+        {hasCustomName(current) && <span className="truncate">{current!.name}</span>}
       </button>
     </div>
     <style>{`
       .study-page-toolbar { display:flex; align-items:center; gap:8px; height:44px; font-family:Arial,sans-serif; }
-      .study-theme-switch { position:relative; display:flex; align-items:center; justify-content:space-around; flex-shrink:0; width:68px; height:34px; padding:2px; border:1px solid #e2e5eb; border-radius:18px; background:#f0f2f5; color:#647084; cursor:pointer; }
+      .study-theme-switch { position:relative; display:flex; align-items:center; justify-content:center; flex-shrink:0; width:34px; height:34px; padding:6px; border:1px solid #e2e5eb; border-radius:50%; background:#f0f2f5; color:#647084; cursor:pointer; }
       .study-theme-switch svg { position:relative; z-index:1; width:19px; height:19px; }
-      .study-theme-thumb { position:absolute; left:3px; top:3px; width:26px; height:26px; border-radius:50%; background:white; box-shadow:0 1px 4px #00000016; transition:transform 160ms ease; }
-      .study-theme-switch[aria-checked="true"] .study-theme-thumb { transform:translateX(34px); }
       .study-theme-switch[aria-checked="false"] .study-theme-sun { color:#343b46; }
       .study-page-trigger { display:flex; align-items:center; gap:7px; max-width:180px; height:36px; padding:0 3px; border:0; border-radius:6px; background:transparent; color:#242424; font-size:14px; cursor:pointer; }
       .study-page-trigger:disabled { opacity:.5; cursor:default; }
       .study-page-trigger:focus-visible,.study-theme-switch:focus-visible { outline:2px solid #8b5cf6; outline-offset:3px; }
       [data-board-theme="dark"] .study-theme-switch { background:#252c37; border-color:#394252; color:#a6afbf; }
-      [data-board-theme="dark"] .study-theme-thumb { background:#424c5d; }
       [data-board-theme="dark"] .study-theme-moon,[data-board-theme="dark"] .study-page-trigger { color:#edf0f5; }
-      @media(prefers-reduced-motion:reduce) { .study-theme-thumb { transition:none; } }
 
       [data-board-theme="dark"] { color: #e5e7eb; }
       [data-board-theme="dark"] .bg-white { background-color: #191e27; border-color: #343c49; }

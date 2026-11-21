@@ -55,7 +55,7 @@
 .study-pen-art{width:32px;height:56px;filter:drop-shadow(0 2px 3px #0003);pointer-events:none}
 .study-embedded .dock .study-pen-art{height:60px;width:35px;transform:translateY(-9px);transition:transform .15s}
 .study-embedded .dock [data-tool="pen"].active .study-pen-art{transform:translateY(-13px)}
-.study-embedded .dock [data-tool="eraser"],.study-embedded .dock [data-tool="insert"],.study-embedded .study-diagrams{display:none!important}
+.study-embedded .dock [data-tool="eraser"],.study-embedded .dock [data-tool="insert"],.study-embedded .dock [data-tool="stamp"]{display:none!important}
 .study-embedded .dock .study-plus{display:grid!important;border-radius:50%;background:var(--surface-2);width:32px;height:32px;margin-left:4px;font-size:23px!important}
 .study-embedded #app .draw-bar{position:absolute;left:50%;right:auto;top:auto;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);margin:0;width:max-content;max-width:calc(100% - 24px);height:44px;max-height:none;min-height:0;overflow:visible;padding:5px 8px;border-radius:16px;box-sizing:border-box;z-index:44;box-shadow:0 2px 7px #00000018;background:var(--surface);border:1px solid var(--border);pointer-events:auto}
 .study-embedded #app .draw-bar.hidden{display:none}
@@ -93,6 +93,14 @@
   .study-embedded .draw-bar .study-ink-colors{gap:14px;border:0;padding:6px 4px}
   .study-embedded .study-ink-colors .sw{width:22px;height:22px;min-width:22px}
   .study-embedded #app:has(.draw-bar:not(.hidden)) .zoombar{bottom:calc(210px + env(safe-area-inset-bottom,0px))}
+}
+.study-embedded .dock .study-diagrams{display:grid!important}
+@media(max-width:600px){
+  .study-embedded #app .dock{gap:2px}
+  .study-embedded .dock .tool{width:36px}
+  .study-embedded .dock [data-tool="pen"]{width:44px}
+  .study-embedded .dock [data-group="insert"]{display:grid!important}
+  .study-embedded .dock [data-tool="stamp"],.study-embedded .dock [data-tool="image"]{display:none!important}
 }
 @media(prefers-reduced-motion:reduce){.study-embedded .study-pen-art{transition:none!important}}
 
