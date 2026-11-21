@@ -5,6 +5,7 @@
 // <komu-color-picker>. See docs/adr/0005.
 
 import { icon, iconFilled, lineWeightIcon } from "./icons";
+import { studyPenArt } from "./study-pen-art";
 import type { StrokeStyle } from "@komuboard/shared";
 import "./color-picker";
 import type { CoColorPicker } from "./color-picker";
@@ -54,6 +55,55 @@ export class CoDrawBar extends HTMLElement {
   #onDocPointer: ((e: PointerEvent) => void) | null = null;
   #anchor: HTMLElement | null = null;
   #wired = false;
+  #study = false;
+  #erasing = false;
+  set erasing(value: boolean) { this.#erasing = value; this.#syncBrush(); }
+  #penColors = ["#202020", "#f24822", "#ff9a3c", "#ffcd38", "#59cf70", "#3ea8ff", "#8950ff", "#ffffff"];
+  #highlightColors = ["#aaa", "#ff99f0", "#ffbb70", "#fff12b", "#a3ff47", "#75f5ee", "#ba99ff", "#ffffff"];
+
+  enableStudy(): void {
+    if (this.#study) return;
+    this.#study = true;
+    if (this.#color === '#0e1116') this.#color = this.#penColors[0]!;
+    this.querySelector('[data-brush="pen"]')!.innerHTML = studyPenArt();
+    this.querySelector('[data-brush="highlighter"]')!.innerHTML = studyPenArt(true);
+    const eraser = document.createElement('button');
+    eraser.type = 'button'; eraser.className = 'db-btn'; eraser.dataset.brush = 'eraser'; eraser.setAttribute('aria-label', t('tool.eraser'));
+    eraser.innerHTML = icon('eraser');
+    eraser.onclick = () => document.querySelector<HTMLButtonElement>('komu-tool-dock [data-tool="eraser"]')?.click();
+    this.querySelector('[data-pop="style"]')!.before(eraser);
+    const colors = document.createElement('div'); colors.className = 'study-ink-colors';
+    this.querySelector('.db-row')!.append(colors);
+    colors.addEventListener('click', event => {
+      const button = (event.target as Element).closest<HTMLElement>('[data-color]');
+      if (!button) return;
+      this.color = button.dataset.color!;
+      this.#emit({ color: this.#color });
+    });
+    this.#syncColorDot();
+    this.#emit({ color: this.#color });
+  }
+
+  #renderStudyColors(): void {
+    if (!this.#study) return;
+    const colors = this.#brush === 'pen' ? this.#penColors : this.#highlightColors;
+    const palette = this.querySelector<HTMLElement>('.study-ink-colors')!;
+    if (palette.dataset.paletteBrush !== this.#brush) {
+      palette.dataset.paletteBrush = this.#brush;
+      palette.innerHTML = colors.map(color =>
+        `<button type="button" class="sw" data-color="${color}" style="--sw:${color}" aria-label="${tColor(COLOR_NAMES[color.toUpperCase()], color)}"></button>`).join('');
+    }
+    palette.querySelectorAll<HTMLElement>('[data-color]').forEach(button => {
+      const active = button.dataset.color === this.#color;
+      button.classList.toggle('on', active); button.setAttribute('aria-pressed', String(active));
+    });
+    this.querySelector('[data-pop="color"]')?.classList.toggle('study-custom', !colors.includes(this.#color));
+    this.style.setProperty('--study-ink', this.#color);
+    const dock = document.querySelector<HTMLElement>('komu-tool-dock');
+    dock?.style.setProperty('--study-ink', this.#color);
+    const pen = dock?.querySelector('[data-tool="pen"]');
+    if (pen) pen.innerHTML = studyPenArt(this.#brush === 'highlighter');
+  }
 
   connectedCallback(): void {
     this.classList.add("draw-bar", "mini-sheet");
@@ -101,7 +151,9 @@ export class CoDrawBar extends HTMLElement {
       if (!btn) return;
       const brush = btn.getAttribute("data-brush");
       const pop = btn.getAttribute("data-pop");
+      if (brush === 'eraser') return; // its own handler selects the existing eraser tool
       if (brush) {
+        if (this.#study && this.#erasing) document.querySelector<HTMLButtonElement>('komu-tool-dock [data-tool="pen"]')?.click();
         this.#setBrush(brush as Brush);
         this.#closePop();
       } else if (pop) {
@@ -126,18 +178,25 @@ export class CoDrawBar extends HTMLElement {
     return dotted ? "dashed" : "solid";
   }
   #setBrush(b: Brush): void {
+    if (this.#study && b !== this.#brush) {
+      const previous = this.#brush === 'pen' ? this.#penColors : this.#highlightColors;
+      const index = previous.indexOf(this.#color);
+      if (index >= 0) this.#color = (b === 'pen' ? this.#penColors : this.#highlightColors)[index]!;
+    }
     this.#brush = b;
     this.#syncBrush();
-    this.#emit({ style: this.#style() });
+    this.#syncColorDot();
+    this.#emit({ style: this.#style(), ...(this.#study ? { color: this.#color } : {}) });
   }
   #syncBrush(): void {
     this.querySelectorAll<HTMLElement>("[data-brush]").forEach((b) => {
-      const on = b.getAttribute("data-brush") === this.#brush;
+      const on = b.getAttribute("data-brush") === (this.#erasing ? 'eraser' : this.#brush);
       b.classList.toggle("active", on);
       b.setAttribute("aria-pressed", String(on));
     });
   }
   #syncColorDot(): void {
+    this.#renderStudyColors();
     const dot = this.querySelector<HTMLElement>(".db-dot");
     if (dot) dot.style.background = this.#color;
   }
@@ -158,6 +217,15 @@ export class CoDrawBar extends HTMLElement {
     this.#closePop();
     this.#open = which;
     this.#anchor = anchor;
+    if (this.#study && which === 'color') {
+      this.#openPicker(anchor);
+      this.#onDocPointer = event => {
+        if (!anchor.contains(event.target as Node) && !this.#picker?.contains(event.target as Node)) this.#closePop();
+      };
+      document.addEventListener('pointerdown', this.#onDocPointer, true);
+      this.#picker?.querySelector<HTMLElement>('input,button')?.focus();
+      return;
+    }
     this.classList.add("pop-open"); // a submenu is open → suppress bar tooltips
     const pop = document.createElement("div");
     pop.className = "db-popover";
@@ -167,7 +235,7 @@ export class CoDrawBar extends HTMLElement {
     this.#pop = pop;
     this.#wirePop(which, pop);
     const r = anchor.getBoundingClientRect();
-    if (window.matchMedia(TOUCH_MEDIA).matches) {
+    if (this.#study || window.matchMedia(TOUCH_MEDIA).matches) {
       // mobile: the bar is a bottom sheet → open the popover UPWARD, centered over the button
       const w = pop.offsetWidth;
       const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));
@@ -292,7 +360,7 @@ export class CoDrawBar extends HTMLElement {
     this.#picker.value = this.#color || "#1E1E1E";
     this.#picker.classList.remove("hidden"); // un-hide first so offsetHeight/Width are measurable
     const r = anchorPop.getBoundingClientRect();
-    if (window.matchMedia(TOUCH_MEDIA).matches) {
+    if (this.#study || window.matchMedia(TOUCH_MEDIA).matches) {
       // mobile: right-align the picker with the colour popover and stack it ABOVE (not over) it,
       // so both stay visible — picker on top, then the palette, then the sheet.
       const w = this.#picker.offsetWidth || 232;

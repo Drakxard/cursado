@@ -17,7 +17,7 @@ export class ViewportGrid {
       if (this.view) this.draw(this.view);
     });
     this.observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] });
-    this.observer.observe(container, { attributes: true, attributeFilter: ['data-grid'] });
+    this.observer.observe(container, { attributes: true, attributeFilter: ['data-grid', 'data-study-grid'] });
   }
 
   draw(view: GridView): void {
@@ -36,7 +36,8 @@ export class ViewportGrid {
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = this.color; ctx.strokeStyle = this.color;
     const lod = Math.log2(1 / scale), step = Math.floor(lod);
-    const fine = 24 * scale * 2 ** step, fade = 1 - (lod - step);
+    const study = this.container.dataset.studyGrid === 'true';
+    const fine = (study ? 8 : 24) * scale * 2 ** step, fade = 1 - (lod - step);
     const lines = this.container.dataset.grid === 'lines';
     const tier = (spacing: number, alpha: number) => {
       ctx.globalAlpha = alpha;
@@ -53,7 +54,7 @@ export class ViewportGrid {
         this.tile.width = this.tile.height = size;
         const tile = this.tile.getContext('2d')!;
         tile.fillStyle = this.color!;
-        tile.beginPath(); tile.arc(size / 2, size / 2, 1.6 * size / spacing, 0, Math.PI * 2); tile.fill();
+        tile.beginPath(); tile.arc(size / 2, size / 2, (study ? .6 : 1.6) * size / spacing, 0, Math.PI * 2); tile.fill();
         const pattern = ctx.createPattern(this.tile, 'repeat');
         if (!pattern) return;
         pattern.setTransform(new DOMMatrix().translate(ox - spacing / 2, oy - spacing / 2).scale(spacing / size));

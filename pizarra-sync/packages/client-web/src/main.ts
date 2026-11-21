@@ -91,7 +91,8 @@ const storedTheme = (): Theme | null => {
 const applyTheme = (t: Theme): void => {
   document.documentElement.dataset.theme = t;
 };
-let theme: Theme = storedTheme() ?? systemTheme();
+const embeddedStudy = new URLSearchParams(location.search).has('topicBoard') && window.parent !== window;
+let theme: Theme = storedTheme() ?? (embeddedStudy ? "light" : systemTheme());
 applyTheme(theme);
 
 // --------------------------------------------------------------------------
@@ -499,7 +500,7 @@ const onPageSelection = (count: number) => {
 canvas.setSelectionListener(onPageSelection);
 // Each of these tools owns a mobile mini-sheet (draw bar / sticky palette / shape menu).
 const sheetForTool = (tool: ToolId): Element | null =>
-  tool === "pen"
+  (tool === "pen" || (embeddedStudy && tool === "eraser"))
     ? drawBarEl
     : tool === "sticky"
       ? stickyBarEl
@@ -512,6 +513,7 @@ const ALL_SHEETS = [drawBarEl, stickyBarEl, shapeMenuEl, stampWheelEl, insertShe
 // Apply a tool to the canvas + sheet visibility (does NOT touch the dock highlight).
 function applyTool(tool: ToolId): void {
   currentTool = tool;
+  if (embeddedStudy && drawBarEl) drawBarEl.erasing = tool === 'eraser';
   if (tool !== "shapes") shapePanelEl?.close(); // the shapes library only lives with its tool
   canvas.setTool(tool);
   updateSelectionBar(); // a non-select tool hides the action bar; returning to select may show it
@@ -1236,7 +1238,7 @@ syncSettings();
 
 // Follow the OS theme until the user picks one explicitly (then the stored pref wins).
 darkMedia.addEventListener("change", () => {
-  if (storedTheme()) return;
+  if (storedTheme() || embeddedStudy) return;
   theme = systemTheme();
   applyTheme(theme);
   syncSettings();

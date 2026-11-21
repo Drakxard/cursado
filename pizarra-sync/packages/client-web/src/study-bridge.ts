@@ -53,6 +53,9 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     return dispose
   }
   document.body.classList.add('study-embedded')
+  document.getElementById('board')!.dataset.studyGrid = 'true'
+  document.querySelector('komu-draw-bar')?.enableStudy()
+  document.querySelectorAll<HTMLElement>('komu-tool-dock [data-tool]').forEach(button => button.dataset.tipPos = 'top')
   document.querySelector('komu-tool-dock [data-tool="image"]')?.remove()
   let initialized = false, busy = false, report: MigrationReport | undefined, checkpointTimer: ReturnType<typeof setTimeout> | undefined
   cleanups.push(() => { if (checkpointTimer) clearTimeout(checkpointTimer) })
@@ -210,6 +213,8 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (data.type === 'study-board:saved' && Number.isInteger(data.revision)) savedRevision = Math.max(savedRevision, Math.min(revision, data.revision))
     if (data.type === 'study-board:night-images' && ['auto', 'original', 'invert'].includes(data.mode)) { document.documentElement.dataset.nightImages = data.mode; localStorage.setItem('study-night-images', data.mode) }
     if (data.type === 'study-board:toggle-theme') document.querySelector<HTMLElement>('[data-theme-toggle]')?.click()
+    if (data.type === 'study-board:history' && ['undo', 'redo', 'reset-view'].includes(data.action)) document.querySelector<HTMLButtonElement>(`#topbar [data-act="${data.action}"]`)?.click()
+    if (data.type === 'study-board:tool' && ['sticky', 'text', 'shapes', 'stamp', 'eraser'].includes(data.tool)) document.querySelector<HTMLButtonElement>(`komu-tool-dock [data-tool="${data.tool}"]`)?.click()
     if(data.type === 'study-board:pdf-published') {
       const map = objectsMap(doc).get(data.id), study = map?.get('study') as any
       if(study?.kind === 'pdf' && study.reference.materialId === data.reference?.materialId && study.reference.workspaceFileId === data.reference?.workspaceFileId) map!.set('study',{...study,reference:{...study.reference,sharedPdf:data.sharedPdf}})
@@ -401,7 +406,7 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   diagrams.onclick = () => send('diagrams')
   const plus = document.querySelector<HTMLButtonElement>('.study-plus') || document.createElement('button'); plus.type = 'button'; plus.className = 'tool study-plus'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Agregar a la pizarra'); plus.onclick = () => send('menu')
   const dock = document.querySelector('komu-tool-dock')
-  if (!diagrams.isConnected) dock?.append(diagrams)
+  diagrams.remove()
   if (!plus.isConnected) dock?.append(plus)
   send('request-init')
   return dispose
