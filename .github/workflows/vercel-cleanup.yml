@@ -1,0 +1,50 @@
+name: Conservar solo la web activa en Vercel
+
+on:
+  deployment_status:
+  schedule:
+    - cron: '15 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Solo mostrar qué se eliminaría
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-cleanup-cursado
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.repository == 'Drakxard/cursado' && (github.event_name != 'deployment_status' || github.event.deployment_status.state == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_CLEANUP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verificar protección del despliegue activo
+        run: node --test --experimental-strip-types tests/vercel-deployment-cleanup.test.mts
+      - name: Limpiar despliegues obsoletos
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        shell: bash
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo 'Falta configurar el secreto VERCEL_CLEANUP_TOKEN en este repositorio.' >&2
+            exit 1
+          fi
+          if [ "$DRY_RUN" = true ]; then
+            node scripts/prune-vercel-deployments.mjs
+          else
+            node scripts/prune-vercel-deployments.mjs --apply
+          fi
