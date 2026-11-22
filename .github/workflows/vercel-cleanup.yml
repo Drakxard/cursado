@@ -1,9 +1,9 @@
-name: Conservar solo la web activa en Vercel
+name: Conservar las webs activas del equipo en Vercel
 
 on:
   deployment_status:
   schedule:
-    - cron: '15 */6 * * *'
+    - cron: '15 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: '22'
       - name: Verificar protección del despliegue activo
-        run: node --test --experimental-strip-types tests/vercel-deployment-cleanup.test.mts tests/vercel-cleanup-route.test.mts
+        run: node --test --experimental-strip-types tests/vercel-deployment-cleanup.test.mts tests/vercel-team-cleanup.test.mts tests/vercel-cleanup-route.test.mts
       - name: Limpiar despliegues obsoletos
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}

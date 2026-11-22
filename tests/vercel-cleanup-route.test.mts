@@ -30,7 +30,9 @@ test('an authorized trigger returns only a cleanup summary, never the API creden
     assert.equal(options?.method, 'GET')
     const path = new URL(String(url)).pathname
     let data
-    if (path.startsWith('/v9/')) data = { id: projectId, accountId: teamId, targets: { production: { id: 'dpl_live', readyState: 'READY' } } }
+    if (path.startsWith('/v10/')) data = { projects: [{ id: projectId, name: 'cursado', accountId: teamId, targets: { production: { alias: ['cursado.vercel.app'] } } }], pagination: { next: null } }
+    else if (path.includes('/domains')) data = { domains: [], pagination: { next: null } }
+    else if (path.startsWith('/v9/')) data = { id: projectId, accountId: teamId, targets: { production: { id: 'dpl_live', readyState: 'READY' } } }
     else if (path.startsWith('/v4/')) data = { projectId, deploymentId: 'dpl_live' }
     else if (path.startsWith('/v13/')) data = { id: 'dpl_live', projectId, readyState: 'READY', createdAt: 100 }
     else data = { deployments: [{ uid: 'dpl_live', projectId, state: 'READY', created: 100 }], pagination: { next: null } }
@@ -41,7 +43,10 @@ test('an authorized trigger returns only a cleanup summary, never the API creden
   }))
   assert.equal(response.status, 200)
   assert.equal(response.headers.get('Cache-Control'), 'no-store')
-  assert.deepEqual(await response.json(), { active: 'dpl_live', total: 1, candidates: 0, removed: 0, dryRun: true })
+  assert.deepEqual(await response.json(), {
+    teamId, projects: [{ projectId, name: 'cursado', active: 'dpl_live', total: 1, candidates: 0, removed: 0, dryRun: true }],
+    errors: [], removed: 0, dryRun: true,
+  })
 })
 
 test('a missing Vercel credential stops an authorized cleanup without exposing environment data', async t => {

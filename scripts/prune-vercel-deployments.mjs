@@ -14,60 +14,74 @@ export function vercelRequest(token, fetcher = fetch) {
     url.searchParams.set('teamId', teamId)
     const response = await fetcher(url, { method, headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) })
     if (method === 'DELETE' && response.status === 404) return null
-    if (!response.ok) throw new Error(`Vercel HTTP ${response.status} (${method} ${url.pathname})`)
+    if (!response.ok) throw Object.assign(new Error(`Vercel HTTP ${response.status} (${method} ${url.pathname})`), { status: response.status })
     return response.status === 204 ? null : response.json()
   }
 }
 
-export async function pruneDeployments({ request, apply = false, log = console.log }) {
-  async function active() {
-    const project = await request(`/v9/projects/${projectId}`)
-    const alias = await request(`/v4/aliases/${domain}`)
-    const activeId = alias.deploymentId || alias.deployment?.id
-    if (!/^dpl_[a-zA-Z0-9]+$/.test(activeId || '')) throw new Error('Alias de producción inválido')
-    // targets.production may already point to a BUILDING deployment. The live
-    // domain remains on the previous READY release until promotion completes.
-    const production = await request(`/v13/deployments/${activeId}`)
-    if (project.id !== projectId || project.accountId !== teamId || alias.projectId !== projectId ||
-        production?.id !== activeId || production.projectId !== projectId || production?.readyState !== 'READY' ||
-        (project.targets?.production?.readyState === 'READY' && project.targets.production.id !== activeId) ||
-        !Number.isFinite(production.createdAt)) throw new Error('No se pudo confirmar el despliegue activo. No se borrará nada.')
-    return production
-  }
-  const production = await active()
-  log(`Conservar ${production.id}: https://${domain}`)
+export async function listProjectDeployments(request, selectedProjectId) {
   const deployments = new Map(), cursors = new Set()
   let cursor
   do {
-    const query = new URLSearchParams({ projectId, limit: '100' })
+    const query = new URLSearchParams({ projectId: selectedProjectId, limit: '100' })
     if (cursor) query.set('until', String(cursor))
     const page = await request(`/v7/deployments?${query}`)
     if (!Array.isArray(page.deployments)) throw new Error('Lista de despliegues inválida')
     for (const deployment of page.deployments) {
-      if (deployment.projectId !== projectId || !/^dpl_[a-zA-Z0-9]+$/.test(deployment.uid)) throw new Error('Despliegue fuera del proyecto autorizado')
+      if (deployment.projectId !== selectedProjectId || !/^dpl_[a-zA-Z0-9]+$/.test(deployment.uid)) throw new Error('Despliegue fuera del proyecto autorizado')
       deployments.set(deployment.uid, deployment)
     }
     cursor = page.pagination?.next
     if (cursor && cursors.has(cursor)) throw new Error('La paginación no avanzó')
     if (cursor) cursors.add(cursor)
   } while (cursor)
+  return [...deployments.values()]
+}
+
+export async function pruneDeployments({ request, apply = false, log = console.log, scope = { projectId, domain } }) {
+  const selectedProjectId = scope.projectId, selectedDomain = scope.domain
+  if (!/^prj_[a-zA-Z0-9]+$/.test(selectedProjectId) || !/^[a-zA-Z0-9.-]+$/.test(selectedDomain)) throw new Error('Proyecto o dominio inválido')
+  async function active() {
+    const project = await request(`/v9/projects/${selectedProjectId}`)
+    const alias = await request(`/v4/aliases/${selectedDomain}`)
+    const activeId = alias.deploymentId || alias.deployment?.id
+    if (!/^dpl_[a-zA-Z0-9]+$/.test(activeId || '')) throw new Error('Alias de producción inválido')
+    // targets.production may already point to a BUILDING deployment. The live
+    // domain remains on the previous READY release until promotion completes.
+    const production = await request(`/v13/deployments/${activeId}`)
+    if (project.id !== selectedProjectId || project.accountId !== teamId || alias.projectId !== selectedProjectId ||
+        production?.id !== activeId || production.projectId !== selectedProjectId || production?.readyState !== 'READY' ||
+        (project.targets?.production?.readyState === 'READY' && project.targets.production.id !== activeId) ||
+        !Number.isFinite(production.createdAt)) throw new Error('No se pudo confirmar el despliegue activo. No se borrará nada.')
+    for (const name of scope.domains || []) {
+      if (name === selectedDomain) continue
+      const other = await request(`/v4/aliases/${encodeURIComponent(name)}`)
+      if (other.projectId !== selectedProjectId || (other.deploymentId || other.deployment?.id) !== activeId) {
+        throw new Error('Cambió un dominio de producción; se conservaron sus despliegues')
+      }
+    }
+    return production
+  }
+  const production = await active()
+  log(`Conservar ${production.id}: https://${selectedDomain}`)
+  const deployments = await listProjectDeployments(request, selectedProjectId)
   const removed = [], candidates = []
-  for (const deployment of deployments.values()) {
+  for (const deployment of deployments) {
     const created = deployment.createdAt ?? deployment.created
     if (deployment.uid === production.id || !terminal.has(deployment.readyState || deployment.state) ||
-        !Number.isFinite(created) || (created > production.createdAt && deployment.target === 'production')) continue
+        !Number.isFinite(created) || (created > production.createdAt && deployment.target === 'production' && (deployment.readyState || deployment.state) === 'READY')) continue
     candidates.push(deployment.uid)
     if (!apply) { log(`Eliminaría ${deployment.uid}`); continue }
     // Confirm scope and production again before EACH deletion. A concurrent
     // promotion/rollback stops this run instead of deleting a newly active release.
     const detail = await request(`/v13/deployments/${deployment.uid}`)
-    if (detail.projectId !== projectId || detail.id !== deployment.uid || !terminal.has(detail.readyState)) throw new Error('El despliegue cambió; limpieza detenida')
+    if (detail.projectId !== selectedProjectId || detail.id !== deployment.uid || !terminal.has(detail.readyState)) throw new Error('El despliegue cambió; limpieza detenida')
     if ((await active()).id !== production.id) throw new Error('Cambió la producción; repetir la limpieza con el nuevo despliegue activo')
     await request(`/v13/deployments/${deployment.uid}`, 'DELETE')
     removed.push(deployment.uid)
     log(`Eliminado ${deployment.uid}`)
   }
-  const summary = { active: production.id, total: deployments.size, candidates: candidates.length, removed: removed.length, dryRun: !apply }
+  const summary = { active: production.id, total: deployments.length, candidates: candidates.length, removed: removed.length, dryRun: !apply }
   log(JSON.stringify(summary))
   return summary
 }
