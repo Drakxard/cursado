@@ -26,6 +26,7 @@ export function proxy(request: NextRequest) {
 
     if (
       (request.nextUrl.pathname === "/api/board-chat" && request.method.toUpperCase() === "POST") ||
+      (request.nextUrl.pathname === "/api/internal/vercel-cleanup" && request.method.toUpperCase() === "POST") ||
       (request.nextUrl.pathname === "/api/diagrams/plantuml" && request.method.toUpperCase() === "POST") ||
       (request.nextUrl.pathname === "/api/pdf-translate" && request.method.toUpperCase() === "POST") ||
       (request.nextUrl.pathname === "/api/pdf-explanation" && ["GET", "POST"].includes(request.method.toUpperCase())) ||

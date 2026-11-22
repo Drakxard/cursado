@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_CLEANUP_TOKEN }}
+      VERCEL_CLEANUP_TRIGGER_SECRET: ${{ secrets.VERCEL_CLEANUP_TRIGGER_SECRET }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,18 +33,23 @@ jobs:
         with:
           node-version: '22'
       - name: Verificar protección del despliegue activo
-        run: node --test --experimental-strip-types tests/vercel-deployment-cleanup.test.mts
+        run: node --test --experimental-strip-types tests/vercel-deployment-cleanup.test.mts tests/vercel-cleanup-route.test.mts
       - name: Limpiar despliegues obsoletos
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         shell: bash
         run: |
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo 'Falta configurar el secreto VERCEL_CLEANUP_TOKEN en este repositorio.' >&2
+          if [ -z "$VERCEL_CLEANUP_TRIGGER_SECRET" ]; then
+            echo 'Falta configurar la credencial del disparador de limpieza.' >&2
             exit 1
           fi
-          if [ "$DRY_RUN" = true ]; then
-            node scripts/prune-vercel-deployments.mjs
-          else
-            node scripts/prune-vercel-deployments.mjs --apply
-          fi
+          node --input-type=module <<'JS'
+          const response = await fetch('https://cursado.vercel.app/api/internal/vercel-cleanup', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${process.env.VERCEL_CLEANUP_TRIGGER_SECRET}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dryRun: process.env.DRY_RUN === 'true' }),
+            signal: AbortSignal.timeout(240_000),
+          })
+          if (!response.ok) throw new Error(`La limpieza respondió HTTP ${response.status}`)
+          console.log(JSON.stringify(await response.json()))
+          JS
