@@ -472,7 +472,7 @@ function refreshInsertActive(): void {
 const selectionBar = createSelectionBar({
   onDuplicate: () => {
     canvas.copySelection();
-    canvas.pasteSelection(); // clones with a cascade offset and selects the copies
+    canvas.pasteSelection(); // clones at the cursor and selects the copies
   },
   onRotate: () => canvas.rotateSelection(15),
   onBringFront: () => canvas.bringSelectionToFront(),
@@ -721,7 +721,7 @@ async function pasteFromClipboards(): Promise<void> {
         if (type) {
           await placeImageFiles([
             new File([await item.getType(type)], "clipboard-image", { type }),
-          ]);
+          ], canvas.pasteClientPosition());
           return;
         }
       }
@@ -755,7 +755,7 @@ window.addEventListener("paste", (e) => {
     .filter((f): f is File => !!f);
   if (files.length) {
     e.preventDefault();
-    void placeImageFiles(files);
+    void placeImageFiles(files, canvas.pasteClientPosition());
   }
 });
 

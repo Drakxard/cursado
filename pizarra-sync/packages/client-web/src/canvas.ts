@@ -237,7 +237,7 @@ export class BoardCanvas {
   /** Local copy/paste buffer (in-app, not the system clipboard): a snapshot of the objects copied
    *  with ⌘/Ctrl+C; ⌘/Ctrl+V clones them with a cascading offset. */
   private clipboard: BoardObject[] = [];
-  private pasteCount = 0; // cascade-offset multiplier for repeated paste of the same clipboard
+  private pasteCursor: { clientX: number; clientY: number } | undefined;
   /** Connector ids present in the doc — connectors paint as DOM <svg> in the text layer now (ADR-0009
    *  P3); the canvas keeps this registry only for hit-test/selection membership + iteration. */
   private readonly connectorIds = new Set<string>();
@@ -427,6 +427,12 @@ export class BoardCanvas {
     // ADR-0009 P3 Step 4: the Konva.Transformer + group proxy are retired — every object (single or
     // multi-node group) resizes/rotates via the text-layer's DOM chrome.
     this.uiLayer.add(this.highlightGroup);
+    opts.container.addEventListener('pointermove', event => {
+      this.pasteCursor = { clientX: event.clientX, clientY: event.clientY };
+    }, { capture: true, signal: this.lifetime.signal });
+    opts.container.addEventListener('pointerdown', event => {
+      this.pasteCursor = { clientX: event.clientX, clientY: event.clientY };
+    }, { capture: true, signal: this.lifetime.signal });
 
     // Camera owns the stage transform; re-sync our viewport-dependent chrome on any change.
     this.viewport = new ViewportController(
@@ -875,13 +881,15 @@ export class BoardCanvas {
           if (Math.hypot(p.x - placement.start.x, p.y - placement.start.y) > this.textLayer.tapSlop())
             placement.moved = true;
         }
-        this.textLayer.showShapeGhost(
+        const bounds = this.shapePlacementBounds();
+        if (bounds) this.textLayer.showShapeGhost(
           p,
           this.currentShape,
           this.shapeColor,
           this.currentShapeCustom ?? undefined,
-          this.shapePlacementBounds(),
+          bounds,
         );
+        else this.textLayer.hideStickyGhost();
       }
       if (this.tool === "text") {
         // I-beam over an existing text box (click to edit it); the default cursor over empty board.
@@ -1095,8 +1103,20 @@ export class BoardCanvas {
 
   private bindText(): void {
     this.bindTapPlace("text", (at, client) => this.textLayer.editOrCreate(at, false, client));
+    let backgroundClicks = 0;
+    // Capture object presses too: the browser can count an object click followed by a
+    // background click as a double-click because both share the same canvas target.
+    this.stage.container().addEventListener('mousedown', event => {
+      const target = event.target;
+      const onObject = target instanceof Element && target.closest('button,input,textarea,[contenteditable],.komu-text,.komu-image,[data-study]');
+      if (this.tool !== 'select' || event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || onObject || this.studyHitAt(event.clientX, event.clientY)) {
+        backgroundClicks = 0;
+        return;
+      }
+      backgroundClicks = event.detail === 1 ? 1 : backgroundClicks + 1;
+    }, { capture: true, signal: this.lifetime.signal });
     this.stage.on('dblclick', event => {
-      if (!this.opts.study || this.tool !== 'select') return;
+      if (!this.opts.study || this.tool !== 'select' || backgroundClicks < 2) return;
       const pointer = event.evt as MouseEvent;
       if (pointer.button !== 0 || pointer.shiftKey || pointer.ctrlKey || pointer.metaKey || pointer.altKey) return;
       const target = pointer.target;
@@ -2172,12 +2192,11 @@ export class BoardCanvas {
     const objs = this.snapshotSelection();
     if (!objs.length) return []; // nothing selected → keep whatever's already on the clipboard
     this.clipboard = objs;
-    this.pasteCount = 0;
     return objs;
   }
 
   /** Paste objects that came from the SYSTEM clipboard (another tab/room). Validates the untrusted
-   *  payload to known object types, then clones them with fresh ids + a cascading offset. Returns
+   *  payload to known object types, then clones them with fresh ids at the cursor. Returns
    *  true when a valid Komuboard payload was pasted (so the caller skips its in-memory fallback). */
   pasteExternal(objs: unknown): boolean {
     if (!Array.isArray(objs) || !objs.length) return false;
@@ -2191,14 +2210,13 @@ export class BoardCanvas {
         typeof (o as { id?: unknown }).id === "string",
     );
     if (!valid.length) return false;
-    this.pasteCount += 1;
-    this.pasteObjects(valid.map(sanitizePastedShape), 24 * this.pasteCount);
+    this.pasteAtCursor(valid.map(sanitizePastedShape));
     return true;
   }
 
   /** Clone `source` objects with fresh ids + an offset (a copied connector rebinds to its copied
    *  shapes via the id map), commit in one transaction, then select the new copies. */
-  private pasteObjects(source: BoardObject[], off: number): void {
+  private pasteObjects(source: BoardObject[], dx: number, dy = dx): void {
     const author = String(this.opts.awareness.clientID);
     // Map every copied id → its new id FIRST, so a connector copied with its shapes rebinds to the copies.
     const idMap = new Map<string, string>();
@@ -2207,7 +2225,7 @@ export class BoardCanvas {
       idMap.set(o.id, randomId(prefix));
     }
     const clones = source.map((o) =>
-      cloneObject(o, idMap.get(o.id) ?? randomId("o"), author, off, off, idMap),
+      cloneObject(o, idMap.get(o.id) ?? randomId("o"), author, dx, dy, idMap),
     );
     this.opts.doc.transact(() => {
       for (const c of clones) addObject(this.opts.doc, c);
@@ -2216,11 +2234,36 @@ export class BoardCanvas {
     this.selectPasted(clones);
   }
 
-  /** Paste the clipboard with a cascading offset so repeated paste doesn't stack. No-op when empty. */
+  private pasteAtCursor(source: BoardObject[]): void {
+    let left = Infinity, top = Infinity;
+    const include = (x: number, y: number): void => {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+    };
+    for (const object of source) {
+      if (object.type === 'stroke') {
+        for (let i = 0; i + 1 < object.points.length; i += 2) include(object.points[i]!, object.points[i + 1]!);
+      } else if (object.type === 'connector') {
+        include(object.from.x, object.from.y);
+        include(object.to.x, object.to.y);
+      } else include(object.x, object.y);
+    }
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+    const rect = this.stage.container().getBoundingClientRect();
+    const cursor = this.pasteCursor ?? { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+    const at = this.clientToWorld(cursor.clientX, cursor.clientY);
+    this.pasteObjects(source, at.x - left, at.y - top);
+  }
+
+  /** Paste at the cursor, preserving the relative positions of copied objects. */
   pasteSelection(): void {
     if (!this.clipboard.length) return;
-    this.pasteCount += 1;
-    this.pasteObjects(this.clipboard, 24 * this.pasteCount);
+    this.pasteAtCursor(this.clipboard);
+  }
+
+  pasteClientPosition(): { clientX: number; clientY: number } | undefined {
+    return this.pasteCursor ? { ...this.pasteCursor } : undefined;
   }
 
   /** Alt-drag support: duplicate the selection IN PLACE (zero offset, clipboard untouched) and select
