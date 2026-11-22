@@ -1208,34 +1208,55 @@ test('study text formatting waits for explicit editing and stays hidden after mo
   assert.deepEqual(errors, [])
 })
 
-test('study PDF background network failure keeps the reader usable and limits retries', { timeout: 60000 }, async t => {
+test('study PDF background never publishes local files or retries rejected uploads', { timeout: 60000 }, async t => {
   const { page } = await pageRegression(t, 'pdf-offline')
   let requests = 0
-  await page.context().route('**/study-pdf/**', route => { requests++; return route.abort('failed') })
+  await page.context().route('**/study-pdf/**', route => { requests++; return route.fulfill({ status: 422, body: 'Rejected' }) })
   await page.goto(origin + '/study-fixture?board=pdf-offline'); await loaded(page)
   await page.evaluate(async () => {
     const root = await navigator.storage.getDirectory()
     const dir = await (await root.getDirectoryHandle('teoria', { create: true })).getDirectoryHandle('offline', { create: true })
     const writer = await (await dir.getFileHandle('local.pdf', { create: true })).createWritable()
     await writer.write('%PDF-1.4 local'); await writer.close()
+    const local = await (await (await root.getDirectoryHandle('teoria')).getFileHandle('uno.pdf', { create: true })).createWritable()
+    await local.write('%PDF-1.4 local reader'); await local.close()
   })
-  const frame = engine(page)
-  const notify = () => frame.evaluate(() => {
+  await engine(page).evaluate(() => {
+    const transfer = new DataTransfer()
+    transfer.setData('application/x-cursado-board-pdf', JSON.stringify({ materialId: 9, subjectId: 'offline', fileName: 'Local.pdf', workspaceFileId: 'workspace://teoria/offline/local.pdf' }))
+    document.getElementById('board').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer, clientX: 600, clientY: 400 }))
+  })
+  await expect(engine(page).locator('[data-study="pdf"]').filter({ hasText: 'Local.pdf' })).toHaveCount(1)
+  const notify = () => engine(page).evaluate(() => {
     const params = new URLSearchParams(location.search)
     const reference = { materialId: 9, subjectId: 'offline', fileName: 'Local.pdf', workspaceFileId: 'workspace://teoria/offline/local.pdf' }
     const send = (type, data) => parent.postMessage({ type: 'study-board:' + type, session: params.get('session'), boardId: params.get('topicBoard'), ...data }, location.origin)
     send('publish-pdf', { reference }); send('pdfs', { pdfs: [{ id: 'local-pdf', reference }] })
   })
   await notify()
-  await expect.poll(() => requests).toBe(1)
-  // Wait for the rejected fetch to settle, then repeat the notification produced by edits.
+  // Repeat the notifications produced by edits; publication must remain disabled.
   await page.waitForTimeout(300)
   for (let i = 0; i < 3; i++) await notify()
   await page.waitForTimeout(300)
-  assert.equal(requests, 1)
+  assert.equal(requests, 0)
+  await page.reload(); await loaded(page)
+  await notify()
+  await expect(engine(page).locator('[data-study="pdf"]').filter({ hasText: 'Local.pdf' })).toHaveCount(1)
+  await page.waitForTimeout(300)
+  assert.equal(requests, 0)
   await expect(page.getByRole('button', { name: 'Cerrar aviso', exact: true })).toHaveCount(0)
-  await page.mouse.dblclick(400, 250)
-  await expect(frame.locator('.komu-text-editor[contenteditable="true"],.komu-text-editor [contenteditable="true"]')).toBeFocused()
+  await engine(page).evaluate(() => {
+    const map = [...window.__komuboard.doc.getMap('objects').values()].find(map => map.get('study')?.reference?.materialId === 1)
+    document.dispatchEvent(new CustomEvent('study-open-pdf', { detail: { id: map.get('id') } }))
+  })
+  await expect(page.getByTitle('Lector de PDF de la pizarra')).toBeVisible()
+  const reader = page.frames().find(frame => frame.url().includes('mode=reader'))
+  await expect.poll(() => reader.evaluate(() => window.reference?.workspaceFileId)).toBe('workspace://teoria/uno.pdf')
+  assert.equal(await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory()
+    return (await (await (await root.getDirectoryHandle('teoria')).getFileHandle('uno.pdf')).getFile()).text()
+  }), '%PDF-1.4 local reader')
+  assert.equal(requests, 0)
 })
 
 test('study typing keeps focus and caret across document updates', { timeout: 60000 }, async t => {

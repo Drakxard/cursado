@@ -33,8 +33,10 @@ export async function svgToPng(file: File): Promise<Blob> {
       for (const attr of Array.from(node.attributes)) {
         const name = attr.localName.toLowerCase()
         const value = attr.value.trim()
+        const embeddedImage = node.localName.toLowerCase() === 'image' &&
+          /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/]+={0,2}$/i.test(value)
         if (name.startsWith('on') || urlReferences(value) ||
-            (name === 'href' && !value.startsWith('#')) ||
+            (name === 'href' && !value.startsWith('#') && !embeddedImage) ||
             /(?:javascript:|@import|expression\s*\()/i.test(value)) {
           node.removeAttributeNode(attr)
         }

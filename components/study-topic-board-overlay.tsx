@@ -10,7 +10,6 @@ import { boardPdfReference, parseBoardLinkDrag, type BoardPdfReference, type Boa
 import { openStudyBoard, saveStudyBoard, confirmStudyMigration } from '@/lib/study-board-workspace'
 import { migrationNeedsReview, migrationErrorSummary, migrationTypeLabel, studyCard, type MigrationReport, type StudyAttachment } from '@/lib/study-board-migration'
 import { readImportantTasks, importantTaskProgress, importantCountdownStyle } from '@/lib/important-tasks'
-import { publishStudyPdf } from '@/lib/study-board-pdf'
 import { cooperationStudyRoomId } from '@/lib/client/cooperation'
 import { startVisibleTask } from '@/lib/client/visible-task'
 import { writeStudyBoardLocation } from '@/lib/study-location'
@@ -23,7 +22,6 @@ export type StudyTopicBoardProps = {
 type Destination = Pick<StudyTopicBoardProps, 'boardId' | 'name' | 'pdfReferences' | 'cooperationSubjectId' | 'cooperationWeekNumber'>
 type Pin = { id: string; reference: BoardPdfReference }
 const pdfKey = (reference: BoardPdfReference) => reference.sharedPdf?.hash || `${reference.subjectId}:${reference.materialId}:${reference.workspaceFileId}`
-const localPdfKey = (reference: BoardPdfReference) => JSON.stringify([reference.subjectId,reference.materialId,reference.workspaceFileId])
 
 export function StudyTopicBoardOverlay(props: StudyTopicBoardProps) {
   const delegate = useContext(StudyBoardNavigationContext)
@@ -102,9 +100,6 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const saveError = useRef<unknown>(null)
   const dirtyRevision = useRef(0), persistedRevision = useRef(0)
   const pendingClose = useRef<(() => void) | null>(null)
-  const publishing = useRef(new Set<string>())
-  const publicationRetry = useRef(new Map<string, number>())
-  const localPdfs = useRef(new Set<string>())
   const mounted = useRef(true)
   const live = useRef({ initial, pins, reader, readerVisible, review, attachment })
   live.current = { initial, pins, reader, readerVisible, review, attachment }
@@ -172,12 +167,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     setPins([]); setReader(null); setReaderVisible(false); setReview(null); setAttachment(null); setMenu(false)
     setImageReader(null); setDiagramEdit(null); setDiagrams(false); setReaderLoading(false); loadedReader.current = null
     live.current.initial = null
-    localPdfs.current.clear(); publishing.current.clear(); publicationRetry.current.clear()
     void cooperationStudyRoomId(cooperationSubjectId, boardId).then(roomId => openStudyBoard(rootHandle, boardId, sharedRoomId, roomId)).then(value => { if (active) {
-      for(const key of value.record.localPdfReferences || []) localPdfs.current.add(key)
-      for(const raw of [...(pdfReferences || []),...(value.snapshot?.content.shapes || []).filter((shape:any)=>shape.visualType === 'pdf-shortcut').map((shape:any)=>shape.pdfReference)]) {
-        const reference = boardPdfReference(raw); if(reference) localPdfs.current.add(localPdfKey(reference))
-      }
       live.current.initial = value; setInitial(value)
       if (frameBoardId.current && frameBoardId.current !== boardId) send('switch-page', { roomId: value.record.roomId, name })
       if (!frameBoardId.current) setFrameSrc(`/study-board/index.html?topicBoard=${encodeURIComponent(boardId)}&room=${encodeURIComponent(value.record.roomId)}&session=${session}&studyTitle=${encodeURIComponent(name)}`)
@@ -203,30 +193,6 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
         if (data.type === 'study-board:import-result' && data.requestId === diagramImport.current?.id) {
           const pending = diagramImport.current; diagramImport.current = null
           if (pending) { if (data.ok) pending.resolve(); else pending.reject(new Error(data.error || 'No se pudo insertar el diagrama.')) }
-        }
-        if(data.type === 'study-board:publish-pdf') {
-          const reference = boardPdfReference(data.reference)
-          if(reference) {
-            localPdfs.current.add(localPdfKey(reference))
-            void save(()=>saveStudyBoard(rootHandle,boardId,{localPdfReferences:[...localPdfs.current]})).catch(()=>{})
-          }
-        }
-        if (data.type === 'study-board:pdfs') {
-          const roomId = live.current.initial?.record.roomId
-          if(roomId) for(const item of data.pdfs || []) {
-            const reference = boardPdfReference(item.reference)
-            if(!reference || !localPdfs.current.has(localPdfKey(reference)) || reference.sharedPdf?.roomId === roomId || publishing.current.has(item.id) || Date.now() < (publicationRetry.current.get(item.id) || 0) || navigator.onLine === false) continue
-            publishing.current.add(item.id)
-            void publishStudyPdf(rootHandle,roomId,reference).then(sharedPdf=>{
-              if(sharedPdf && mounted.current) send('pdf-published',{id:item.id,reference,sharedPdf})
-            }).catch(reason=>{
-              publicationRetry.current.set(item.id, Date.now() + 60_000)
-              // Publication is background cooperation work. A network outage must
-              // not interrupt reading a PDF that is already on this device.
-              const networkFailure = reason instanceof TypeError && /fetch|network|load failed/i.test(reason.message)
-              if(mounted.current && !networkFailure) setError(String(reason))
-            }).finally(()=>publishing.current.delete(item.id))
-          }
         }
         if (data.type === 'study-board:request-init') initialize()
         if (data.type === 'study-board:ready') {
