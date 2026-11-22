@@ -6,6 +6,7 @@ import { resolve, relative, sep } from 'node:path'
 import { createHash } from 'node:crypto'
 import * as sass from 'sass'
 import { createRequire } from 'node:module'
+import { pruneNativeReleases } from './native-release-storage.mjs'
 
 const output = resolve(process.argv[2] || 'public/native-web')
 const stage = resolve('.cache/native-web-build')
@@ -40,4 +41,5 @@ const manifest = { version: 1, bridgeVersion: 1, revision, files }
 await mkdir(resolve(output, 'releases'), { recursive: true })
 await cp(stage, resolve(output, 'releases', revision), { recursive: true })
 await writeFile(resolve(output, 'current.json'), JSON.stringify(manifest))
+await pruneNativeReleases(output, revision)
 console.log(`Native web ${revision}: ${files.length} files (${files.reduce((sum,file) => sum + file.size,0)} bytes)`)

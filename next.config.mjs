@@ -4,6 +4,9 @@ const nextConfig = {
   outputFileTracingIncludes: {
     '/api/pdf-explanation': ['./node_modules/katex/dist/katex.min.css', './node_modules/katex/dist/fonts/*.woff2'],
   },
+  outputFileTracingExcludes: {
+    '*': ['./public/**/*', './.cache/**/*', './test-results/**/*', './pizarra-sync/**/.wrangler/**/*'],
+  },
   turbopack: {
     root: process.cwd(),
   },

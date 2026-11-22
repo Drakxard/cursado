@@ -2,5 +2,5 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "npm ci --no-audit --no-fund && npm --prefix pizarraproyecto-main ci --no-audit --no-fund",
-  "buildCommand": "npm run build"
+  "buildCommand": "npm run build && node scripts/prepare-vercel-output.mjs"
 }

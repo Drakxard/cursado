@@ -208,7 +208,7 @@ test('Study integration: review by type, retained PDF, imports, links, two-clien
   await context.route('https://notebooklm.google.com/**', route => route.fulfill({ body: 'NotebookLM' }))
   await shortcut.hover({ force: true })
   const popupPromise = page.waitForEvent('popup', {timeout:10000})
-  await engine(page).locator('.ctb-link-card').getByRole('link', { name: 'Open', exact: true }).click()
+  await shortcut.click({ force: true })
   const popup = await popupPromise
   await popup.waitForURL('https://notebooklm.google.com/notebook/semana-3')
   await popup.close()
@@ -471,7 +471,7 @@ test('dragged shortcuts use native text links and repair existing saved cards', 
   await link().hover({ force: true })
   const [popup] = await Promise.all([
     page.waitForEvent('popup'),
-    engine(page).locator('.ctb-link-card').getByRole('link', { name: 'Open', exact: true }).click(),
+    link().click({ force: true }),
   ])
   await popup.waitForURL('https://notebooklm.google.com/notebook/native-link')
 })
@@ -1174,6 +1174,88 @@ test('study compact palettes and background double click keep placement direct a
   assert.equal((await objects()).length, count)
   await dock.locator('[data-tool="hand"]').click(); await page.mouse.dblclick(600, 200)
   await expect(editor).toHaveCount(0)
+  assert.deepEqual(errors, [])
+})
+
+test('study text formatting waits for explicit editing and stays hidden after moving', { timeout: 60000 }, async t => {
+  const { page, errors } = await pageRegression(t, 'edit-toolbar')
+  await page.goto(origin + '/study-fixture?board=edit-toolbar'); await loaded(page)
+  const frame = engine(page), bar = frame.locator('.komu-text-bar')
+  await frame.evaluate(() => window.__komuboard.canvas.pasteExternal([{ id: 'toolbar-text', type: 'text', x: 350, y: 250, fontSize: 24, runs: [{ text: 'Editar con intención' }] }]))
+  const text = frame.locator('.komu-text[data-id]').filter({ hasText: 'Editar con intención' })
+  const box = await text.boundingBox()
+  await page.mouse.click(box.x + 10, box.y + 10)
+  await page.waitForTimeout(450)
+  await expect(bar).toBeHidden()
+  await page.mouse.move(box.x + 10, box.y + 10); await page.mouse.down()
+  await page.mouse.move(box.x + 100, box.y + 80, { steps: 8 }); await page.mouse.up()
+  await page.waitForTimeout(450)
+  await expect(bar).toBeHidden()
+  const moved = await text.boundingBox()
+  await page.mouse.dblclick(moved.x + 10, moved.y + 10)
+  const editor = frame.locator('.komu-text-editor[contenteditable="true"],.komu-text-editor [contenteditable="true"]')
+  await expect(editor).toBeFocused()
+  await expect(bar).toBeHidden()
+  await expect(bar).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(bar).toBeHidden()
+  // A short editing session must not leave a delayed toolbar behind.
+  await page.mouse.dblclick(moved.x + 10, moved.y + 10)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(450)
+  await expect(bar).toBeHidden()
+  await expect(frame.locator('.ctb-link-card')).toHaveCount(0)
+  assert.deepEqual(errors, [])
+})
+
+test('study PDF background network failure keeps the reader usable and limits retries', { timeout: 60000 }, async t => {
+  const { page } = await pageRegression(t, 'pdf-offline')
+  let requests = 0
+  await page.context().route('**/study-pdf/**', route => { requests++; return route.abort('failed') })
+  await page.goto(origin + '/study-fixture?board=pdf-offline'); await loaded(page)
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory()
+    const dir = await (await root.getDirectoryHandle('teoria', { create: true })).getDirectoryHandle('offline', { create: true })
+    const writer = await (await dir.getFileHandle('local.pdf', { create: true })).createWritable()
+    await writer.write('%PDF-1.4 local'); await writer.close()
+  })
+  const frame = engine(page)
+  const notify = () => frame.evaluate(() => {
+    const params = new URLSearchParams(location.search)
+    const reference = { materialId: 9, subjectId: 'offline', fileName: 'Local.pdf', workspaceFileId: 'workspace://teoria/offline/local.pdf' }
+    const send = (type, data) => parent.postMessage({ type: 'study-board:' + type, session: params.get('session'), boardId: params.get('topicBoard'), ...data }, location.origin)
+    send('publish-pdf', { reference }); send('pdfs', { pdfs: [{ id: 'local-pdf', reference }] })
+  })
+  await notify()
+  await expect.poll(() => requests).toBe(1)
+  // Wait for the rejected fetch to settle, then repeat the notification produced by edits.
+  await page.waitForTimeout(300)
+  for (let i = 0; i < 3; i++) await notify()
+  await page.waitForTimeout(300)
+  assert.equal(requests, 1)
+  await expect(page.getByRole('button', { name: 'Cerrar aviso', exact: true })).toHaveCount(0)
+  await page.mouse.dblclick(400, 250)
+  await expect(frame.locator('.komu-text-editor[contenteditable="true"],.komu-text-editor [contenteditable="true"]')).toBeFocused()
+})
+
+test('study typing keeps focus and caret across document updates', { timeout: 60000 }, async t => {
+  const { page, errors } = await pageRegression(t, 'typing-focus')
+  await page.goto(origin + '/study-fixture?board=typing-focus'); await loaded(page)
+  const frame = engine(page)
+  const editor = frame.locator('.komu-text-editor[contenteditable="true"],.komu-text-editor [contenteditable="true"]')
+  await page.mouse.dblclick(400, 250)
+  await editor.fill('Antes después')
+  await page.keyboard.press('Home')
+  await page.keyboard.press('ArrowRight')
+  for (let i = 0; i < 3; i++) {
+    await frame.evaluate(i => window.__komuboard.canvas.pasteExternal([{ id: 'background-' + i, type: 'text', x: 700, y: 300 + i * 60, fontSize: 24, runs: [{ text: 'Actualización ' + i }] }]), i)
+    await expect(editor).toBeFocused()
+    await page.keyboard.type(String(i))
+  }
+  await expect(editor).toHaveText('A012ntes después')
+  await page.keyboard.press('Control+Enter')
+  await expect(editor).toHaveCount(0)
+  await expect.poll(() => frame.evaluate(() => [...window.__komuboard.doc.getMap('objects').values()].some(m => m.get('runs')?.some(r => r.text === 'A012ntes después')))).toBe(true)
   assert.deepEqual(errors, [])
 })
 

@@ -105,12 +105,15 @@ export function BoardLibraryClient({authSession}:{authSession:AuthSession}) {
     if(!reader || !initialized || !reference || (isLocalStorageMode() && !root)) return
     let current = true
     const controller = new AbortController()
-    setResolved(false)
+    setResolved(false); setError(''); setDownload(null)
     void (async()=>{
       if(isLocalStorageMode()) {
         setReadyWorkspaceHandle(root!)
         const material = await getLocalMaterialById(reference.materialId, reference.subjectId)
-        if(!material || material.subject_id!==reference.subjectId || material.drive_file_id!==reference.workspaceFileId || !material.drive_file_id || !await readFile(root!,material.drive_file_id.slice(12))) {
+        const localFile = reference.workspaceFileId && await readFile(root!,reference.workspaceFileId.slice(12))
+        if(localFile && (!material || material.subject_id!==reference.subjectId || material.drive_file_id!==reference.workspaceFileId)) {
+          if(current) setMaterial({id:reference.materialId,subjectId:reference.subjectId,subjectName:getSubjectById(reference.subjectId)?.name || reference.subjectId,sessionDate:'',weekNumber:1,weekdayIndex:0,materialType:'theory',fileName:reference.fileName,workspaceFileId:reference.workspaceFileId!,sourceRevision:`${reference.workspaceFileId}:${localFile.lastModified}:${localFile.size}`})
+        } else if(!localFile || !material) {
           const workspaceFileId = await downloadStudyPdf(root!,reference,value=>{if(current)setDownload(value)},controller.signal)
           if(current) setMaterial({id:parseInt(reference.sharedPdf!.hash.slice(0,12),16) || 1,subjectId:`shared-board:${reference.sharedPdf!.roomId}`,subjectName:'Pizarras compartidas',sessionDate:'',weekNumber:1,weekdayIndex:0,materialType:'theory',fileName:reference.fileName,workspaceFileId,sourceRevision:reference.sharedPdf!.hash})
         } else if(current) setMaterial({

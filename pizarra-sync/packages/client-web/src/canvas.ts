@@ -458,6 +458,7 @@ export class BoardCanvas {
       doc: opts.doc,
       awareness: opts.awareness,
       camera: () => ({ scale: this.stage.scaleX(), x: this.stage.x(), y: this.stage.y() }),
+      canOpenLink: () => this.tool === 'select',
       onCameraSettled: () => {
         this.renderSelectionBoxes();
         this.renderRemoteSelections(true);

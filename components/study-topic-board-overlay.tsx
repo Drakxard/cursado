@@ -103,6 +103,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   const dirtyRevision = useRef(0), persistedRevision = useRef(0)
   const pendingClose = useRef<(() => void) | null>(null)
   const publishing = useRef(new Set<string>())
+  const publicationRetry = useRef(new Map<string, number>())
   const localPdfs = useRef(new Set<string>())
   const mounted = useRef(true)
   const live = useRef({ initial, pins, reader, readerVisible, review, attachment })
@@ -171,7 +172,7 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
     setPins([]); setReader(null); setReaderVisible(false); setReview(null); setAttachment(null); setMenu(false)
     setImageReader(null); setDiagramEdit(null); setDiagrams(false); setReaderLoading(false); loadedReader.current = null
     live.current.initial = null
-    localPdfs.current.clear(); publishing.current.clear()
+    localPdfs.current.clear(); publishing.current.clear(); publicationRetry.current.clear()
     void cooperationStudyRoomId(cooperationSubjectId, boardId).then(roomId => openStudyBoard(rootHandle, boardId, sharedRoomId, roomId)).then(value => { if (active) {
       for(const key of value.record.localPdfReferences || []) localPdfs.current.add(key)
       for(const raw of [...(pdfReferences || []),...(value.snapshot?.content.shapes || []).filter((shape:any)=>shape.visualType === 'pdf-shortcut').map((shape:any)=>shape.pdfReference)]) {
@@ -214,11 +215,17 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
           const roomId = live.current.initial?.record.roomId
           if(roomId) for(const item of data.pdfs || []) {
             const reference = boardPdfReference(item.reference)
-            if(!reference || !localPdfs.current.has(localPdfKey(reference)) || reference.sharedPdf?.roomId === roomId || publishing.current.has(item.id)) continue
+            if(!reference || !localPdfs.current.has(localPdfKey(reference)) || reference.sharedPdf?.roomId === roomId || publishing.current.has(item.id) || Date.now() < (publicationRetry.current.get(item.id) || 0) || navigator.onLine === false) continue
             publishing.current.add(item.id)
             void publishStudyPdf(rootHandle,roomId,reference).then(sharedPdf=>{
               if(sharedPdf && mounted.current) send('pdf-published',{id:item.id,reference,sharedPdf})
-            }).catch(reason=>{if(mounted.current)setError(String(reason))}).finally(()=>publishing.current.delete(item.id))
+            }).catch(reason=>{
+              publicationRetry.current.set(item.id, Date.now() + 60_000)
+              // Publication is background cooperation work. A network outage must
+              // not interrupt reading a PDF that is already on this device.
+              const networkFailure = reason instanceof TypeError && /fetch|network|load failed/i.test(reason.message)
+              if(mounted.current && !networkFailure) setError(String(reason))
+            }).finally(()=>publishing.current.delete(item.id))
           }
         }
         if (data.type === 'study-board:request-init') initialize()

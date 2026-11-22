@@ -61,7 +61,6 @@ import {
   type TextRun,
 } from "@komuboard/shared";
 import {
-  allRunsHaveMark,
   type BoolMark,
   colorToHex,
   elementToRuns,
@@ -99,6 +98,7 @@ export interface TextLayerOptions {
   awareness: Awareness;
   /** Reads the live camera each layout (kept a callback so the canvas stays the single owner). */
   camera: () => Camera;
+  canOpenLink?: () => boolean;
   /** Notified whenever the text selection changes (lets the canvas fold it into its count). */
   onSelectionChange?: () => void;
   /** Notified after an editor commits (writes/deletes the box) — lets the canvas revert the tool.
@@ -356,9 +356,9 @@ export class TextLayer {
     this.renderRemoteEdits();
     this.renderRemoteSelDrag();
   };
-  /** The floating rich-text toolbar (created once; shown while editing OR while a single box is
-   *  selected — in the latter "selection mode" its controls apply to the whole box via the doc). */
+  /** The floating rich-text toolbar is shown only during an explicit edit. */
   private readonly bar: TextBar;
+  private barTimer = 0;
   /** The box the toolbar is showing for in selection mode (no active editor), or null. */
   private barSelId: string | null = null;
   /** Reflect the toolbar's active states whenever the editor selection changes. */
@@ -478,9 +478,7 @@ export class TextLayer {
   /** Stamps stuck to a host being rotated/resized — they glide live (committed by transformAttachedStamps). */
   private transformAttached = new Set<string>();
   /** Hover card (Open / Edit) shown when the pointer is over a link — committed box or editor. */
-  private linkCard: HTMLDivElement | null = null;
-  private linkCardFor: HTMLAnchorElement | null = null;
-  private cardHideTimer = 0;
+  private linkPress: { pointer: number; x: number; y: number; href: string; moved: boolean } | null = null;
   /** Translucent sticky-note placement preview that tracks the cursor while the sticky tool is on. */
   private stickyGhost: HTMLElement | null = null;
   /** Translucent stamp placement preview — a DOM `.komu-stamp` in the overlay so it stacks ABOVE
@@ -493,9 +491,11 @@ export class TextLayer {
     this.root.className = "text-layer";
     opts.container.appendChild(this.root);
     opts.container.addEventListener('pointerdown', this.finishCameraMotion, true);
-    // Links are pointer-events:none (a click must reach the canvas to select/drag the box), so link
-    // hover is detected by hit-testing pointer moves over the board rather than mouseover on the link.
-    opts.container.addEventListener("pointermove", this.onHoverMove, true);
+    // Links share the canvas hit surface, so distinguish a click from a drag.
+    opts.container.addEventListener('pointerdown', this.onLinkDown, true);
+    window.addEventListener('pointermove', this.onLinkMove, true);
+    window.addEventListener('pointerup', this.onLinkUp, true);
+    window.addEventListener('pointercancel', this.onLinkUp, true);
     this.observer = (events): void => {
       this.invalidate(events);
       this.render();
@@ -598,10 +598,10 @@ export class TextLayer {
       this.inkLockBadges.delete(id);
     }
     this.reorderZ();
-    if (this.linkCardFor && !this.linkCardFor.isConnected) this.removeLinkCard(); // repaint detached it
     this.updateDisplayVisibility();
     this.refreshSelectionChrome();
-    if (this.edit) this.root.appendChild(this.edit.el); // keep the editor on top of the re-stacked boxes
+    // reorderZ inserts committed boxes before the editor. Moving the editor itself
+    // would blur its contenteditable and commit an in-progress typing session.
     if (this.stickyGhost) this.root.appendChild(this.stickyGhost); // …and the placement ghost above all
     if (this.stampGhost) this.root.appendChild(this.stampGhost); // stamp preview stays above objects too
     this.renderedCamera = { ...this.opts.camera() };
@@ -2151,8 +2151,13 @@ export class TextLayer {
     else this.caretToEnd(editable);
     document.execCommand("styleWithCSS", false, "true"); // marks emit inline-style spans (serialisable)
     this.barSelId = null; // editing takes over the bar from any selection-mode display
-    this.bar.show(editable, this.barState());
-    this.positionBar();
+    clearTimeout(this.barTimer);
+    this.barTimer = window.setTimeout(() => {
+      this.barTimer = 0;
+      if (this.edit?.editable !== editable) return;
+      this.bar.show(editable, this.barState());
+      this.positionBar();
+    }, 400);
     document.addEventListener("selectionchange", this.onSelChange);
     this.broadcastEdit(); // announce the session so peers hide the stale copy / show it live
   }
@@ -2200,14 +2205,26 @@ export class TextLayer {
     sel.addRange(range);
   }
 
-  // ---- link hover card (Open / Edit) — works on committed boxes and the active editor ----
-  // Links don't receive pointer events (a click must reach the canvas to select/drag the box), so
-  // hover is detected by hit-testing pointer moves against the rendered links, not link mouseover.
-  private readonly onHoverMove = (e: PointerEvent): void => {
-    if (e.pointerType === "touch") return; // hover is a mouse/pen affordance
-    const link = this.linkAtPoint(e.clientX, e.clientY);
-    if (link) this.showLinkCard(link);
-    else if (this.linkCardFor) this.scheduleCardHide();
+  // ---- direct link clicks; moving a linked box never opens its destination ----
+  private readonly onLinkDown = (event: PointerEvent): void => {
+    this.linkPress = null;
+    if (this.edit || event.button !== 0 || !event.isPrimary || this.opts.canOpenLink?.() === false) return;
+    const link = this.linkAtPoint(event.clientX, event.clientY);
+    // Embedded PDFs have their own local-reader gesture in study-bridge.
+    if (link?.closest('[data-study="pdf"]') && document.body.classList.contains('study-embedded')) return;
+    const href = link && safeHref(link.getAttribute('href') || '');
+    if (href) this.linkPress = { pointer: event.pointerId, x: event.clientX, y: event.clientY, href, moved: false };
+  };
+  private readonly onLinkMove = (event: PointerEvent): void => {
+    const press = this.linkPress;
+    if (press?.pointer === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) press.moved = true;
+  };
+  private readonly onLinkUp = (event: PointerEvent): void => {
+    const press = this.linkPress;
+    if (!press || press.pointer !== event.pointerId) return;
+    this.linkPress = null;
+    if (press.moved || event.type === 'pointercancel' || this.edit || this.opts.canOpenLink?.() === false || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
+    window.open(press.href, '_blank', 'noopener,noreferrer');
   };
   /** The rendered link under a screen point (per-line rects), or null. */
   private linkAtPoint(x: number, y: number): HTMLAnchorElement | null {
@@ -2236,87 +2253,6 @@ export class TextLayer {
   editStudyPdf(id: string): void {
     if ((this.objects.get(id)?.get('study') as TextObject['study'])?.kind === 'pdf') this.beginEdit(id, true);
   }
-  private cancelCardHide(): void {
-    clearTimeout(this.cardHideTimer);
-    this.cardHideTimer = 0;
-  }
-  private scheduleCardHide(): void {
-    if (this.cardHideTimer) return; // a hide is already pending — don't keep pushing it back
-    this.cardHideTimer = window.setTimeout(() => {
-      this.cardHideTimer = 0;
-      this.removeLinkCard();
-    }, 180);
-  }
-  private removeLinkCard(): void {
-    this.cancelCardHide();
-    this.linkCard?.remove();
-    this.linkCard = null;
-    this.linkCardFor = null;
-  }
-  /** Show the Open/Edit card centred under a hovered link (no "create" preview — existing links). */
-  private showLinkCard(link: HTMLAnchorElement): void {
-    this.cancelCardHide();
-    if (this.linkCardFor === link && this.linkCard) return; // already showing for this link
-    this.removeLinkCard();
-    const href = link.getAttribute("href") ?? "";
-    const card = document.createElement("div");
-    card.className = "ctb-link-card";
-    card.addEventListener("mousedown", (e) => e.preventDefault()); // don't blur/commit the editor
-    card.addEventListener("mouseenter", () => this.cancelCardHide());
-    card.addEventListener("mouseleave", () => this.scheduleCardHide());
-    const urlText = document.createElement("span");
-    urlText.className = "ctb-link-card-url";
-    urlText.textContent = href;
-    const sep = document.createElement("span");
-    sep.className = "ctb-link-card-sep";
-    const open = document.createElement("a");
-    open.className = "ctb-link-card-btn";
-    open.textContent = "Open";
-    open.href = safeHref(href) || "#";
-    open.target = "_blank";
-    open.rel = "noopener noreferrer";
-    open.addEventListener("click", event => {
-      const element = link.closest<HTMLElement>('[data-study="pdf"][data-id]');
-      if (element) {
-        event.preventDefault();
-        document.dispatchEvent(new CustomEvent('study-open-pdf', { detail: { id: element.dataset.id } }));
-      }
-      this.removeLinkCard();
-    });
-    const edit = document.createElement("button");
-    edit.className = "ctb-link-card-btn";
-    edit.textContent = "Edit";
-    edit.addEventListener("click", () => {
-      this.removeLinkCard();
-      this.editLink(link);
-    });
-    card.append(urlText, sep, open, edit);
-    document.body.appendChild(card);
-    const lr = link.getBoundingClientRect();
-    const cw = card.offsetWidth || 220;
-    // centre the card under the link, clamped to the viewport
-    const left = lr.left + lr.width / 2 - cw / 2;
-    card.style.left = `${Math.max(8, Math.min(left, window.innerWidth - cw - 8))}px`;
-    card.style.top = `${lr.bottom + 6}px`;
-    this.linkCard = card;
-    this.linkCardFor = link;
-  }
-  /** Edit a hovered link's URL — if it's only a committed box, begin editing it first. */
-  private editLink(link: HTMLAnchorElement): void {
-    if (this.edit && this.edit.el.contains(link)) {
-      this.bar.editLink(link);
-      return;
-    }
-    const host = link.closest(".komu-text") as HTMLElement | null;
-    const id = host?.dataset.id;
-    if (!id) return;
-    const href = link.getAttribute("href") ?? "";
-    this.beginEdit(id);
-    const links = [...(this.edit?.el.querySelectorAll("a") ?? [])];
-    const match = links.find((a) => a.getAttribute("href") === href) ?? links[0];
-    if (match) this.bar.editLink(match);
-  }
-
   // ---- toolbar (the floating <komu-text-bar> above the active editor) ----
 
   /** Apply a block-level change (font / size / alignment), re-lay-out + reposition + broadcast. */
@@ -2460,61 +2396,13 @@ export class TextLayer {
     this.bar.reflect(this.barState());
   }
 
-  /** Show/hide the toolbar in *selection mode* — when exactly one committed box is selected and we
-   *  aren't editing/moving/resizing, the bar floats over it and its controls apply to the whole box. */
+  /** Selecting and moving a box does not enter text editing. */
   private updateSelectionBar(): void {
-    if (this.edit) return; // an open editor owns the bar
-    const ids = [...this.selected];
-    const id = ids.length === 1 ? ids[0]! : null;
-    const obj = id ? this.boxObj(id) : null;
-    const show =
-      !!obj &&
-      !this.moveState &&
-      !this.resizing &&
-      !this.groupSelected && // in a multi-node group the box has no individual toolbar
-      id != null &&
-      !this.remoteEditIds.has(id);
-    if (!show) {
-      if (this.barSelId !== null) {
-        this.barSelId = null;
-        this.bar.hide();
-      }
-      return;
-    }
-    this.barSelId = id;
-    this.bar.showForSelection(this.barStateForObject(obj));
-    this.positionBar();
+    if (this.edit) return;
+    this.barSelId = null;
+    this.bar.hide();
   }
 
-  /** Toolbar state derived from a committed box (selection mode) rather than the editor's selection. */
-  private barStateForObject(obj: TextObject): TextBarState {
-    const colors = new Set(obj.runs.filter((r) => r.text).map((r) => r.color ?? ""));
-    const highlights = new Set(
-      obj.runs.filter((r) => r.text).map((r) => safeColor(r.highlight ?? "")),
-    );
-    const state: TextBarState = {
-      bold: allRunsHaveMark(obj.runs, "bold"),
-      italic: allRunsHaveMark(obj.runs, "italic"),
-      underline: allRunsHaveMark(obj.runs, "underline"),
-      strike: allRunsHaveMark(obj.runs, "strike"),
-      bullet: runsAreBulleted(obj.runs),
-      fontFamily: obj.fontFamily,
-      fontSize: obj.fontSize,
-      color: (colors.size === 1 ? [...colors][0] : "") || INK,
-      highlight: highlights.size === 1 ? ([...highlights][0] ?? "") : "",
-    };
-    if (obj.shape != null) {
-      state.shape = obj.shape;
-      state.fill = obj.bg ?? "#ffffff";
-      state.borderColor = obj.borderColor ?? SHAPE_STROKE;
-      state.borderStyle = obj.borderStyle ?? "solid";
-      state.align = obj.align;
-    } else if (obj.bg != null) {
-      state.sticky = true; // a note: the bar offers its paper colour (and nothing else shape-ish)
-      state.fill = obj.bg;
-    }
-    return state;
-  }
   private barState(): TextBarState {
     const e = this.edit;
     const state: TextBarState = {
@@ -4681,6 +4569,8 @@ export class TextLayer {
 
   /** Serialize the editor to runs and write it back to the doc (or discard/delete if empty). */
   commit(keepTool = false, cancelTool = false): void {
+    clearTimeout(this.barTimer);
+    this.barTimer = 0;
     const e = this.edit;
     if (!e) return;
     this.edit = null;
@@ -4779,8 +4669,10 @@ export class TextLayer {
     this.remoteEditSignatures.clear();
     this.remoteGeom.clear();
     this.bar.destroy();
-    this.removeLinkCard();
-    this.opts.container.removeEventListener("pointermove", this.onHoverMove, true);
+    this.opts.container.removeEventListener('pointerdown', this.onLinkDown, true);
+    window.removeEventListener('pointermove', this.onLinkMove, true);
+    window.removeEventListener('pointerup', this.onLinkUp, true);
+    window.removeEventListener('pointercancel', this.onLinkUp, true);
     this.opts.container.removeEventListener('pointerdown', this.finishCameraMotion, true);
     document.removeEventListener("selectionchange", this.onSelChange);
     this.root.remove();
