@@ -47,7 +47,7 @@ import {
   type StrokeObject,
   type StrokeStyle,
 } from "@komuboard/shared";
-import { toCanvas } from "html-to-image";
+import { toCanvas, toSvg } from "html-to-image";
 import { ViewportController } from "./viewport";
 import { CONNECTOR_DOT_GAP, TextLayer } from "./text-layer";
 import { ConnectorBar } from "./connector-bar";
@@ -740,6 +740,22 @@ export class BoardCanvas {
   async exportCanvas(
     opts: { selectionOnly?: boolean; background?: "solid" | "transparent" | "grid" } = {},
   ): Promise<HTMLCanvasElement | null> {
+    const result = await this.captureExport(opts);
+    return result instanceof HTMLCanvasElement ? result : null;
+  }
+
+  /** Self-contained SVG with embedded fonts and images, cropped to the selected world bounds. */
+  async exportSvg(
+    opts: { selectionOnly?: boolean; background?: "solid" | "transparent" | "grid" } = {},
+  ): Promise<Blob | null> {
+    const result = await this.captureExport({ ...opts, svg: true });
+    return result instanceof Blob ? result : null;
+  }
+
+  private async captureExport(
+    opts: { selectionOnly?: boolean; background?: "solid" | "transparent" | "grid"; svg?: boolean },
+  ): Promise<HTMLCanvasElement | Blob | null> {
+    const selected = opts.selectionOnly ? new Set(this.selectionIds()) : null;
     const region = opts.selectionOnly ? this.selectionUnionRect() : this.contentBounds();
     if (!region || region.width <= 0 || region.height <= 0) return null;
     // Breathing room around the content — ~5% of the longer side (min 32px world), so the margin looks
@@ -765,10 +781,16 @@ export class BoardCanvas {
       x: (sw - box.width * scale) / 2 - box.x * scale,
       y: (sh - box.height * scale) / 2 - box.y * scale,
     };
-    this.viewport.applyTransform(scale, pos);
-    this.textLayer.setExportMode(true);
-    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    const selectionChrome: Element[] = [];
     try {
+      this.viewport.applyTransform(scale, pos);
+      this.textLayer.setExportMode(true);
+      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      for (const child of this.textLayer.node.children) {
+        if (!child.classList.contains("selected")) continue;
+        selectionChrome.push(child);
+        child.classList.remove("selected");
+      }
       const bg = opts.background ?? "solid";
       const surface =
         getComputedStyle(document.documentElement).getPropertyValue("--surface").trim() ||
@@ -778,7 +800,27 @@ export class BoardCanvas {
       const node = bg === "grid" ? this.opts.container : this.textLayer.node;
       const backgroundColor = bg === "transparent" ? undefined : surface;
       const PIXEL = 2; // crisp on hi-dpi + when zoomed in on the exported file
-      const full = await toCanvas(node, { pixelRatio: PIXEL, backgroundColor });
+      // Filter whole object subtrees, not merely the crop: unselected overlapping objects must
+      // never leak into a selection export. Selection handles, editors and peer chrome stay out.
+      const filter = (child: HTMLElement) => {
+        if (child.parentNode !== this.textLayer.node) return true;
+        const id = child.dataset?.id;
+        return !!id && (!selected || selected.has(id)) &&
+          !child.matches(".komu-text-editor,.komu-text-remote,.komu-text-ghost") &&
+          (child.classList.contains("komu-text") || child.classList.contains("komu-stamp") ||
+           child.classList.contains("komu-image") || child.tagName.toLowerCase() === "svg");
+      };
+      if (opts.svg) {
+        const url = await toSvg(node, { backgroundColor, filter });
+        const source = await (await fetch(url)).text();
+        const doc = new DOMParser().parseFromString(source, "image/svg+xml");
+        const svg = doc.documentElement;
+        svg.setAttribute("viewBox", `${box.x * scale + pos.x} ${box.y * scale + pos.y} ${box.width * scale} ${box.height * scale}`);
+        svg.setAttribute("width", String(box.width));
+        svg.setAttribute("height", String(box.height));
+        return new Blob([new XMLSerializer().serializeToString(svg)], { type: "image/svg+xml;charset=utf-8" });
+      }
+      const full = await toCanvas(node, { pixelRatio: PIXEL, backgroundColor, filter });
       // Crop to the framed box's on-screen rect (scaled by the pixel ratio).
       const sx = Math.round((box.x * scale + pos.x) * PIXEL);
       const sy = Math.round((box.y * scale + pos.y) * PIXEL);
@@ -790,6 +832,7 @@ export class BoardCanvas {
       crop.getContext("2d")?.drawImage(full, sx, sy, cw, ch, 0, 0, cw, ch);
       return crop;
     } finally {
+      for (const child of selectionChrome) child.classList.add("selected");
       this.textLayer.setExportMode(false);
       this.viewport.applyTransform(cam.scale, { x: cam.x, y: cam.y });
     }

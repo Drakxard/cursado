@@ -319,6 +319,8 @@ const contextMenu = createContextMenu({
     canvas.deleteSelection();
   },
   copy: () => copyToClipboards(),
+  exportSvg: () => void runExport("svg", "transparent", true),
+  exportPdf: () => void runExport("pdf", "solid", true),
   downloadImage: () => {
     const src = canvas.selectionMeta().imageSrc;
     if (!src) return;
@@ -1338,7 +1340,7 @@ function downloadBlob(blob: Blob, name: string): void {
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-async function runExport(format: ExportFormat, background: ExportBackground): Promise<void> {
+async function runExport(format: ExportFormat | "svg", background: ExportBackground, selectionOnly = false): Promise<void> {
   if (exporting) return; // ignore re-entrancy while a capture is in flight
   exporting = true;
   const scrim = document.createElement("div");
@@ -1346,12 +1348,19 @@ async function runExport(format: ExportFormat, background: ExportBackground): Pr
   scrim.textContent = tr("status.exporting");
   document.body.appendChild(scrim);
   try {
-    const cv = await canvas.exportCanvas({ background });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const filename = `komuboard-${selectionOnly ? "seleccion-" : ""}${stamp}`;
+    if (format === "svg") {
+      const blob = await canvas.exportSvg({ selectionOnly, background });
+      if (blob) downloadBlob(blob, `${filename}.svg`);
+      else showToast(tr("toast.nothingToExport"));
+      return;
+    }
+    const cv = await canvas.exportCanvas({ background, selectionOnly });
     if (!cv) {
       showToast(tr("toast.nothingToExport"));
       return;
     }
-    const stamp = new Date().toISOString().slice(0, 10);
     if (format === "pdf") {
       const { jsPDF } = await import("jspdf"); // lazy — keep the PDF lib out of the main bundle
       const w = cv.width;
@@ -1362,14 +1371,14 @@ async function runExport(format: ExportFormat, background: ExportBackground): Pr
         format: [w, h],
       });
       pdf.addImage(cv.toDataURL("image/png"), "PNG", 0, 0, w, h);
-      pdf.save(`komuboard-${stamp}.pdf`);
+      pdf.save(`${filename}.pdf`);
     } else {
       const blob = await new Promise<Blob | null>((res) => cv.toBlob(res, "image/png"));
       if (!blob) {
         showToast(tr("toast.exportFailed"));
         return;
       }
-      downloadBlob(blob, `komuboard-${stamp}.png`);
+      downloadBlob(blob, `${filename}.png`);
     }
   } catch {
     showToast(tr("toast.exportFailed"));

@@ -231,6 +231,8 @@ const dict: Record<string, string> = {
   "menu.cut": "Cortar",
   "menu.copy": "Copiar",
   "menu.downloadImage": "Descargar imagen",
+  "menu.exportSvg": "Exportar SVG",
+  "menu.exportPdf": "Exportar PDF",
   "toast.imageDownloadFailed": "No se pudo descargar la imagen. Intentá de nuevo.",
   "menu.paste": "Pegar",
   "menu.selectAll": "Seleccionar todo",

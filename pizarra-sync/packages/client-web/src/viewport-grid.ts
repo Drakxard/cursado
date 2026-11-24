@@ -35,9 +35,12 @@ export class ViewportGrid {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = this.color; ctx.strokeStyle = this.color;
-    const lod = Math.log2(1 / scale), step = Math.floor(lod);
+    // Keep the same world grid when zooming in. Only decimate when zooming out,
+    // otherwise every zoom octave looked identical and gave no sense of depth.
+    const lod = Math.max(0, Math.log2(1 / scale)), step = Math.floor(lod);
     const study = this.container.dataset.studyGrid === 'true';
-    const fine = (study ? 8 : 24) * scale * 2 ** step, fade = 1 - (lod - step);
+    // At the 500% cap the study grid has 64px spacing and 8px dots, like FigJam.
+    const fine = (study ? 12.8 : 24) * scale * 2 ** step, fade = 1 - (lod - step);
     const lines = this.container.dataset.grid === 'lines';
     const tier = (spacing: number, alpha: number) => {
       ctx.globalAlpha = alpha;
@@ -54,7 +57,8 @@ export class ViewportGrid {
         this.tile.width = this.tile.height = size;
         const tile = this.tile.getContext('2d')!;
         tile.fillStyle = this.color!;
-        tile.beginPath(); tile.arc(size / 2, size / 2, (study ? .6 : 1.6) * size / spacing, 0, Math.PI * 2); tile.fill();
+        const radius = (study ? .8 : 1.6) * Math.max(1, scale);
+        tile.beginPath(); tile.arc(size / 2, size / 2, radius * size / spacing, 0, Math.PI * 2); tile.fill();
         const pattern = ctx.createPattern(this.tile, 'repeat');
         if (!pattern) return;
         pattern.setTransform(new DOMMatrix().translate(ox - spacing / 2, oy - spacing / 2).scale(spacing / size));

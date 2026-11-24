@@ -11,6 +11,8 @@ export interface ContextMenuActions {
   paste(): void;
   duplicate(): void;
   downloadImage(): void;
+  exportSvg(): void;
+  exportPdf(): void;
   remove(): void;
   bringToFront(): void;
   sendToBack(): void;
@@ -87,6 +89,10 @@ export function createContextMenu(actions: ContextMenuActions): ContextMenu {
               },
               { label: "Duplicate", key: "common.duplicate", act: "duplicate" },
               ...(meta.imageSrc ? [{ label: "Download image", key: "menu.downloadImage", act: "downloadImage" } satisfies Item] : []),
+            ],
+            [
+              { label: "Export SVG", key: "menu.exportSvg", act: "exportSvg" },
+              { label: "Export PDF", key: "menu.exportPdf", act: "exportPdf" },
             ],
             [
               {

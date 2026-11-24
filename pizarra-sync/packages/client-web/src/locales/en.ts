@@ -233,6 +233,8 @@ const dict: Record<string, string> = {
   "menu.cut": "Cut",
   "menu.copy": "Copy",
   "menu.downloadImage": "Download image",
+  "menu.exportSvg": "Export SVG",
+  "menu.exportPdf": "Export PDF",
   "toast.imageDownloadFailed": "Could not download the image. Please try again.",
   "menu.paste": "Paste",
   "menu.selectAll": "Select all",
