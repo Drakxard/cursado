@@ -4574,3 +4574,43 @@ input[type="range"] {
 }
 
 :root[data-theme="dark"] .komu-text-editor:not(.sticky):not(.shape) { background-color: #f1f3f5 !important; caret-color: #111827; }
+
+
+::highlight(study-spelling) {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: #e23d4d;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+.study-spelling-menu {
+  position: fixed;
+  z-index: 100000;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 190px;
+  max-width: min(260px, calc(100vw - 16px));
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid #8886;
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  color: var(--ink, #202020);
+  box-shadow: 0 8px 30px #0003;
+  font: 14px system-ui, sans-serif;
+}
+.study-spelling-menu > span { padding: 4px 8px; font-size: 12px; opacity: .75; }
+.study-spelling-menu button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.study-spelling-menu button:hover, .study-spelling-menu button:focus-visible { background: #8882; }
+[data-theme="dark"] .study-spelling-menu { background: #25262a; color: #f4f4f5; }

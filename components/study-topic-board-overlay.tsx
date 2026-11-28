@@ -105,13 +105,14 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
   live.current = { initial, pins, reader, readerVisible, review, attachment }
   const send = (type: string, data: Record<string, unknown> = {}) => frame.current?.contentWindow?.postMessage({ type: `study-board:${type}`, session, boardId, ...data }, location.origin)
   useEffect(() => {
-    if (!ready || readerVisible) return
+    if (!ready) return
     const wheel = (event: WheelEvent) => {
       const target = event.target instanceof Element ? event.target : null
       const bar = target?.closest('.study-page-toolbar') || (target && addMenu.current?.contains(target) ? addMenu.current : null)
       const bounds = frame.current?.getBoundingClientRect()
-      if (!target || !bar || !bounds) return
-      for (let node: Element | null = target; node; node = node.parentElement) {
+      if (!target || (!bar && !event.ctrlKey) || !bounds) return
+      if (readerVisible && !event.ctrlKey) return
+      for (let node: Element | null = event.ctrlKey ? null : target; node; node = node.parentElement) {
         if (/(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight &&
           (event.deltaY < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)) return
         if (node === bar) break
@@ -119,8 +120,18 @@ function StudyBoardSession({ boardId, name, rootHandle, pdfReferences, sharedRoo
       event.preventDefault()
       send('wheel', { deltaY: event.deltaY, deltaMode: event.deltaMode, clientX: event.clientX - bounds.left, clientY: event.clientY - bounds.top, ctrlKey: event.ctrlKey })
     }
+    const keydown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || !['=', '+', '-', '_', '0'].includes(event.key)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      send('zoom-key', { key: event.key })
+    }
     document.addEventListener('wheel', wheel, { capture: true, passive: false })
-    return () => document.removeEventListener('wheel', wheel, true)
+    window.addEventListener('keydown', keydown, true)
+    return () => {
+      document.removeEventListener('wheel', wheel, true)
+      window.removeEventListener('keydown', keydown, true)
+    }
   }, [ready, readerVisible, boardId, session])
   const save = (work: () => Promise<unknown>) => {
     const result = saveQueue.current.then(work)

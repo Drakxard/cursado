@@ -50,6 +50,9 @@ importers:
       aframe:
         specifier: ^1.8.0
         version: 1.8.0
+      dictionary-es-ar:
+        specifier: ^2.0.0
+        version: 2.0.0
       html-to-image:
         specifier: ^1.11.13
         version: 1.11.13
@@ -68,6 +71,9 @@ importers:
       qrcode-generator:
         specifier: ^2.0.4
         version: 2.0.4
+      typo-js:
+        specifier: ^2.0.0
+        version: 2.0.0
       y-partyserver:
         specifier: ^2.2.0
         version: 2.2.0(@cloudflare/workers-types@4.20260619.1)(partyserver@0.5.8(@cloudflare/workers-types@4.20260619.1))(yjs@13.6.31)
@@ -1296,6 +1302,9 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
+  dictionary-es-ar@2.0.0:
+    resolution: {integrity: sha512-9TnVDGuA5FyHk/mtI00qm6hpzJnucfMEGIXZlyqhoOWZII/O2cTpXMFyeqTq8q74r4qVoTjZ0uWYLLKKmGI3pg==}
+
   dom-walk@0.1.2:
     resolution: {integrity: sha512-6QvTW9mrGeIegrFXdtQi9pk7O/nSK6lSdXW2eqUspN5LWD7UTji2Fqw5V2YLjBpHEoU9Xl/eUWNpDeZvoyOv2w==}
 
@@ -1947,6 +1956,10 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  typo-js@2.0.0:
+    resolution: {integrity: sha512-sP7w46bByUNKIHzeiWsktNXJRrHtuODQ/xNMw4qICZMG8i3ayUTxwAwYow9zd1TGyLKzLoG4lvu2Cl3EFLZXMw==}
+    engines: {node: '>=20.16'}
 
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
@@ -3075,6 +3088,8 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
+  dictionary-es-ar@2.0.0: {}
+
   dom-walk@0.1.2: {}
 
   dompurify@3.4.11:
@@ -3772,6 +3787,8 @@ snapshots:
       - supports-color
 
   typescript@5.9.3: {}
+
+  typo-js@2.0.0: {}
 
   undici-types@6.21.0: {}
 

@@ -1,3 +1,4 @@
+import { installSpelling } from './spelling';
 import { paintStudy } from "./study-render";
 import { studyPdfRuns } from './study-pdf-link';
 // src/text-layer.ts — the board's text objects as an HTML overlay (display boxes + the editor).
@@ -2057,6 +2058,8 @@ export class TextLayer {
     this.openEditor(session);
   }
 
+  private disposeSpelling: (() => void) | undefined;
+
   private openEditor(
     session: Omit<EditSession, "el" | "editable">,
     seedHtml = "",
@@ -2102,6 +2105,8 @@ export class TextLayer {
     this.hideStickyGhost(); // the real note replaces the placement preview
     this.root.appendChild(el);
     this.edit = { ...session, el, editable };
+    this.disposeSpelling?.();
+    this.disposeSpelling = installSpelling(editable);
     this.updateDisplayVisibility(); // hide the existing box's display copy while the editor stands in
     this.updateResizeChrome(); // hide the resize handles while editing
     this.layout(
@@ -2134,7 +2139,7 @@ export class TextLayer {
     editable.addEventListener("blur", (e) => {
       // Focus moving into the toolbar / a popover (e.g. the size input) must not commit the box.
       const next = (e as FocusEvent).relatedTarget as HTMLElement | null;
-      if (next?.closest(".komu-text-bar, .ctb-pop, komu-color-picker")) return;
+      if (next?.closest(".komu-text-bar, .ctb-pop, komu-color-picker, .study-spelling-menu")) return;
       // Focus moving into a tool picker (shape menu / place bars) DOES commit the box, but must not
       // also revert the tool to select: the revert would synchronously hide the menu before the
       // picked item's click registers, so e.g. picking the arrow after placing a shape silently
@@ -4574,6 +4579,8 @@ export class TextLayer {
     const e = this.edit;
     if (!e) return;
     this.edit = null;
+    this.disposeSpelling?.();
+    this.disposeSpelling = undefined;
     this.bar.hide();
     document.removeEventListener("selectionchange", this.onSelChange);
     if (this.editTimer !== null) {
@@ -4646,6 +4653,7 @@ export class TextLayer {
   }
 
   destroy(): void {
+    this.disposeSpelling?.();
     window.removeEventListener("pointermove", this.onGroupResizeMove);
     window.removeEventListener("pointerup", this.onGroupResizeUp);
     window.removeEventListener("pointermove", this.onGroupRotateMove);

@@ -1511,3 +1511,70 @@ test('night mode analyzes cross-origin images, inverts diagrams and restores ori
   assert.equal(await frame.evaluate(() => JSON.stringify([...window.__komuboard.doc.getMap('objects').values()].map(m => m.toJSON()))), before)
   assert.deepEqual(errors, [])
 })
+
+
+test('Study zoom stays inside the board over toolbars, scrollable panels and focused fields', { timeout: 60000 }, async t => {
+  const { page, errors } = await pageRegression(t, 'zoom-guards')
+  await page.goto(origin + '/study-fixture?board=zoom-guards'); await loaded(page)
+  const frame = engine(page)
+  for (const scope of [page, frame]) {
+    const result = await scope.evaluate(() => {
+      const panel = document.createElement('div')
+      panel.style.cssText = 'height:20px;overflow-y:auto'
+      panel.className = 'study-page-toolbar dock'
+      panel.innerHTML = '<div style="height:500px"><input /></div>'
+      document.body.append(panel)
+      const input = panel.querySelector('input'); input.focus()
+      const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -80, clientX: 400, clientY: 300 })
+      input.dispatchEvent(wheel)
+      const prevented = wheel.defaultPrevented
+      panel.remove()
+      return prevented
+    })
+    assert.equal(result, true, 'Ctrl+wheel must cancel native zoom even in scrollable UI')
+    await expect.poll(() => frame.evaluate(() => window.__komuboard.canvas.captureStudyReviewView().zoom)).toBeGreaterThan(1)
+    await frame.evaluate(() => window.__komuboard.canvas.zoomTo(1))
+    await expect.poll(() => frame.evaluate(() => window.__komuboard.canvas.captureStudyReviewView().zoom)).toBe(1)
+    for (const key of ['+', '-', '0']) {
+      assert.equal(await scope.evaluate(key => {
+        const input = document.createElement('input'); document.body.append(input); input.focus()
+        const event = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true })
+        input.dispatchEvent(event); input.remove()
+        return event.defaultPrevented
+      }, key), true)
+    }
+    await expect.poll(() => frame.evaluate(() => window.__komuboard.canvas.captureStudyReviewView().zoom)).toBe(1)
+  }
+  assert.deepEqual(errors, [])
+})
+
+
+test('Study spelling underlines Spanish mistakes and corrects a tapped word with formatting and undo', { timeout: 60000 }, async t => {
+  const { page, errors } = await pageRegression(t, 'spelling')
+  await page.goto(origin + '/study-fixture?board=spelling'); await loaded(page)
+  const frame = engine(page)
+  await page.mouse.dblclick(400, 250)
+  const editor = frame.locator('.komu-text-editor[contenteditable="true"],.komu-text-editor [contenteditable="true"]')
+  await editor.evaluate(el => {
+    el.innerHTML = '<b>camion</b> casa'
+    el.dispatchEvent(new InputEvent('input', { bubbles: true }))
+  })
+  await expect.poll(() => frame.evaluate(() => CSS.highlights.get('study-spelling')?.size), { timeout: 20000 }).toBe(1)
+  await expect(editor).toBeFocused()
+  // Highlights do not add spans or spelling marks to the persisted text.
+  assert.equal(await editor.innerHTML(), '<b>camion</b> casa')
+  await editor.locator('b').click()
+  const correction = frame.getByRole('button', { name: 'cami\u00f3n', exact: true })
+  await expect(correction).toBeVisible({ timeout: 20000 })
+  await correction.click()
+  await expect(editor).toHaveText('cami\u00f3n casa')
+  await expect(editor.locator('b')).toHaveText('cami\u00f3n')
+  await expect(editor).toBeFocused()
+  await expect(frame.locator('.study-spelling-menu')).toHaveCount(0)
+  await page.keyboard.press('Control+z')
+  await expect(editor).toHaveText('camion casa')
+  await page.keyboard.press('Control+Enter')
+  await expect(editor).toHaveCount(0)
+  assert.equal(await frame.evaluate(() => CSS.highlights.has('study-spelling')), false)
+  assert.deepEqual(errors, [])
+})

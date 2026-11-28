@@ -56,9 +56,9 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
   onDocument('wheel', event => {
     const target = event.target instanceof Element ? event.target : null
     const bar = target?.closest('.dock,.draw-bar,.sticky-bar,.shape-menu,.zoombar,.text-bar')
-    if (!bar) return
+    if (!bar && !event.ctrlKey) return
     // Let genuinely scrollable menus consume their own vertical wheel movement.
-    for (let node = target; node; node = node.parentElement) {
+    for (let node = event.ctrlKey ? null : target; node; node = node.parentElement) {
       const overflow = getComputedStyle(node).overflowY
       if (/(auto|scroll)/.test(overflow) && node.scrollHeight > node.clientHeight &&
         (event.deltaY < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)) return
@@ -67,6 +67,14 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     event.stopPropagation()
     canvas.handleViewportWheel(event)
   }, { capture: true, passive: false })
+  // Capture before fields, dialogs and toolbar handlers can let page zoom escape.
+  onWindow('keydown', event => {
+    if (!(event.ctrlKey || event.metaKey) || !['=', '+', '-', '_', '0'].includes(event.key)) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    if (event.key === '0') canvas.zoomTo(1)
+    else canvas.zoomStep(event.key === '=' || event.key === '+' ? 1 : -1)
+  }, { capture: true })
   document.getElementById('board')!.dataset.studyGrid = 'true'
   document.querySelector('komu-draw-bar')?.enableStudy()
   document.querySelector('komu-shape-menu')?.enableStudy()
@@ -230,6 +238,10 @@ export function installStudyBridge(doc: Y.Doc, provider: YProvider, canvas: Boar
     if (data.type === 'study-board:toggle-theme') document.querySelector<HTMLElement>('[data-theme-toggle]')?.click()
     if (data.type === 'study-board:wheel' && [data.deltaY, data.clientX, data.clientY].every(Number.isFinite))
       canvas.handleViewportWheel(new WheelEvent('wheel', { deltaY: data.deltaY, deltaMode: data.deltaMode, clientX: data.clientX, clientY: data.clientY, ctrlKey: !!data.ctrlKey }))
+    if (data.type === 'study-board:zoom-key' && ['=', '+', '-', '_', '0'].includes(data.key)) {
+      if (data.key === '0') canvas.zoomTo(1)
+      else canvas.zoomStep(data.key === '=' || data.key === '+' ? 1 : -1)
+    }
     if (data.type === 'study-board:history' && ['undo', 'redo', 'reset-view'].includes(data.action)) document.querySelector<HTMLButtonElement>(`#topbar [data-act="${data.action}"]`)?.click()
     if (data.type === 'study-board:tool' && ['sticky', 'text', 'shapes', 'stamp', 'eraser'].includes(data.tool)) document.querySelector<HTMLButtonElement>(`komu-tool-dock [data-tool="${data.tool}"]`)?.click()
     if(data.type === 'study-board:pdf-published') {
